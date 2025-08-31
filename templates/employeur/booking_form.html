@@ -1,0 +1,53 @@
+{% extends "admin/includes/base.html" %}
+{% block title %}Réservation{% endblock %}
+
+{% block content %}
+<div x-data="bookingCalculator()" class="max-w-xl mx-auto bg-white p-6 rounded shadow">
+  <h1 class="text-2xl font-bold mb-4">Réserver un service</h1>
+
+  <form method="post">
+    {% csrf_token %}
+    {{ form.as_p }}
+
+    <!-- Dynamique : affichage du tarif -->
+    <div class="mt-4">
+      <label class="font-semibold">Durée (minutes) :</label>
+      <input type="number" class="form-control" x-model="duration" placeholder="Ex: 120">
+    </div>
+
+    <div class="mt-4">
+      <p class="font-bold">Montant estimé : <span x-text="totalAmount.toFixed(2)"></span> €</p>
+    </div>
+
+    <button type="submit" class="btn btn-primary mt-3">Confirmer</button>
+  </form>
+</div>
+
+<script>
+function bookingCalculator() {
+  return {
+    priceType: '{{ form.instance.service.price_type if form.instance.service else "" }}',
+    hourlyRate: parseFloat('{{ form.instance.service.handyman.handyman_profile.hourly_rate if form.instance.service else 0 }}'),
+    dailyRate: parseFloat('{{ form.instance.service.handyman.handyman_profile.daily_rate if form.instance.service else 0 }}'),
+    monthlyRate: parseFloat('{{ form.instance.service.handyman.handyman_profile.monthly_rate if form.instance.service else 0 }}'),
+    fixedPrice: parseFloat('{{ form.instance.service.price if form.instance.service else 0 }}'),
+    duration: 0,
+    get totalAmount() {
+      switch (this.priceType) {
+        case 'hourly':
+          return this.hourlyRate * (this.duration / 60);
+        case 'daily':
+          return this.dailyRate;
+        case 'monthly':
+          return this.monthlyRate;
+        case 'fixed':
+          return this.fixedPrice;
+        case 'quote':
+          return 0;
+      }
+      return 0;
+    }
+  }
+}
+</script>
+{% endblock %}

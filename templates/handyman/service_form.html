@@ -1,0 +1,166 @@
+{% extends "handyman/base_handyman.html" %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto px-4 py-8">
+    <div class="bg-white rounded-2xl shadow-xl overflow-hidden">
+        <div class="bg-gradient-to-r from-green-500 to-green-600 p-5">
+            <h1 class="text-xl font-bold text-white">
+                <i class="fas fa-{{ object|yesno:'edit,plus' }} mr-2"></i>
+                {{ object|yesno:"Modifier le service,Créer un nouveau service" }}
+            </h1>
+        </div>
+        
+        <form method="post" enctype="multipart/form-data" class="p-6">
+            {% csrf_token %}
+            
+            {% if form.non_field_errors or image_formset.non_form_errors %}
+                <div class="mb-6 p-4 bg-red-50 text-red-700 rounded-lg">
+                    {% for error in form.non_field_errors %}
+                        <p>{{ error }}</p>
+                    {% endfor %}
+                    {% for error in image_formset.non_form_errors %}
+                        <p>{{ error }}</p>
+                    {% endfor %}
+                </div>
+            {% endif %}
+            
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+                <!-- Colonne gauche -->
+                <div>
+                    <div class="mb-5">
+                        <label class="block text-sm font-medium mb-2">Catégorie</label>
+                        {{ form.category }}
+                        {% for error in form.category.errors %}
+                            <p class="text-red-500 text-xs mt-1">{{ error }}</p>
+                        {% endfor %}
+                    </div>
+                    
+                    <div class="mb-5">
+                        <label class="block text-sm font-medium mb-2">Titre du service</label>
+                        {{ form.title }}
+                        {% for error in form.title.errors %}
+                            <p class="text-red-500 text-xs mt-1">{{ error }}</p>
+                        {% endfor %}
+                    </div>
+                    
+                    <div class="mb-5">
+                        <label class="block text-sm font-medium mb-2">Description</label>
+                        {{ form.description }}
+                        {% for error in form.description.errors %}
+                            <p class="text-red-500 text-xs mt-1">{{ error }}</p>
+                        {% endfor %}
+                    </div>
+                    
+                    <div class="mb-5">
+                        <label class="block text-sm font-medium mb-2">Statut</label>
+                        <div class="flex items-center">
+                            {{ form.is_active }}
+                            <span class="ml-2 text-gray-700">Service actif</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Colonne droite -->
+                <div>
+                    <div class="mb-5">
+                        <label class="block text-sm font-medium mb-2">Type de tarification</label>
+                        {{ form.price_type }}
+                        {% for error in form.price_type.errors %}
+                            <p class="text-red-500 text-xs mt-1">{{ error }}</p>
+                        {% endfor %}
+                    </div>
+                    
+                    <div class="mb-5" id="price-field">
+                        <label class="block text-sm font-medium mb-2">Prix (FCFA)</label>
+                        {{ form.price }}
+                        {% for error in form.price.errors %}
+                            <p class="text-red-500 text-xs mt-1">{{ error }}</p>
+                        {% endfor %}
+                    </div>
+                    
+                    <div class="mb-5" id="duration-field">
+                        <label class="block text-sm font-medium mb-2">Durée (minutes)</label>
+                        {{ form.duration }}
+                        {% for error in form.duration.errors %}
+                            <p class="text-red-500 text-xs mt-1">{{ error }}</p>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Images du service -->
+            <div class="mb-8">
+                <h3 class="text-lg font-bold text-gray-900 mb-4 flex items-center">
+                    <i class="fas fa-images text-green-600 mr-2"></i> Images du service
+                </h3>
+                
+                {{ image_formset.management_form }}
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {% for form in image_formset %}
+                        <div class="border border-gray-200 rounded-xl p-4">
+                            <div class="mb-3">
+                                <label class="block text-sm font-medium mb-1">Image</label>
+                                {{ form.image }}
+                            </div>
+                            <div class="mb-3">
+                                <label class="block text-sm font-medium mb-1">Texte alternatif</label>
+                                {{ form.alt_text }}
+                            </div>
+                            {% if form.instance.image %}
+                                <div class="mt-2">
+                                    <img src="{{ form.instance.image.url }}" 
+                                         alt="Image actuelle" 
+                                         class="w-full h-32 object-cover rounded-lg">
+                                </div>
+                                <div class="mt-2 flex items-center">
+                                    {{ form.DELETE }}
+                                    <label class="ml-2 text-sm text-red-600">Supprimer cette image</label>
+                                </div>
+                            {% endif %}
+                            {{ form.id }}
+                        </div>
+                    {% endfor %}
+                </div>
+            </div>
+            
+            <div class="flex justify-between pt-6 border-t border-gray-200">
+                <a href="{% url 'handydash' %}" class="px-6 py-3 border border-gray-300 rounded-xl font-medium hover:bg-gray-50 transition">
+                    <i class="fas fa-times mr-2"></i> Annuler
+                </a>
+                <button type="submit" class="px-6 py-3 bg-green-600 hover:bg-green-700 text-white rounded-xl font-medium shadow transition">
+                    <i class="fas fa-save mr-2"></i> Enregistrer
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const priceTypeField = document.getElementById('id_price_type');
+    const priceField = document.getElementById('price-field');
+    const durationField = document.getElementById('duration-field');
+    
+    function toggleFields() {
+        const selectedValue = priceTypeField.value;
+        
+        if (selectedValue === 'hourly') {
+            priceField.style.display = 'block';
+            durationField.style.display = 'block';
+        } else if (selectedValue === 'fixed') {
+            priceField.style.display = 'block';
+            durationField.style.display = 'none';
+        } else if (selectedValue === 'quote') {
+            priceField.style.display = 'none';
+            durationField.style.display = 'none';
+        }
+    }
+    
+    // Initial state
+    toggleFields();
+    
+    // Update on change
+    priceTypeField.addEventListener('change', toggleFields);
+});
+</script>
+{% endblock %}

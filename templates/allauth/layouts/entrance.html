@@ -1,10 +1,53 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <title>Title</title>
-</head>
-<body>
+{% extends "allauth/layouts/base.html" %}
 
-</body>
-</html>
+{% block content %}
+
+{#<h2 class="text-2xl font-bold mb-6 text-center">Créer mon compte</h2>#}
+{##}
+{#<form method="POST" enctype="multipart/form-data" x-data="{ userType: '' }">#}
+{#  {% csrf_token %}#}
+{##}
+{#  <!-- BOUTONS CHOIX DE RÔLE -->#}
+{#  <div class="flex flex-wrap gap-4 mb-6 justify-center">#}
+{#    <button type="button"#}
+{#      class="px-4 py-2 rounded-md font-semibold transition"#}
+{#      :class="userType === 'employeur' ? 'bg-blue-600 text-white' : 'border border-blue-600 text-blue-600'"#}
+{#      @click="userType = 'employeur'">#}
+{#      <i class="fas fa-search"></i> Employeur#}
+{#    </button>#}
+{##}
+{#    <button type="button"#}
+{#      class="px-4 py-2 rounded-md font-semibold transition"#}
+{#      :class="userType === 'handyman' ? 'bg-green-600 text-white' : 'border border-green-600 text-green-600'"#}
+{#      @click="userType = 'handyman'">#}
+{#      <i class="fas fa-briefcase"></i> Artisan#}
+{#    </button>#}
+{#  </div>#}
+{##}
+{#  <!-- Champ caché qui sera POSTé -->#}
+{#  <input type="hidden" name="user_type" x-model="userType">#}
+{##}
+{#  <!-- Rendu du reste du formulaire -->#}
+{#  <div class="space-y-4">#}
+{#    {{ form.first_name.label_tag }} {{ form.first_name }}#}
+{#    {{ form.last_name.label_tag }} {{ form.last_name }}#}
+{#    {{ form.email.label_tag }} {{ form.email }}#}
+{#    {{ form.phone.label_tag }} {{ form.phone }}#}
+{#    {{ form.address.label_tag }} {{ form.address }}#}
+{#    {{ form.city.label_tag }} {{ form.city }}#}
+{#    {{ form.postal_code.label_tag }} {{ form.postal_code }}#}
+{#    {{ form.country.label_tag }} {{ form.country }}#}
+{#    {{ form.profile_picture.label_tag }} {{ form.profile_picture }}#}
+{##}
+{#    <!-- Par sécurité, ne pas afficher le field user_type normal -->#}
+{#    <!-- On le gère manuellement via le hidden -->#}
+{##}
+{#    <!-- Bouton submit -->#}
+{#    <button type="submit" class="w-full py-3 bg-primary text-white font-semibold rounded-md hover:bg-primary/90 transition">#}
+{#      Créer mon compte#}
+{#    </button>#}
+{#  </div>#}
+{##}
+{#</form>#}
+
+{% endblock %}

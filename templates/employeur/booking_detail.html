@@ -1,0 +1,403 @@
+{% extends 'employeur/base_employer.html' %}
+{% load humanize %}
+
+{% block content %}
+<div class="container mx-auto px-4 py-8">
+    <div class="bg-white rounded-xl shadow-sm p-6 mb-6">
+        <!-- En-tête avec titre et statut -->
+        <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 pb-6 border-b">
+            <div>
+                <h1 class="text-2xl font-bold">Réservation #{{ booking.id }}</h1>
+                <div class="mt-2 flex items-center">
+                    <span class="px-3 py-1 rounded-full text-sm font-medium
+                              {% if booking.status == 'completed' %}bg-green-100 text-green-800
+                              {% elif booking.status == 'cancelled' or booking.status == 'declined' %}bg-red-100 text-red-800
+                              {% elif booking.status == 'pending' %}bg-yellow-100 text-yellow-800
+                              {% else %}bg-blue-100 text-blue-800{% endif %}">
+                        {{ booking.get_status_display }}
+                    </span>
+                    <span class="ml-3 text-sm text-gray-500">
+                        Créée le {{ booking.created_at|date:"d M Y" }}
+                    </span>
+                </div>
+            </div>
+
+            <!-- Actions disponibles -->
+          {% if available_actions %}
+<div class="mt-4 md:mt-0 flex flex-wrap gap-2 z-10">
+    {% for action in available_actions %}
+        {% if action.method == 'post' %}
+        <form method="post" action="{{ action.url }}">
+            {% csrf_token %}
+            <button type="submit" class="px-4 py-2 rounded-lg font-medium transition {{ action.class }}">
+                {{ action.name }}
+            </button>
+        </form>
+        {% else %}
+        <a href="{{ action.url }}" class="px-4 py-2 rounded-lg font-medium transition {{ action.class }}">
+            {{ action.name }}ijijijijijiji
+        </a>
+        {% endif %}
+    {% endfor %}
+</div>
+{% endif %}
+        </div>
+
+        <!-- Grille principale -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <!-- Colonne de gauche -->
+            <div class="lg:col-span-2">
+                <!-- Détails du service -->
+                <div class="bg-gray-50 rounded-lg p-5 mb-6">
+                    <h2 class="text-lg font-semibold mb-4">Détails du service</h2>
+
+                    <div class="flex flex-col md:flex-row gap-6">
+                        <div class="md:w-1/3">
+                            <div class="aspect-w-1 aspect-h-1 rounded-xl overflow-hidden bg-gray-100">
+                                {% if booking.service.images.first %}
+                                <img src="{{ booking.service.images.first.image.url }}"
+                                     alt="{{ booking.service.title }}"
+                                     class="w-full h-full object-cover"
+                                     loading="lazy">
+                                {% else %}
+                                <div class="w-full h-full flex items-center justify-center">
+                                    <i class="fas fa-image text-3xl text-gray-300"></i>
+                                </div>
+                                {% endif %}
+                            </div>
+                        </div>
+
+                        <div class="md:w-2/3">
+                            <h3 class="font-bold text-lg">{{ booking.service.title }}</h3>
+                            <p class="text-gray-600">
+                                Prestataire:
+                                <a href="{% url 'worker_profile' booking.handyman.id %}"
+                                   class="text-employer hover:underline">
+                                    {{ booking.handyman.get_full_name }}
+                                </a>
+                            </p>
+
+                            <div class="mt-4 grid grid-cols-2 gap-4">
+                                <div>
+                                    <p class="text-sm text-gray-500">Date prévue</p>
+                                    <p class="font-medium">{{ booking.booking_date|date:"d M Y à H:i" }}</p>
+                                </div>
+                                {% if booking.end_date %}
+                                <div>
+                                    <p class="text-sm text-gray-500">Terminé le</p>
+                                    <p class="font-medium">{{ booking.end_date|date:"d M Y à H:i" }}</p>
+                                </div>
+                                {% endif %}
+                                <div>
+                                    <p class="text-sm text-gray-500">Prix</p>
+                                    <p class="font-medium">
+                                        {% if booking.service.price %}
+                                        {{ booking.service.price|intcomma }} CFA
+                                        {% else %}
+                                        Sur devis
+                                        {% endif %}
+                                    </p>
+                                </div>
+                                <div>
+                                    <p class="text-sm text-gray-500">Catégorie</p>
+                                    <p class="font-medium">{{ booking.service.category.name }}</p>
+                                </div>
+                            </div>
+
+                            {% if booking.description %}
+                            <div class="mt-4">
+                                <p class="text-sm text-gray-500">Description initiale</p>
+                                <p class="font-medium">{{ booking.description }}</p>
+                            </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Conversation -->
+                <div class="mb-6">
+                    <h2 class="text-lg font-semibold mb-4">Conversation</h2>
+
+                    <div class="bg-gray-50 rounded-lg p-5 max-h-96 overflow-y-auto">
+
+                        {% for conversation in booking.conversation.all %}
+                            {% for message in conversation.messages.all %}
+                            <div class="mb-6">
+                                <div class="flex justify-between mb-1">
+                                    <div class="flex items-center">
+                                        <div class="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center overflow-hidden">
+                                            {% if message.sender.profile_picture %}
+                                            <img src="{{ message.sender.profile_picture.url }}"
+                                                 alt="{{ message.sender.get_full_name }}"
+                                                 class="w-full h-full object-cover">
+                                            {% else %}
+                                            <i class="fas fa-user text-gray-400"></i>
+                                            {% endif %}
+                                        </div>
+                                        <span class="ml-2 font-medium">{{ message.sender.get_full_name }}</span>
+                                    </div>
+                                    <span class="text-sm text-gray-500">{{ message.created_at|date:"d M Y H:i" }}</span>
+                                </div>
+                                <div class="ml-10 bg-white p-4 rounded-lg border">
+                                    <p class="text-gray-700">{{ message.content }}</p>
+                                </div>
+                            </div>
+                            {% endfor %}
+                        {% empty %}
+                        <div class="text-center py-10 text-gray-500">
+                            Aucun message échangé
+                        </div>
+                        {% endfor %}
+                    </div>
+
+                    <!-- Formulaire d'envoi de message -->
+                    <form method="post" action="{% url 'send_message' booking.id %}" class="mt-4">
+                        {% csrf_token %}
+                        <div class="flex gap-3">
+                            {{ message_form.content }}
+                            <button type="submit" class="px-4 py-2 bg-employer text-white rounded-lg hover:bg-blue-700 transition whitespace-nowrap">
+                                Envoyer
+                            </button>
+                        </div>
+                    </form>
+                </div>
+
+                <!-- Avis -->
+                {% if booking.status == 'completed' %}
+                <div class="mb-6">
+                    <h2 class="text-lg font-semibold mb-4">Avis sur le service</h2>
+
+                    {% if review %}
+                    <div class="bg-gray-50 rounded-lg p-5">
+                        <div class="flex justify-between items-center mb-3">
+                            <div class="flex items-center">
+                                <div class="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center overflow-hidden">
+                                    {% if review.booking.client.profile_picture %}
+                                    <img src="{{ review.booking.client.profile_picture.url }}"
+                                         alt="{{ review.booking.client.get_full_name }}"
+                                         class="w-full h-full object-cover">
+                                    {% else %}
+                                    <i class="fas fa-user text-gray-400"></i>
+                                    {% endif %}
+                                </div>
+                                <div class="ml-3">
+                                    <p class="font-medium">{{ review.booking.client.get_full_name }}</p>
+                                    <p class="text-xs text-gray-500">{{ review.created_at|date:"d M Y" }}</p>
+                                </div>
+                            </div>
+                            <div class="flex text-yellow-400">
+                                {% for i in "12345" %}
+                                <i class="fas fa-star {% if forloop.counter <= review.rating %}text-yellow-400{% else %}text-gray-300{% endif %}"></i>
+                                {% endfor %}
+                            </div>
+                        </div>
+                        <p class="text-gray-700 mt-3">{{ review.comment }}</p>
+                    </div>
+                    {% elif review_form %}
+                    <div class="bg-gray-50 rounded-lg p-5">
+                        <h3 class="font-medium mb-3">Donnez votre avis</h3>
+                        <form method="post" action="{% url 'add_review' booking.id %}">
+                            {% csrf_token %}
+                            <div class="mb-4">
+                                <label class="block text-sm font-medium mb-2">Note</label>
+                                <div class="flex">
+                                    {% for i in "12345" %}
+                                    <label class="mr-2 cursor-pointer">
+                                        <input type="radio" name="rating" value="{{ forloop.counter }}"
+                                               class="sr-only" {% if forloop.counter == 5 %}checked{% endif %}>
+                                        <i class="fas fa-star text-2xl {% if forloop.counter <= 5 %}text-yellow-400{% else %}text-gray-300{% endif %}"></i>
+                                    </label>
+                                    {% endfor %}
+                                </div>
+                            </div>
+
+                            <div class="mb-4">
+                                <label class="block text-sm font-medium mb-2">Commentaire</label>
+                                {{ review_form.comment }}
+                            </div>
+
+                            <button type="submit" class="px-4 py-2 bg-employer text-white rounded-lg hover:bg-blue-700 transition">
+                                Publier l'avis
+                            </button>
+                        </form>
+                    </div>
+                    {% endif %}
+                </div>
+                {% endif %}
+            </div>
+
+            <!-- Colonne de droite -->
+            <div class="lg:col-span-1">
+                <!-- Adresse et coordonnées -->
+                <div class="bg-gray-50 rounded-lg p-5 mb-6">
+                    <h2 class="text-lg font-semibold mb-4">Adresse de prestation</h2>
+
+                    <div class="space-y-3">
+                        <div>
+                            <p class="text-sm text-gray-500">Adresse</p>
+                            <p class="font-medium">{{ booking.address }}</p>
+                        </div>
+                        <div>
+                            <p class="text-sm text-gray-500">Ville</p>
+                            <p class="font-medium">{{ booking.city }}</p>
+                        </div>
+                        <div>
+                            <p class="text-sm text-gray-500">Code postal</p>
+                            <p class="font-medium">{{ booking.postal_code }}</p>
+                        </div>
+                    </div>
+
+                    <div class="mt-6">
+                        <div id="map" class="h-48 rounded-lg bg-gray-200 flex items-center justify-center">
+                            <i class="fas fa-map-marker-alt text-3xl text-gray-400"></i>
+                            <span class="ml-2">Carte non disponible</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Informations de paiement -->
+                <div class="bg-gray-50 rounded-lg p-5">
+                    <h2 class="text-lg font-semibold mb-4">Paiement</h2>
+
+                    {% if payment %}
+                    <div class="space-y-3">
+                        <div>
+                            <p class="text-sm text-gray-500">Statut</p>
+                            <p class="font-medium {% if payment.status == 'completed' %}text-green-600{% else %}text-yellow-600{% endif %}">
+                                {{ payment.get_status_display }}
+                            </p>
+                        </div>
+                        <div>
+                            <p class="text-sm text-gray-500">Montant</p>
+                            <p class="font-medium">{{ payment.amount|intcomma }} CFA</p>
+                        </div>
+                        <div>
+                            <p class="text-sm text-gray-500">Méthode</p>
+                            <p class="font-medium">{{ payment.get_method_display }}</p>
+                        </div>
+                        {% if payment.transaction_id %}
+                        <div>
+                            <p class="text-sm text-gray-500">ID de transaction</p>
+                            <p class="font-medium">{{ payment.transaction_id }}</p>
+                        </div>
+                        {% endif %}
+                        <div>
+                            <p class="text-sm text-gray-500">Date</p>
+                            <p class="font-medium">{{ payment.payment_date|date:"d M Y à H:i" }}</p>
+                        </div>
+                    </div>
+                    {% elif payment_form %}
+                    <form method="post" action="{% url 'add_payment' booking.id %}">
+                        {% csrf_token %}
+                        <div class="space-y-4">
+                            <div>
+                                <label class="block text-sm font-medium mb-2">Méthode de paiement</label>
+                                {{ payment_form.method }}
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium mb-2">ID de transaction</label>
+                                {{ payment_form.transaction_id }}
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium mb-2">Montant</label>
+                                <div class="relative">
+                                    <span class="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500">CFA</span>
+                                    <input type="number" name="amount"
+                                           value="{{ booking.service.price|default:'' }}"
+                                           class="w-full pl-10 px-4 py-2 border rounded-lg"
+                                           required>
+                                </div>
+                            </div>
+                            <button type="submit" class="w-full mt-4 px-4 py-2 bg-employer text-white rounded-lg hover:bg-blue-700 transition">
+                                Enregistrer le paiement
+                            </button>
+                        </div>
+                    </form>
+                    {% else %}
+                    <p class="text-gray-500">Aucune information de paiement disponible</p>
+                    {% endif %}
+                </div>
+
+                <!-- Informations du prestataire/client -->
+                <div class="bg-gray-50 rounded-lg p-5 mt-6">
+                    <h2 class="text-lg font-semibold mb-4">
+                        {% if request.user == booking.client %}Prestataire{% else %}Client{% endif %}
+                    </h2>
+
+                    <div class="flex items-center">
+                        <div class="w-12 h-12 rounded-full bg-gray-200 flex items-center justify-center overflow-hidden">
+                            {% if request.user == booking.client %}
+                                {% if booking.handyman.profile_picture %}
+                                <img src="{{ booking.handyman.profile_picture.url }}"
+                                     alt="{{ booking.handyman.get_full_name }}"
+                                     class="w-full h-full object-cover">
+                                {% else %}
+                                <i class="fas fa-user text-gray-400"></i>
+                                {% endif %}
+                            {% else %}
+                                {% if booking.client.profile_picture %}
+                                <img src="{{ booking.client.profile_picture.url }}"
+                                     alt="{{ booking.client.get_full_name }}"
+                                     class="w-full h-full object-cover">
+                                {% else %}
+                                <i class="fas fa-user text-gray-400"></i>
+                                {% endif %}
+                            {% endif %}
+                        </div>
+                        <div class="ml-4">
+                            <p class="font-medium">
+                                {% if request.user == booking.client %}
+                                    {{ booking.handyman.get_full_name }}
+                                {% else %}
+                                    {{ booking.client.get_full_name }}
+                                {% endif %}
+                            </p>
+                            <p class="text-sm text-gray-500">
+                                {% if request.user == booking.client %}
+                                    {{ booking.handyman.profession|default:"Prestataire" }}
+                                {% else %}
+                                    Client
+                                {% endif %}
+                            </p>
+                        </div>
+                    </div>
+
+                    <div class="mt-4">
+                        <a href="{% if request.user == booking.client %}{% url 'worker_profile' booking.handyman.id %}{% else %}#{% endif %}"
+                           class="block w-full text-center py-2 border border-employer text-employer rounded-lg hover:bg-blue-50 transition">
+                            Voir le profil
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+    // Scripts pour les interactions
+    document.addEventListener('DOMContentLoaded', function() {
+        // Gestion des étoiles dans l'avis
+        const stars = document.querySelectorAll('.fa-star');
+        stars.forEach(star => {
+            star.addEventListener('click', function() {
+                const rating = this.dataset.value;
+                document.querySelector('input[name="rating"]').value = rating;
+
+                // Mettre à jour l'affichage
+                stars.forEach(s => {
+                    if (s.dataset.value <= rating) {
+                        s.classList.add('text-yellow-400');
+                        s.classList.remove('text-gray-300');
+                    } else {
+                        s.classList.remove('text-yellow-400');
+                        s.classList.add('text-gray-300');
+                    }
+                });
+            });
+        });
+    });
+</script>
+{% endblock %}

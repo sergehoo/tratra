@@ -1,10 +1,63 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <title>Title</title>
-</head>
-<body>
+{% extends "allauth/layouts/base_custom.html" %}
+{% load socialaccount %}
+{% block title %}Connexion{% endblock %}
 
-</body>
-</html>
+{% block content %}
+<div class="max-w-2xl mx-auto bg-white p-8 rounded-xl shadow-md border border-green-50">
+
+
+  {% if messages %}
+    <div class="mb-4">
+      {% for message in messages %}
+        <div class="p-3 mb-2 rounded-md 
+                    {% if message.tags == 'error' %} bg-red-100 text-red-800 
+                    {% elif message.tags == 'success' %} bg-green-100 text-green-800 
+                    {% else %} bg-blue-100 text-blue-800 {% endif %}">
+          {{ message }}
+        </div>
+      {% endfor %}
+    </div>
+  {% endif %}
+
+  <form method="POST" class="space-y-4">
+    {% csrf_token %}
+    <!-- Rendu automatique du formulaire Allauth -->
+    {{ form.login.label_tag }} {{ form.login }}
+    {{ form.password.label_tag }} {{ form.password }}
+
+    {% if form.remember %}
+    <div class="flex items-center">
+      {{ form.remember }} {{ form.remember.label_tag }}
+    </div>
+    {% endif %}
+
+    <button type="submit"
+            class="w-full py-3 bg-primary text-white font-semibold rounded-md hover:bg-primary/90 transition">
+      Se connecter
+    </button>
+  </form>
+
+  <div class="mt-6 flex justify-between text-sm text-gray-600">
+    <a href="{% url 'account_reset_password' %}" class="hover:underline">Mot de passe oublié ?</a>
+    <a href="{% url 'handyman_signup' %}" class="hover:underline">Devenir artisan</a>
+    <a href="{% url 'employer_signup' %}" class="hover:underline">Trouver un artisan</a>
+  </div>
+
+  {% if socialaccount_providers %}
+  <div class="flex items-center my-6">
+    <div class="flex-grow h-px bg-slate-200"></div>
+    <span class="px-3 text-slate-400 text-xs uppercase">Ou</span>
+    <div class="flex-grow h-px bg-slate-200"></div>
+  </div>
+
+  <div class="space-y-3">
+    {% for provider in socialaccount_providers %}
+      <a href="{% provider_login_url provider.id %}" 
+         class="w-full flex items-center justify-center gap-2 border border-slate-200 rounded-lg py-2 hover:bg-slate-50 transition">
+        <i class="fab fa-{{ provider.id }}"></i> Se connecter avec {{ provider.name }}
+      </a>
+    {% endfor %}
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

@@ -1,666 +1,276 @@
-<!DOCTYPE html>
-<html lang="fr" class="h-full">
-<head>
-    <meta charset="UTF-8"/>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-    <title>Tratra - Plateforme de Services</title>
-    
-    <!-- Fonts -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Montserrat:wght@700;800&display=swap" rel="stylesheet">
+{% extends 'employeur/base_employer.html' %}
 
-    <!-- Tailwind CSS -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-        tailwind.config = {
-            theme: {
-                extend: {
-                    colors: {
-                        primary: '#3b82f6',
-                        secondary: '#10b981',
-                        accent: '#f97316',
-                        worker: '#8b5cf6',
-                        employer: '#0ea5e9',
-                        dark: '#1e293b',
-                        light: '#f8fafc'
-                    },
-                    boxShadow: {
-                        'card': '0 20px 40px -15px rgba(0, 0, 0, 0.1)',
-                        'glow': '0 0 25px rgba(59, 130, 246, 0.25)',
-                        'inner-xl': 'inset 0 10px 20px rgba(0,0,0,0.05)'
-                    },
-                    animation: {
-                        'float': 'float 6s ease-in-out infinite',
-                        'pulse-slow': 'pulse 4s cubic-bezier(0.4, 0, 0.6, 1) infinite',
-                        'fade-in': 'fadeIn 0.5s ease-out forwards',
-                        'bounce-slow': 'bounceSlow 3s infinite',
-                        'wave': 'wave 8s linear infinite',
-                        'progress': 'progressBar 3s ease-in-out forwards'
-                    },
-                    keyframes: {
-                        float: {
-                            '0%, 100%': { transform: 'translateY(0)' },
-                            '50%': { transform: 'translateY(-12px)' }
-                        },
-                        fadeIn: {
-                            '0%': { opacity: 0, transform: 'translateY(20px)' },
-                            '100%': { opacity: 1, transform: 'translateY(0)' }
-                        },
-                        bounceSlow: {
-                            '0%, 100%': { transform: 'translateY(0)', animationTimingFunction: 'cubic-bezier(0.8,0,1,1)' },
-                            '50%': { transform: 'translateY(-15px)', animationTimingFunction: 'cubic-bezier(0,0,0.2,1)' }
-                        },
-                        wave: {
-                            '0%': { transform: 'translateX(0)' },
-                            '100%': { transform: 'translateX(-100%)' }
-                        },
-                        progressBar: {
-                            '0%': { width: '0%' },
-                            '100%': { width: 'var(--progress-value)' }
-                        }
-                    }
-                }
-            }
-        }
-    </script>
-
-    <!-- Font Awesome -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-
-    <!-- Alpine.js -->
-    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
-
-    <style>
-        :root {
-            --sidebar-width: 280px;
-        }
-        
-        body {
-            font-family: 'Inter', sans-serif;
-            background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
-            color: #334155;
-            overflow-x: hidden;
-        }
-        
-        .header-worker {
-            background: linear-gradient(120deg, #8b5cf6 0%, #7c3aed 100%);
-            color: white;
-            box-shadow: 0 4px 20px rgba(123, 92, 246, 0.3);
-            position: relative;
-            overflow: hidden;
-        }
-        
-        .header-worker::before {
-            content: "";
-            position: absolute;
-            top: -100%;
-            left: -50%;
-            width: 200%;
-            height: 200%;
-            background: radial-gradient(circle, rgba(255,255,255,0.15) 0%, rgba(255,255,255,0) 70%);
-            transform: rotate(30deg);
-            animation: wave 20s linear infinite;
-        }
-        
-        .header-employer {
-            background: linear-gradient(120deg, #0ea5e9 0%, #0284c7 100%);
-            color: white;
-            box-shadow: 0 4px 20px rgba(14, 165, 233, 0.3);
-            position: relative;
-            overflow: hidden;
-        }
-        
-        .header-employer::before {
-            content: "";
-            position: absolute;
-            top: -100%;
-            left: -50%;
-            width: 200%;
-            height: 200%;
-            background: radial-gradient(circle, rgba(255,255,255,0.15) 0%, rgba(255,255,255,0) 70%);
-            transform: rotate(30deg);
-            animation: wave 20s linear infinite;
-        }
-        
-        .stats-card {
-            border-radius: 18px;
-            overflow: hidden;
-            position: relative;
-            transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-            border: 1px solid rgba(226, 232, 240, 0.5);
-            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.05);
-            background: white;
-        }
-        
-        .stats-card:hover {
-            transform: translateY(-8px);
-            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.15);
-        }
-        
-        .stats-card::before {
-            content: "";
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 4px;
-            background: linear-gradient(90deg, var(--gradient-from), var(--gradient-to));
-        }
-        
-        .service-card {
-            transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-            border-radius: 16px;
-            overflow: hidden;
-            background: white;
-            border: 1px solid #e2e8f0;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.05);
-        }
-        
-        .service-card:hover {
-            transform: translateY(-5px) scale(1.02);
-            box-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.15);
-        }
-        
-        .tab-button {
-            transition: all 0.3s ease;
-            border-bottom: 3px solid transparent;
-            padding: 0.75rem 1.5rem;
-            font-weight: 500;
-            position: relative;
-        }
-        
-        .tab-button.active {
-            border-bottom-color: currentColor;
-            color: #3b82f6;
-        }
-        
-        .tab-button.active::after {
-            content: "";
-            position: absolute;
-            bottom: -3px;
-            left: 50%;
-            transform: translateX(-50%);
-            width: 6px;
-            height: 6px;
-            border-radius: 50%;
-            background-color: currentColor;
-            animation: pulse-slow 2s infinite;
-        }
-        
-        .switch-view {
-            position: fixed;
-            bottom: 30px;
-            right: 30px;
-            z-index: 100;
-            background: white;
-            border-radius: 50px;
-            padding: 10px 20px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.15);
-            display: flex;
-            gap: 10px;
-            animation: fade-in 0.8s ease-out;
-        }
-        
-        .progress-bar {
-            height: 8px;
-            border-radius: 4px;
-            overflow: hidden;
-            background-color: #e2e8f0;
-        }
-        
-        .progress-value {
-            height: 100%;
-            border-radius: 4px;
-            animation: progress 1.5s ease-out forwards;
-        }
-        
-        .notification-badge {
-            position: absolute;
-            top: 8px;
-            right: 8px;
-            width: 20px;
-            height: 20px;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 0.7rem;
-            font-weight: bold;
-            animation: bounceSlow 1.5s infinite;
-        }
-        
-        .chart-container {
-            height: 120px;
-            display: flex;
-            align-items: flex-end;
-            gap: 8px;
-            padding: 0 10px;
-        }
-        
-        .chart-bar {
-            width: 20px;
-            background: linear-gradient(to top, var(--bar-color), var(--bar-color-light));
-            border-radius: 4px 4px 0 0;
-            animation: growBar 1s ease-out forwards;
-        }
-        
-        @keyframes growBar {
-            from { height: 0; }
-            to { height: var(--bar-height); }
-        }
-        
-        .floating {
-            animation: float 6s ease-in-out infinite;
-        }
-        
-        .bounce {
-            animation: bounceSlow 3s infinite;
-        }
-        
-        .pulse {
-            animation: pulse-slow 3s infinite;
-        }
-        
-        .calendar-day {
-            transition: all 0.3s ease;
-            border-radius: 8px;
-            cursor: pointer;
-        }
-        
-        .calendar-day:hover {
-            transform: scale(1.1);
-            background-color: #f1f5f9;
-        }
-        
-        .calendar-day.active {
-            background: linear-gradient(135deg, #8b5cf6, #7c3aed);
-            color: white;
-            box-shadow: 0 4px 10px rgba(139, 92, 246, 0.3);
-        }
-        
-        .calendar-day.booked {
-            background: linear-gradient(135deg, #f97316, #ea580c);
-            color: white;
-        }
-        
-        .calendar-day.available {
-            background: linear-gradient(135deg, #10b981, #059669);
-            color: white;
-        }
-        
-        .rating-stars {
-            position: relative;
-            display: inline-block;
-        }
-        
-        .rating-stars::before {
-            content: "★★★★★";
-            color: #cbd5e1;
-        }
-        
-        .rating-fill {
-            position: absolute;
-            top: 0;
-            left: 0;
-            white-space: nowrap;
-            overflow: hidden;
-            width: var(--rating-width);
-        }
-        
-        .rating-fill::before {
-            content: "★★★★★";
-            color: #f59e0b;
-        }
-    </style>
-</head>
-
-<body class="min-h-screen flex flex-col"
-      x-data="{ 
-          currentView: 'worker',
-          sidebarOpen: window.innerWidth > 1024,
-          mobileMenuOpen: false,
-          notifications: [
-            { id: 1, title: 'Nouvelle réservation', description: 'Mariage Kouassi confirmé pour demain', time: 'Il y a 2 min', read: false, icon: 'fas fa-calendar-check', color: 'bg-purple-500' },
-            { id: 2, title: 'Paiement reçu', description: '450.000 FCFA pour service de cuisine', time: 'Il y a 1h', read: false, icon: 'fas fa-wallet', color: 'bg-green-500' },
-            { id: 3, title: 'Avis reçu', description: 'Nouvel avis 5 étoiles de Fatoumata', time: 'Il y a 3h', read: true, icon: 'fas fa-star', color: 'bg-yellow-500' }
-          ],
-          unreadCount: 2,
-          activeTab: 'upcoming',
-          selectedDate: new Date(),
-          availability: {
-            '2023-07-05': 'available',
-            '2023-07-08': 'available',
-            '2023-07-12': 'booked',
-            '2023-07-15': 'booked',
-            '2023-07-18': 'available',
-            '2023-07-22': 'available'
-          },
-          workerServices: [
-            { id: 1, title: 'Service de cuisine', category: 'Cuisine', price: '50.000 FCFA', rating: 4.9, missions: 24, image: 'https://source.unsplash.com/random/600x400/?cooking,chef' },
-            { id: 2, title: 'Service de chauffeur', category: 'Transport', price: '30.000 FCFA', rating: 4.7, missions: 18, image: 'https://source.unsplash.com/random/600x400/?driver,car' },
-            { id: 3, title: 'Nettoyage premium', category: 'Ménage', price: '25.000 FCFA', rating: 4.8, missions: 15, image: 'https://source.unsplash.com/random/600x400/?cleaning,house' }
-          ],
-          recommendedWorkers: [
-            { id: 1, name: 'Amara Diallo', profession: 'Cuisinier Professionnel', price: '50.000 FCFA', rating: 4.9, image: 'https://source.unsplash.com/random/600x400/?chef,man' },
-            { id: 2, name: 'Mohamed Traoré', profession: 'Chauffeur Privé', price: '35.000 FCFA', rating: 4.8, image: 'https://source.unsplash.com/random/600x400/?driver,man' },
-            { id: 3, name: 'Aïcha Koné', profession: 'Nounou Expérimentée', price: '40.000 FCFA', rating: 4.7, image: 'https://source.unsplash.com/random/600x400/?nanny,woman' },
-            { id: 4, name: 'Jean Kouassi', profession: 'Jardinier Paysagiste', price: '25.000 FCFA', rating: 4.8, image: 'https://source.unsplash.com/random/600x400/?gardener,man' }
-          ],
-          activeRequests: [
-            { id: 1, title: 'Cuisinier pour dîner d\'affaires', date: '12 Juin 2023', providers: 3, status: 'En cours', icon: 'fas fa-utensils' },
-            { id: 2, title: 'Transport aéroport', date: '11 Juin 2023', providers: 5, status: 'En cours', icon: 'fas fa-car' }
-          ],
-          upcomingServices: [
-            { id: 1, title: 'Nettoyage mensuel', provider: 'Fatoumata Diallo', date: 'Demain, 10h - 13h', status: 'Confirmé', icon: 'fas fa-concierge-bell' },
-            { id: 2, title: 'Garde d\'enfants', provider: 'Aïcha Koné', date: 'Samedi, 14h - 20h', status: 'Confirmé', icon: 'fas fa-baby' }
-          ]
-      }"
-      x-init="
-        $nextTick(() => {
-          // Initialize charts
-          document.querySelectorAll('.chart-bar').forEach(bar => {
-            bar.style.setProperty('--bar-height', bar.getAttribute('data-height') + 'px');
-          });
-          
-          // Initialize rating stars
-          document.querySelectorAll('.rating-stars').forEach(stars => {
-            const rating = parseFloat(stars.getAttribute('data-rating'));
-            const width = (rating / 5) * 100;
-            stars.style.setProperty('--rating-width', width + '%');
-          });
-        });
-      ">
-      
-<!-- Switch View Buttons -->
-<div class="switch-view">
-    <button 
-        @click="currentView = 'worker'" 
-        :class="currentView === 'worker' ? 'bg-worker text-white shadow-lg' : 'bg-gray-100 text-gray-700'"
-        class="px-4 py-2 rounded-full font-medium transition transform hover:scale-105"
-    >
-        <i class="fas fa-tools mr-2"></i> Travailleur
-    </button>
-    <button 
-        @click="currentView = 'employer'" 
-        :class="currentView === 'employer' ? 'bg-employer text-white shadow-lg' : 'bg-gray-100 text-gray-700'"
-        class="px-4 py-2 rounded-full font-medium transition transform hover:scale-105"
-    >
-        <i class="fas fa-home mr-2"></i> Employeur
-    </button>
-</div>
-
-<!-- Worker View -->
-<!-- Employer View -->
-<template x-if="currentView === 'employer'">
-    <div>
-        <!-- Employer Header -->
-        <header class="header-employer shadow-xl">
-            <div class="flex items-center justify-between px-8 py-5 relative z-10">
-                <div class="flex items-center">
-                    <button @click="sidebarOpen = !sidebarOpen" class="mr-6 text-blue-200 hover:text-white transition lg:hidden">
-                        <i class="fas fa-bars text-2xl"></i>
-                    </button>
-                    <a href="#" class="flex items-center">
-                        <div class="w-12 h-12 rounded-xl bg-white flex items-center justify-center mr-4 shadow-lg bounce">
-                            <span class="text-2xl font-bold text-employer">T</span>
+{% block content %}
+    <div class="flex flex-1 overflow-hidden">
+        <main class="flex-1 overflow-y-auto p-8">
+            <!-- Welcome Banner -->
+            <div class="bg-gradient-to-r from-blue-50 to-cyan-50 p-8 mb-8 rounded-2xl relative overflow-hidden">
+                <div class="absolute inset-0 opacity-10">
+                    <div class="absolute top-0 right-0 w-64 h-64 bg-blue-300 rounded-full filter blur-3xl opacity-30 animate-pulse"></div>
+                    <div class="absolute bottom-0 left-0 w-48 h-48 bg-blue-400 rounded-full filter blur-3xl opacity-30 animate-pulse"></div>
+                </div>
+                <div class="relative flex flex-col lg:flex-row lg:items-center">
+                    <div class="lg:w-2/3">
+                        <h1 class="text-3xl font-bold text-gray-800 mb-3">Bonjour, {{ user.first_name }} 👋</h1>
+                        <p class="text-xl text-gray-600 max-w-2xl mb-6">
+                            Vous avez <span
+                                class="font-semibold text-employer">{{ stats.totalServices }} services</span> actifs.
+                            Trouvez le prestataire idéal pour vos besoins.
+                        </p>
+                        <div class="flex gap-4">
+                            <a href="{% url "service_search" %}"
+                               class="px-6 py-3.5 bg-employer hover:bg-blue-700 text-white rounded-xl font-semibold flex items-center transition shadow-md transform hover:scale-105">
+                                <i class="fas fa-search mr-3"></i> Trouver un service
+                            </a>
+                            <a href="#create_request"
+                               class="px-6 py-3.5 bg-white hover:bg-gray-50 text-gray-800 rounded-xl font-semibold flex items-center transition shadow-md transform hover:scale-105">
+                                <i class="fas fa-plus mr-3"></i> Nouvelle demande
+                            </a>
                         </div>
-                        <div>
-                            <span class="text-2xl font-bold text-white tracking-tight">Tratra Employeur</span>
-                            <span class="block text-xs bg-blue-200 text-blue-900 px-2 py-1 rounded-full font-bold mt-1">Recruteur de Services</span>
+                    </div>
+                    <div class="mt-8 lg:mt-0 lg:w-1/3 flex justify-center">
+                        <img src="https://cdn-icons-png.flaticon.com/512/1067/1067566.png"
+                             alt="Employer Illustration" class="w-64 floating">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Stats Cards -->
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+                <!-- Services Card -->
+                <div class="stats-card" style="--gradient-from: #0ea5e9; --gradient-to: #0284c7;">
+                    <div class="p-6">
+                        <div class="flex items-center">
+                            <div class="w-14 h-14 rounded-2xl bg-blue-100 flex items-center justify-center">
+                                <i class="fas fa-tasks text-employer text-2xl"></i>
+                            </div>
+                            <div class="ml-5">
+                                <p class="text-sm text-gray-500">Services actifs</p>
+                                <h3 class="text-3xl font-bold text-gray-800 mt-1">{{ stats.totalServices }}</h3>
+                            </div>
                         </div>
-                    </a>
+                        <div class="mt-6 flex items-center">
+                            <div class="px-3 py-1.5 bg-blue-100 text-employer rounded-full text-sm font-medium flex items-center">
+                                <i class="fas fa-arrow-up mr-1.5 text-xs"></i> 18%
+                            </div>
+                            <span class="ml-3 text-sm text-gray-500">vs mois dernier</span>
+                        </div>
+                    </div>
                 </div>
 
-                <div class="flex items-center space-x-8">
-                    <div class="relative rounded-xl bg-blue-500/20">
-                        <input type="text" placeholder="Rechercher un service..."
-                               class="pl-14 pr-6 py-3 rounded-xl bg-transparent text-white placeholder-blue-200 focus:outline-none focus:ring-2 focus:ring-blue-300 w-80">
-                        <i class="fas fa-search absolute left-5 top-1/2 transform -translate-y-1/2 text-blue-200 text-lg"></i>
+                <!-- Spending Card -->
+                <div class="stats-card" style="--gradient-from: #10b981; --gradient-to: #059669;">
+                    <div class="p-6">
+                        <div class="flex items-center">
+                            <div class="w-14 h-14 rounded-2xl bg-green-100 flex items-center justify-center">
+                                <i class="fas fa-wallet text-green-600 text-2xl"></i>
+                            </div>
+                            <div class="ml-5">
+                                <p class="text-sm text-gray-500">Dépenses mensuelles</p>
+                                <h3 class="text-3xl font-bold text-gray-800 mt-1">{{ stats.monthlySpending }}</h3>
+                            </div>
+                        </div>
+                        <div class="mt-6">
+                            <div class="chart-container">
+                                <div class="chart-bar" data-height="40"
+                                     style="--bar-color: #0ea5e9; --bar-color-light: #bae6fd;"></div>
+                                <div class="chart-bar" data-height="80"
+                                     style="--bar-color: #0ea5e9; --bar-color-light: #bae6fd;"></div>
+                                <div class="chart-bar" data-height="60"
+                                     style="--bar-color: #0ea5e9; --bar-color-light: #bae6fd;"></div>
+                                <div class="chart-bar" data-height="100"
+                                     style="--bar-color: #0ea5e9; --bar-color-light: #bae6fd;"></div>
+                                <div class="chart-bar" data-height="70"
+                                     style="--bar-color: #0ea5e9; --bar-color-light: #bae6fd;"></div>
+                                <div class="chart-bar" data-height="90"
+                                     style="--bar-color: #0ea5e9; --bar-color-light: #bae6fd;"></div>
+                                <div class="chart-bar" data-height="85"
+                                     style="--bar-color: #0ea5e9; --bar-color-light: #bae6fd;"></div>
+                            </div>
+                        </div>
                     </div>
+                </div>
 
-                    <div class="flex items-center space-x-7">
-                        <div class="relative" x-data="{ open: false }">
-                            <button @click="open = !open" class="relative p-3 text-blue-200 hover:text-white transition transform hover:scale-110">
-                                <i class="far fa-bell text-xl"></i>
-                                <span class="notification-badge bg-red-500 text-white">3</span>
-                            </button>
+                <!-- Requests Card -->
+                <div class="stats-card" style="--gradient-from: #f59e0b; --gradient-to: #d97706;">
+                    <div class="p-6">
+                        <div class="flex items-center">
+                            <div class="w-14 h-14 rounded-2xl bg-yellow-100 flex items-center justify-center">
+                                <i class="fas fa-file-alt text-yellow-500 text-2xl"></i>
+                            </div>
+                            <div class="ml-5">
+                                <p class="text-sm text-gray-500">Demandes en attente</p>
+                                <h3 class="text-3xl font-bold text-gray-800 mt-1">{{ stats.pendingRequests }}</h3>
+                            </div>
                         </div>
-                        
-                        <div class="relative">
-                            <button class="relative p-3 text-blue-200 hover:text-white transition transform hover:scale-110">
-                                <i class="fas fa-shopping-cart text-xl"></i>
-                                <span class="notification-badge bg-employer">2</span>
-                            </button>
+                        <div class="mt-6">
+                            <div class="progress-bar">
+                                <div class="progress-value bg-employer" style="--progress-value: 60%"></div>
+                            </div>
+                            <p class="text-xs text-gray-500 mt-2">Taux de réponse: 85%</p>
                         </div>
+                    </div>
+                </div>
 
-                        <div class="relative" x-data="{ open: false }">
-                            <button @click="open = !open" class="flex items-center space-x-4 focus:outline-none">
-                                <div class="w-12 h-12 rounded-xl bg-gradient-to-r from-employer to-blue-700 flex items-center justify-center text-white font-bold shadow-lg floating">
-                                    <span>K</span>
-                                </div>
-                                <div class="text-left hidden md:block">
-                                    <p class="text-base font-semibold text-white">Koffi Yao</p>
-                                    <p class="text-xs text-blue-200">Membre Premium</p>
-                                </div>
-                            </button>
+                <!-- Satisfaction Card -->
+                <div class="stats-card" style="--gradient-from: #8b5cf6; --gradient-to: #7c3aed;">
+                    <div class="p-6">
+                        <div class="flex items-center">
+                            <div class="w-14 h-14 rounded-2xl bg-purple-100 flex items-center justify-center">
+                                <i class="fas fa-star text-purple-500 text-2xl"></i>
+                            </div>
+                            <div class="ml-5">
+                                <p class="text-sm text-gray-500">Satisfaction</p>
+                                <h3 class="text-3xl font-bold text-gray-800 mt-1">4.8/5</h3>
+                            </div>
+                        </div>
+                        <div class="mt-6">
+                            <div class="rating-stars" data-rating="4.8">
+                                <div class="rating-fill"></div>
+                            </div>
+                            <span class="ml-2 text-gray-600">(42 avis)</span>
                         </div>
                     </div>
                 </div>
             </div>
-        </header>
 
-        <!-- Employer Content -->
-        <div class="flex flex-1 overflow-hidden">
-            <main class="flex-1 overflow-y-auto p-8">
-                <!-- Welcome Banner -->
-                <div class="bg-gradient-to-r from-blue-50 to-cyan-50 p-8 mb-8 rounded-2xl relative overflow-hidden">
-                    <div class="absolute inset-0 opacity-10">
-                        <div class="absolute top-0 right-0 w-64 h-64 bg-blue-300 rounded-full filter blur-3xl opacity-30 animate-pulse"></div>
-                        <div class="absolute bottom-0 left-0 w-48 h-48 bg-blue-400 rounded-full filter blur-3xl opacity-30 animate-pulse"></div>
-                    </div>
-                    <div class="relative z-10 flex flex-col lg:flex-row lg:items-center">
-                        <div class="lg:w-2/3">
-                            <h1 class="text-3xl font-bold text-gray-800 mb-3">Bonjour, Koffi 👋</h1>
-                            <p class="text-xl text-gray-600 max-w-2xl mb-6">
-                                Vous avez <span class="font-semibold text-employer">2 services</span> prévus cette semaine.
-                                Trouvez le prestataire idéal pour vos besoins.
-                            </p>
-                            <div class="flex gap-4">
-                                <button class="px-6 py-3.5 bg-employer hover:bg-blue-700 text-white rounded-xl font-semibold flex items-center transition shadow-md transform hover:scale-105">
-                                    <i class="fas fa-search mr-3"></i> Trouver un service
-                                </button>
-                                <button class="px-6 py-3.5 bg-white hover:bg-gray-50 text-gray-800 rounded-xl font-semibold flex items-center transition shadow-md transform hover:scale-105">
-                                    <i class="fas fa-plus mr-3"></i> Nouvelle demande
-                                </button>
-                            </div>
-                        </div>
-                        <div class="mt-8 lg:mt-0 lg:w-1/3 flex justify-center">
-                            <img src="https://cdn-icons-png.flaticon.com/512/1067/1067566.png" alt="Employer Illustration" class="w-64 floating">
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Services Categories -->
-                <div class="mb-8">
-                    <h2 class="text-2xl font-bold text-gray-800 mb-6">Services populaires</h2>
-                    <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <!-- Services Categories -->
+            <div class="mb-8">
+                <h2 class="text-2xl font-bold text-gray-800 mb-6">Services populaires</h2>
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <template x-for="category in popularCategories" :key="category.id">
                         <div class="bg-white rounded-2xl p-5 text-center hover:shadow-lg transition cursor-pointer transform hover:-translate-y-1">
                             <div class="w-16 h-16 rounded-2xl bg-blue-100 flex items-center justify-center mx-auto mb-4">
-                                <i class="fas fa-concierge-bell text-employer text-2xl"></i>
+                                <i :class="category.icon" class="text-employer text-2xl"></i>
                             </div>
-                            <h3 class="font-semibold">Service ménager</h3>
-                            <p class="text-xs text-gray-500 mt-1">120+ prestataires</p>
+                            <h3 class="font-semibold" x-text="category.name"></h3>
+                            <p class="text-xs text-gray-500 mt-1" x-text="category.providers + '+ prestataires'"></p>
                         </div>
-                        
-                        <div class="bg-white rounded-2xl p-5 text-center hover:shadow-lg transition cursor-pointer transform hover:-translate-y-1">
-                            <div class="w-16 h-16 rounded-2xl bg-green-100 flex items-center justify-center mx-auto mb-4">
-                                <i class="fas fa-utensils text-employer text-2xl"></i>
-                            </div>
-                            <h3 class="font-semibold">Cuisinier</h3>
-                            <p class="text-xs text-gray-500 mt-1">85+ prestataires</p>
-                        </div>
-                        
-                        <div class="bg-white rounded-2xl p-5 text-center hover:shadow-lg transition cursor-pointer transform hover:-translate-y-1">
-                            <div class="w-16 h-16 rounded-2xl bg-yellow-100 flex items-center justify-center mx-auto mb-4">
-                                <i class="fas fa-baby text-employer text-2xl"></i>
-                            </div>
-                            <h3 class="font-semibold">Nounou</h3>
-                            <p class="text-xs text-gray-500 mt-1">65+ prestataires</p>
-                        </div>
-                        
-                        <div class="bg-white rounded-2xl p-5 text-center hover:shadow-lg transition cursor-pointer transform hover:-translate-y-1">
-                            <div class="w-16 h-16 rounded-2xl bg-purple-100 flex items-center justify-center mx-auto mb-4">
-                                <i class="fas fa-car text-employer text-2xl"></i>
-                            </div>
-                            <h3 class="font-semibold">Chauffeur</h3>
-                            <p class="text-xs text-gray-500 mt-1">110+ prestataires</p>
-                        </div>
+                    </template>
+                </div>
+            </div>
+
+            <!-- Recommended Workers -->
+            <div class="bg-white rounded-2xl shadow-sm p-7 mb-8">
+                <div class="flex justify-between items-center mb-7">
+                    <div>
+                        <h2 class="text-2xl font-bold text-gray-800 mb-1">Prestataires recommandés</h2>
+                        <p class="text-gray-500">Découvrez nos meilleurs travailleurs près de chez vous</p>
+                    </div>
+                    <div>
+                        <a href="#handyman_list" class="text-base text-employer font-semibold flex items-center">
+                            Voir plus <i class="fas fa-arrow-right ml-2 text-xs"></i>
+                        </a>
                     </div>
                 </div>
 
-                <!-- Recommended Workers -->
-                <div class="bg-white rounded-2xl shadow-sm p-7 mb-8">
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                    <template x-for="worker in recommendedWorkers" :key="worker.id">
+                        <div class="service-card">
+                            <div class="h-48 relative overflow-hidden">
+                                <img :src="worker.image"
+                                     alt="Worker"
+                                     class="w-full h-full object-cover transition-transform duration-500 hover:scale-110">
+                                <div class="absolute top-4 right-4 bg-white/90 px-3 py-1.5 rounded-xl text-sm font-semibold flex items-center">
+                                    <i class="fas fa-star text-yellow-500 mr-1.5"></i>
+                                    <span x-text="worker.rating"></span>
+                                </div>
+                                <div class="absolute bottom-0 left-0 w-full bg-gradient-to-t from-black/70 to-transparent p-4 text-white">
+                                    <h3 class="font-bold text-lg" x-text="worker.name"></h3>
+                                    <p class="text-sm" x-text="worker.profession"></p>
+                                </div>
+                            </div>
+                            <div class="p-5">
+                                <div class="flex items-center justify-between">
+                                    <span class="text-lg font-bold" x-text="worker.price"></span>
+                                    <button class="px-3 py-1.5 bg-employer text-white rounded-lg text-sm hover:bg-blue-700 transition">
+                                        Contacter
+                                    </button>
+                                </div>
+                                <div class="mt-4 flex justify-between">
+                                    <a href="#" class="text-sm text-employer font-medium flex items-center">
+                                        <i class="far fa-eye mr-1"></i> Voir profil
+                                    </a>
+                                    <button class="text-sm text-employer font-medium flex items-center">
+                                        <i class="far fa-bookmark mr-1"></i> Enregistrer
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+            </div>
+
+            <!-- Current Requests -->
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
+                <!-- Active Requests -->
+                <div class="bg-white rounded-2xl shadow-sm p-7">
                     <div class="flex justify-between items-center mb-7">
-                        <div>
-                            <h2 class="text-2xl font-bold text-gray-800 mb-1">Prestataires recommandés</h2>
-                            <p class="text-gray-500">Découvrez nos meilleurs travailleurs près de chez vous</p>
-                        </div>
-                        <div>
-                            <a href="#" class="text-base text-employer font-semibold flex items-center">
-                                Voir plus <i class="fas fa-arrow-right ml-2 text-xs"></i>
-                            </a>
-                        </div>
+                        <h2 class="text-2xl font-bold text-gray-800">Mes demandes actives</h2>
+                        <a href="#my_requests" class="text-base text-employer font-semibold flex items-center">
+                            Voir tout <i class="fas fa-arrow-right ml-2 text-xs"></i>
+                        </a>
                     </div>
-                    
-                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                        <template x-for="worker in recommendedWorkers" :key="worker.id">
-                            <div class="service-card">
-                                <div class="h-48 relative overflow-hidden">
-                                    <img :src="worker.image" 
-                                         alt="Worker" 
-                                         class="w-full h-full object-cover transition-transform duration-500 hover:scale-110">
-                                    <div class="absolute top-4 right-4 bg-white/90 px-3 py-1.5 rounded-xl text-sm font-semibold flex items-center">
-                                        <i class="fas fa-star text-yellow-500 mr-1.5"></i>
-                                        <span x-text="worker.rating"></span>
-                                    </div>
-                                    <div class="absolute bottom-0 left-0 w-full bg-gradient-to-t from-black/70 to-transparent p-4 text-white">
-                                        <h3 class="font-bold text-lg" x-text="worker.name"></h3>
-                                        <p class="text-sm" x-text="worker.profession"></p>
+
+                    <div class="space-y-5">
+                        <template x-for="request in activeRequests" :key="request.id">
+                            <div class="flex items-start p-5 bg-blue-50/50 rounded-2xl hover:bg-blue-100/30 transition">
+                                <div class="flex-shrink-0 mr-5">
+                                    <div class="w-14 h-14 rounded-2xl bg-employer/10 flex items-center justify-center">
+                                        <i :class="request.icon" class="text-employer text-2xl"></i>
                                     </div>
                                 </div>
-                                <div class="p-5">
-                                    <div class="flex items-center justify-between">
-                                        <span class="text-lg font-bold" x-text="worker.price"></span>
-                                        <button class="px-3 py-1.5 bg-employer text-white rounded-lg text-sm hover:bg-blue-700 transition">
-                                            Contacter
-                                        </button>
+                                <div class="flex-1 min-w-0">
+                                    <p class="text-base font-semibold text-gray-900" x-text="request.title"></p>
+                                    <p class="text-sm text-gray-500 mt-1" x-text="'Demandé le ' + request.date"></p>
+                                    <div class="mt-3 flex items-center text-sm text-gray-400">
+                                        <i class="fas fa-user mr-2"></i>
+                                        <span x-text="request.providers + ' prestataires intéressés'"></span>
                                     </div>
-                                    <div class="mt-4 flex justify-between">
-                                        <button class="text-sm text-employer font-medium flex items-center">
-                                            <i class="far fa-eye mr-1"></i> Voir profil
-                                        </button>
-                                        <button class="text-sm text-employer font-medium flex items-center">
-                                            <i class="far fa-bookmark mr-1"></i> Enregistrer
-                                        </button>
-                                    </div>
+                                </div>
+                                <div class="ml-4">
+                                    <span class="px-3 py-1.5 bg-employer text-white text-xs font-medium rounded-full"
+                                          x-text="request.status"></span>
                                 </div>
                             </div>
                         </template>
                     </div>
                 </div>
 
-                <!-- Current Requests -->
-                <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
-                    <!-- Active Requests -->
-                    <div class="bg-white rounded-2xl shadow-sm p-7">
-                        <div class="flex justify-between items-center mb-7">
-                            <h2 class="text-2xl font-bold text-gray-800">Mes demandes actives</h2>
-                            <a href="#" class="text-base text-employer font-semibold flex items-center">
-                                Voir tout <i class="fas fa-arrow-right ml-2 text-xs"></i>
-                            </a>
-                        </div>
-                        
-                        <div class="space-y-5">
-                            <template x-for="request in activeRequests" :key="request.id">
-                                <div class="flex items-start p-5 bg-blue-50/50 rounded-2xl hover:bg-blue-100/30 transition">
-                                    <div class="flex-shrink-0 mr-5">
-                                        <div class="w-14 h-14 rounded-2xl bg-employer/10 flex items-center justify-center">
-                                            <i :class="request.icon" class="text-employer text-2xl"></i>
-                                        </div>
-                                    </div>
-                                    <div class="flex-1 min-w-0">
-                                        <p class="text-base font-semibold text-gray-900" x-text="request.title"></p>
-                                        <p class="text-sm text-gray-500 mt-1" x-text="'Demandé le ' + request.date"></p>
-                                        <div class="mt-3 flex items-center text-sm text-gray-400">
-                                            <i class="fas fa-user mr-2"></i>
-                                            <span x-text="request.providers + ' prestataires intéressés'"></span>
-                                        </div>
-                                    </div>
-                                    <div class="ml-4">
-                                        <span class="px-3 py-1.5 bg-employer text-white text-xs font-medium rounded-full" x-text="request.status"></span>
-                                    </div>
-                                </div>
-                            </template>
-                        </div>
+                <!-- Upcoming Services -->
+                <div class="bg-white rounded-2xl shadow-sm p-7">
+                    <div class="flex justify-between items-center mb-7">
+                        <h2 class="text-2xl font-bold text-gray-800">Services à venir</h2>
+                        <a href="#employer_calendar" class="text-base text-employer font-semibold flex items-center">
+                            Voir calendrier <i class="fas fa-arrow-right ml-2 text-xs"></i>
+                        </a>
                     </div>
-                    
-                    <!-- Upcoming Services -->
-                    <div class="bg-white rounded-2xl shadow-sm p-7">
-                        <div class="flex justify-between items-center mb-7">
-                            <h2 class="text-2xl font-bold text-gray-800">Services à venir</h2>
-                            <a href="#" class="text-base text-employer font-semibold flex items-center">
-                                Voir calendrier <i class="fas fa-arrow-right ml-2 text-xs"></i>
-                            </a>
-                        </div>
-                        
-                        <div class="space-y-5">
-                            <template x-for="service in upcomingServices" :key="service.id">
-                                <div class="flex items-start p-5 bg-blue-50/50 rounded-2xl hover:bg-blue-100/30 transition">
-                                    <div class="flex-shrink-0 mr-5">
-                                        <div class="w-14 h-14 rounded-2xl bg-employer/10 flex items-center justify-center">
-                                            <i :class="service.icon" class="text-employer text-2xl"></i>
-                                        </div>
-                                    </div>
-                                    <div class="flex-1 min-w-0">
-                                        <p class="text-base font-semibold text-gray-900" x-text="service.title"></p>
-                                        <p class="text-sm text-gray-500 mt-1" x-text="'Avec ' + service.provider"></p>
-                                        <div class="mt-3 flex items-center text-sm text-gray-400">
-                                            <i class="far fa-clock mr-2"></i>
-                                            <span x-text="service.date"></span>
-                                        </div>
-                                    </div>
-                                    <div class="ml-4">
-                                        <span class="px-3 py-1.5 bg-employer text-white text-xs font-medium rounded-full" x-text="service.status"></span>
+
+                    <div class="space-y-5">
+                        <template x-for="service in upcomingServices" :key="service.id">
+                            <div class="flex items-start p-5 bg-blue-50/50 rounded-2xl hover:bg-blue-100/30 transition">
+                                <div class="flex-shrink-0 mr-5">
+                                    <div class="w-14 h-14 rounded-2xl bg-employer/10 flex items-center justify-center">
+                                        <i :class="service.icon" class="text-employer text-2xl"></i>
                                     </div>
                                 </div>
-                            </template>
-                        </div>
+                                <div class="flex-1 min-w-0">
+                                    <p class="text-base font-semibold text-gray-900" x-text="service.title"></p>
+                                    <p class="text-sm text-gray-500 mt-1" x-text="'Avec ' + service.provider"></p>
+                                    <div class="mt-3 flex items-center text-sm text-gray-400">
+                                        <i class="far fa-clock mr-2"></i>
+                                        <span x-text="service.date"></span>
+                                    </div>
+                                </div>
+                                <div class="ml-4">
+                                    <span class="px-3 py-1.5 bg-employer text-white text-xs font-medium rounded-full"
+                                          x-text="service.status"></span>
+                                </div>
+                            </div>
+                        </template>
                     </div>
                 </div>
-            </main>
-        </div>
+            </div>
+        </main>
     </div>
-</template>
-
-
-
-<script>
-    // Initialize animations on page load
-    document.addEventListener('DOMContentLoaded', function() {
-        // Add animation to all elements with specific classes
-        document.querySelectorAll('.floating').forEach(el => {
-            el.style.animation = 'float 6s ease-in-out infinite';
-        });
-        
-        document.querySelectorAll('.bounce').forEach(el => {
-            el.style.animation = 'bounceSlow 3s infinite';
-        });
-        
-        document.querySelectorAll('.pulse').forEach(el => {
-            el.style.animation = 'pulse-slow 3s infinite';
-        });
-    });
-</script>
-</body>
-</html>
+{% endblock %}

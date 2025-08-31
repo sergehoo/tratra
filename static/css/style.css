@@ -1,0 +1,47 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+    --primary: #16a34a;
+    --primary-dark: #15803d;
+    --light: #f0fdf4;
+}
+
+body {
+    font-family: 'Poppins', sans-serif;
+    @apply text-gray-800;
+}
+
+.btn {
+    @apply px-6 py-3 rounded-full font-medium transition duration-300;
+}
+
+.btn-primary {
+    @apply bg-green-600 text-white hover:bg-green-700 hover:shadow-lg;
+}
+
+.btn-outline {
+    @apply border-2 border-green-600 text-green-600 hover:bg-green-50;
+}
+
+.btn-white {
+    @apply bg-white text-green-600 hover:bg-gray-100 px-8 py-3 font-bold;
+}
+
+.btn-transparent {
+    @apply border-2 border-white text-white hover:bg-green-700 px-8 py-3 font-bold;
+}
+
+.btn-sm {
+    @apply px-4 py-2 text-sm;
+}
+
+/* Animation pour les éléments au scroll */
+.animate-on-scroll {
+    @apply opacity-0 transform translate-y-10 transition duration-500 ease-out;
+}
+
+.animate-on-scroll.animated {
+    @apply opacity-100 translate-y-0;
+}

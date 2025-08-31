@@ -1,0 +1,119 @@
+{% extends 'employeur/base_employer.html' %}
+{% load humanize %}
+
+{% block content %}
+<div class="container mx-auto px-4 py-8 max-w-3xl">
+    <div class="bg-white rounded-xl shadow-sm p-6 mb-6">
+        <h1 class="text-2xl font-bold mb-6">Réserver : {{ service.title }}</h1>
+        
+        <div class="flex flex-col md:flex-row gap-8">
+            <!-- Résumé du service -->
+            <div class="md:w-1/3">
+                <div class="border rounded-lg p-4">
+                    <div class="flex items-center mb-4">
+                        <div class="w-16 h-16 rounded-xl bg-gray-100 flex items-center justify-center mr-3">
+                            <i class="{{ service.category.icon|default:'fas fa-tools' }} text-employer text-xl"></i>
+                        </div>
+                        <div>
+                            <h3 class="font-bold">{{ service.title }}</h3>
+                            <p class="text-sm text-gray-500">par {{ service.handyman.get_full_name }}</p>
+                        </div>
+                    </div>
+                    
+                    <div class="space-y-3">
+                        <div class="flex justify-between">
+                            <span class="text-gray-500">Prix</span>
+                            <span class="font-bold">
+                                {% if service.price %}
+                                {{ service.price|intcomma }} CFA
+                                {% else %}
+                                Sur devis
+                                {% endif %}
+                            </span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-gray-500">Durée</span>
+                            <span class="font-bold">
+                                {% if service.duration %}
+                                {{ service.duration }} min
+                                {% else %}
+                                Variable
+                                {% endif %}
+                            </span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-gray-500">Type</span>
+                            <span class="font-bold">{{ service.get_price_type_display }}</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Formulaire de réservation -->
+            <div class="md:w-2/3">
+                <form method="post">
+                    {% csrf_token %}
+                    <div class="mb-6">
+                        <label class="block text-sm font-medium mb-2">Date et heure de la prestation</label>
+                        {{ form.booking_date }}
+                        {% if form.booking_date.errors %}
+                        <p class="text-red-500 text-sm mt-1">{{ form.booking_date.errors.0 }}</p>
+                        {% endif %}
+                        <p class="text-sm text-gray-500 mt-2">La réservation doit être faite au moins 24h à l'avance</p>
+                    </div>
+                    
+                    <div class="mb-6">
+                        <label class="block text-sm font-medium mb-2">Adresse complète</label>
+                        {{ form.address }}
+                    </div>
+                    
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                        <div>
+                            <label class="block text-sm font-medium mb-2">Ville</label>
+                            {{ form.city }}
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium mb-2">Code postal</label>
+                            {{ form.postal_code }}
+                        </div>
+                    </div>
+                    
+                    <div class="mb-6">
+                        <label class="block text-sm font-medium mb-2">Description détaillée de votre besoin</label>
+                        {{ form.description }}
+                        <p class="text-sm text-gray-500 mt-2">
+                            Décrivez précisément ce dont vous avez besoin pour que le prestataire 
+                            puisse bien préparer son intervention
+                        </p>
+                    </div>
+                    
+                    <div class="border-t pt-6">
+                        <button type="submit" class="w-full bg-employer text-white py-3 rounded-lg font-bold hover:bg-blue-700 transition">
+                            Confirmer la réservation
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Informations importantes -->
+    <div class="bg-blue-50 border border-blue-200 rounded-xl p-6">
+        <h3 class="font-bold text-lg mb-3">Informations importantes</h3>
+        <ul class="space-y-2 text-gray-700">
+            <li class="flex">
+                <i class="fas fa-info-circle text-blue-500 mt-1 mr-2"></i>
+                <span>Vous pouvez annuler gratuitement jusqu'à 24h avant la prestation</span>
+            </li>
+            <li class="flex">
+                <i class="fas fa-info-circle text-blue-500 mt-1 mr-2"></i>
+                <span>Le paiement s'effectuera directement auprès du prestataire après la prestation</span>
+            </li>
+            <li class="flex">
+                <i class="fas fa-info-circle text-blue-500 mt-1 mr-2"></i>
+                <span>En cas de problème, notre équipe support est disponible au 01 23 45 67 89</span>
+            </li>
+        </ul>
+    </div>
+</div>
+{% endblock %}

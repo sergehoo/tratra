@@ -1,0 +1,190 @@
+{% extends 'employeur/base_employer.html' %}
+{% load humanize %}
+
+{% block content %}
+<div class="container mx-auto px-4 py-8">
+    <div class="bg-white rounded-xl shadow-sm p-6 mb-8">
+        <div class="flex flex-col md:flex-row items-center">
+            <div class="w-32 h-32 rounded-full bg-gray-200 flex items-center justify-center overflow-hidden mb-4 md:mb-0">
+                {% if worker.profile_picture %}
+                <img src="{{ worker.profile_picture.url }}" 
+                     alt="{{ worker.get_full_name }}" 
+                     class="w-full h-full object-cover">
+                {% else %}
+                <i class="fas fa-user text-gray-400 text-4xl"></i>
+                {% endif %}
+            </div>
+            
+            <div class="md:ml-6 text-center md:text-left">
+                <h1 class="text-2xl font-bold">{{ worker.get_full_name }}</h1>
+                <p class="text-gray-600 mt-1">{{ worker.profession|default:"Prestataire de services" }}</p>
+                
+                <div class="mt-4 flex justify-center md:justify-start">
+                    <div class="flex text-yellow-400">
+                        {% for i in "12345" %}
+                        <i class="fas fa-star {% if forloop.counter <= stats.avg_rating %}text-yellow-400{% else %}text-gray-300{% endif %}"></i>
+                        {% endfor %}
+                    </div>
+                    <span class="ml-2 text-gray-600">({{ stats.review_count }} avis)</span>
+                </div>
+                
+                <div class="mt-4 flex flex-wrap justify-center md:justify-start gap-2">
+                    {% if worker.city %}
+                    <span class="flex items-center text-gray-500">
+                        <i class="fas fa-map-marker-alt mr-1"></i>
+                        {{ worker.city }}{% if worker.postal_code %}, {{ worker.postal_code }}{% endif %}
+                    </span>
+                    {% endif %}
+                    
+                    {% if worker.phone %}
+                    <span class="flex items-center text-gray-500">
+                        <i class="fas fa-phone mr-1"></i>
+                        {{ worker.phone }}
+                    </span>
+                    {% endif %}
+                </div>
+            </div>
+            
+            <div class="ml-auto mt-4 md:mt-0">
+                <button class="px-5 py-2 bg-employer text-white rounded-lg hover:bg-blue-700 transition">
+                    Contacter
+                </button>
+            </div>
+        </div>
+        
+        <div class="mt-8 grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div class="bg-gray-50 rounded-lg p-3 text-center">
+                <p class="text-xl font-bold">{{ stats.total_services }}</p>
+                <p class="text-xs text-gray-500">Services</p>
+            </div>
+            <div class="bg-gray-50 rounded-lg p-3 text-center">
+                <p class="text-xl font-bold">{{ stats.total_bookings }}</p>
+                <p class="text-xs text-gray-500">Réservations</p>
+            </div>
+            <div class="bg-gray-50 rounded-lg p-3 text-center">
+                <p class="text-xl font-bold">{{ stats.response_rate }}%</p>
+                <p class="text-xs text-gray-500">Taux de réponse</p>
+            </div>
+            <div class="bg-gray-50 rounded-lg p-3 text-center">
+                <p class="text-xl font-bold">{{ stats.member_since }}</p>
+                <p class="text-xs text-gray-500">Membre depuis</p>
+            </div>
+        </div>
+        
+        {% if worker.bio %}
+        <div class="mt-8">
+            <h3 class="font-bold text-lg mb-2">À propos</h3>
+            <p class="text-gray-700 whitespace-pre-line">{{ worker.bio }}</p>
+        </div>
+        {% endif %}
+    </div>
+    
+    <!-- Services proposés -->
+    <div class="bg-white rounded-xl shadow-sm p-6 mb-8">
+        <div class="flex justify-between items-center mb-6">
+            <h2 class="text-xl font-bold">Services proposés ({{ stats.total_services }})</h2>
+            <a href="{% url 'service_search' %}?worker={{ worker.id }}" class="text-employer hover:underline">
+                Voir tous
+            </a>
+        </div>
+        
+        {% if services %}
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {% for service in services %}
+            <div class="border rounded-lg overflow-hidden hover:shadow-md transition">
+                <a href="{% url 'service_detail' service.id %}">
+                    {% if service.images.first %}
+                    <img src="{{ service.images.first.image.url }}" 
+                         alt="{{ service.title }}" 
+                         class="w-full h-48 object-cover">
+                    {% else %}
+                    <div class="bg-gray-200 border-2 border-dashed w-full h-48 flex items-center justify-center">
+                        <i class="fas fa-image text-3xl text-gray-400"></i>
+                    </div>
+                    {% endif %}
+                </a>
+                <div class="p-4">
+                    <a href="{% url 'service_detail' service.id %}" class="group">
+                        <h3 class="font-bold text-lg group-hover:text-employer transition">{{ service.title }}</h3>
+                    </a>
+                    <div class="mt-2 flex justify-between items-center">
+                        <span class="text-employer font-bold">
+                            {% if service.price %}
+                            {{ service.price|intcomma }} CFA
+                            {% if service.price_type == 'hourly' %}/h{% endif %}
+                            {% else %}
+                            Sur devis
+                            {% endif %}
+                        </span>
+                        <span class="bg-employer/10 text-employer text-xs px-2 py-1 rounded">
+                            {{ service.get_price_type_display }}
+                        </span>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="text-center py-10">
+            <i class="fas fa-tools text-4xl text-gray-300 mb-4"></i>
+            <p class="text-gray-500">Aucun service proposé pour le moment</p>
+        </div>
+        {% endif %}
+    </div>
+    
+    <!-- Avis -->
+    <div class="bg-white rounded-xl shadow-sm p-6">
+        <div class="flex justify-between items-center mb-6">
+            <h2 class="text-xl font-bold">Avis ({{ stats.review_count }})</h2>
+            <div class="flex items-center">
+                <span class="text-2xl font-bold mr-2">{{ stats.avg_rating|floatformat:1 }}</span>
+                <div class="flex flex-col">
+                    <div class="flex text-yellow-400">
+                        {% for i in "12345" %}
+                        <i class="fas fa-star {% if forloop.counter <= stats.avg_rating %}text-yellow-400{% else %}text-gray-300{% endif %} text-sm"></i>
+                        {% endfor %}
+                    </div>
+                    <span class="text-xs text-gray-500">Note moyenne</span>
+                </div>
+            </div>
+        </div>
+        
+        {% if stats.review_count > 0 %}
+        <div class="space-y-6">
+            {% for review in reviews|slice:":5" %}
+            <div class="border-b pb-6 last:border-0 last:pb-0">
+                <div class="flex justify-between flex-wrap gap-2">
+                    <div class="flex items-center">
+                        <div class="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center overflow-hidden shrink-0">
+                            {% if review.booking.client.profile_picture %}
+                            <img src="{{ review.booking.client.profile_picture.url }}" 
+                                 alt="{{ review.booking.client.get_full_name }}" 
+                                 class="w-full h-full object-cover">
+                            {% else %}
+                            <i class="fas fa-user text-gray-400"></i>
+                            {% endif %}
+                        </div>
+                        <div class="ml-3">
+                            <p class="font-medium">{{ review.booking.client.get_full_name }}</p>
+                            <p class="text-xs text-gray-500">{{ review.created_at|date:"d M Y" }}</p>
+                        </div>
+                    </div>
+                    <div class="flex text-yellow-400 items-start">
+                        {% for i in "12345" %}
+                        <i class="fas fa-star {% if forloop.counter <= review.rating %}text-yellow-400{% else %}text-gray-300{% endif %} text-sm"></i>
+                        {% endfor %}
+                    </div>
+                </div>
+                <p class="mt-4 text-gray-700 whitespace-pre-line">{{ review.comment }}</p>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="text-center py-10">
+            <i class="fas fa-comment-alt text-4xl text-gray-300 mb-4"></i>
+            <p class="text-gray-500">Aucun avis pour ce prestataire</p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

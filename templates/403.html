@@ -1,10 +1,330 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="fr">
 <head>
-  <meta charset="UTF-8">
-  <title>Title</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Accès Bloqué | Sécurité</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Poppins', sans-serif;
+            background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
+            color: #ffffff;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        body::before {
+            content: "";
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: 
+                radial-gradient(circle at 10% 20%, rgba(255, 0, 92, 0.1) 0%, transparent 20%),
+                radial-gradient(circle at 90% 70%, rgba(0, 195, 255, 0.1) 0%, transparent 20%),
+                radial-gradient(circle at 50% 50%, rgba(120, 0, 255, 0.1) 0%, transparent 30%);
+            z-index: -1;
+        }
+
+        .container {
+            max-width: 800px;
+            width: 100%;
+            background: rgba(20, 20, 40, 0.8);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 40px;
+            box-shadow: 0 15px 35px rgba(0, 0, 0, 0.5);
+            text-align: center;
+            position: relative;
+            overflow: hidden;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .container::before {
+            content: "";
+            position: absolute;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: conic-gradient(
+                transparent,
+                rgba(168, 239, 255, 0.1),
+                transparent 30%
+            );
+            animation: rotate 6s linear infinite;
+            z-index: -1;
+        }
+
+        @keyframes rotate {
+            100% {
+                transform: rotate(360deg);
+            }
+        }
+
+        .icon-container {
+            position: relative;
+            width: 150px;
+            height: 150px;
+            margin: 0 auto 30px;
+        }
+
+        .circle {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            border-radius: 50%;
+            border: 4px solid #ff005c;
+            animation: pulse 2s infinite;
+        }
+
+        .circle:nth-child(2) {
+            border-color: #00c3ff;
+            animation-delay: -0.5s;
+        }
+
+        .circle:nth-child(3) {
+            border-color: #7800ff;
+            animation-delay: -1s;
+        }
+
+        .icon {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 70px;
+            color: #ff005c;
+            z-index: 10;
+        }
+
+        h1 {
+            font-size: 2.5rem;
+            font-weight: 700;
+            margin-bottom: 20px;
+            background: linear-gradient(90deg, #ff005c, #00c3ff, #7800ff);
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+            position: relative;
+            display: inline-block;
+        }
+
+        h1::after {
+            content: "";
+            position: absolute;
+            bottom: -5px;
+            left: 0;
+            width: 100%;
+            height: 3px;
+            background: linear-gradient(90deg, #ff005c, #00c3ff, #7800ff);
+            border-radius: 3px;
+        }
+
+        .message {
+            font-size: 1.2rem;
+            line-height: 1.8;
+            margin-bottom: 30px;
+            color: #e0e0ff;
+        }
+
+        .contact-btn {
+            display: inline-block;
+            padding: 15px 40px;
+            background: linear-gradient(90deg, #ff005c, #7800ff);
+            color: white;
+            text-decoration: none;
+            font-weight: 600;
+            border-radius: 50px;
+            margin: 20px 0;
+            transition: all 0.3s ease;
+            box-shadow: 0 5px 15px rgba(255, 0, 92, 0.3);
+            border: none;
+            cursor: pointer;
+            font-size: 1.1rem;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .contact-btn::before {
+            content: "";
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
+            transition: 0.5s;
+        }
+
+        .contact-btn:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 25px rgba(255, 0, 92, 0.5);
+        }
+
+        .contact-btn:hover::before {
+            left: 100%;
+        }
+
+        .info-box {
+            background: rgba(0, 0, 0, 0.2);
+            border-left: 4px solid #00c3ff;
+            padding: 20px;
+            margin: 30px 0;
+            text-align: left;
+            border-radius: 0 10px 10px 0;
+        }
+
+        .info-title {
+            font-weight: 600;
+            margin-bottom: 10px;
+            color: #00c3ff;
+            display: flex;
+            align-items: center;
+        }
+
+        .info-title i {
+            margin-right: 10px;
+        }
+
+        .info-content {
+            font-size: 0.95rem;
+            color: #b0b0ff;
+            line-height: 1.6;
+        }
+
+        .footer {
+            margin-top: 30px;
+            color: #a0a0c0;
+            font-size: 0.9rem;
+        }
+
+        @keyframes pulse {
+            0% {
+                transform: scale(0.8);
+                opacity: 0.7;
+            }
+            50% {
+                transform: scale(1);
+                opacity: 0.3;
+            }
+            100% {
+                transform: scale(0.8);
+                opacity: 0.7;
+            }
+        }
+
+        @media (max-width: 600px) {
+            .container {
+                padding: 30px 20px;
+            }
+            
+            h1 {
+                font-size: 2rem;
+            }
+            
+            .message {
+                font-size: 1rem;
+            }
+            
+            .icon-container {
+                width: 120px;
+                height: 120px;
+            }
+            
+            .icon {
+                font-size: 50px;
+            }
+        }
+    </style>
 </head>
 <body>
+    <div class="container">
+        <div class="icon-container">
+            <div class="circle"></div>
+            <div class="circle"></div>
+            <div class="circle"></div>
+            <div class="icon">
+                <i class="fas fa-ban"></i>
+            </div>
+        </div>
+        
+        <h1>Accès Bloqué</h1>
+        
+        <p class="message">
+            Pour des raisons de sécurité, votre accès a été temporairement restreint.<br>
+            Cette mesure protège notre système contre les activités suspectes.
+        </p>
+        
+        <div class="info-box">
+            <div class="info-title">
+                <i class="fas fa-info-circle"></i> Que faire ensuite ?
+            </div>
+            <div class="info-content">
+                Si vous pensez qu'il s'agit d'une erreur, contactez notre équipe de support en cliquant sur le bouton ci-dessous. Veuillez nous fournir les informations suivantes :<br>
+                - Votre adresse IP : <span id="ip-address">Chargement...</span><br>
+                - L'heure de l'incident : <span id="current-time"></span><br>
+                - La page que vous tentiez d'atteindre
+            </div>
+        </div>
+        
+        <a href="mailto:support@example.com" class="contact-btn">
+            <i class="fas fa-envelope"></i> Contacter l'administrateur
+        </a>
+        
+        <div class="footer">
+            <i class="fas fa-shield-alt"></i> Système de sécurité • V 2.4.1
+        </div>
+    </div>
 
+    <script>
+        // Affichage de l'heure actuelle
+        function updateTime() {
+            const now = new Date();
+            const timeString = now.toLocaleTimeString('fr-FR', {
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit'
+            });
+            const dateString = now.toLocaleDateString('fr-FR', {
+                weekday: 'long',
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric'
+            });
+            document.getElementById('current-time').textContent = `${dateString} à ${timeString}`;
+        }
+        
+        // Simulation d'adresse IP (dans une application réelle, cela viendrait du serveur)
+        function getIP() {
+            const ips = ['192.168.1.42', '10.0.0.15', '172.16.254.1'];
+            return ips[Math.floor(Math.random() * ips.length)];
+        }
+        
+        // Initialisation
+        document.addEventListener('DOMContentLoaded', () => {
+            updateTime();
+            document.getElementById('ip-address').textContent = getIP();
+            
+            // Mettre à jour l'heure chaque seconde
+            setInterval(updateTime, 1000);
+        });
+    </script>
 </body>
 </html>

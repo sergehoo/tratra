@@ -10,6 +10,9 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
 
+  <!-- Bootstrap -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-EVSTQN3/azprG1Anm3QDgpJLIm9Nao0Yz1ztcQTwFspd3yD65VohhpuuCOmLASjC" crossorigin="anonymous">
+
   <!-- Tailwind CSS -->
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
@@ -27,24 +30,72 @@
           },
           boxShadow: {
             card: '0 20px 40px -15px rgba(0, 0, 0, 0.1)',
-            glow: '0 0 25px rgba(59, 130, 246, 0.25)'
+            glow: '0 0 25px rgba(59, 130, 246, 0.25)',
+            'btn-glow': '0 0 15px rgba(59, 130, 246, 0.5)'
+          },
+          animation: {
+            'float': 'float 6s ease-in-out infinite',
+            'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+            'fade-in': 'fadeIn 0.5s ease-out forwards',
+            'slide-up': 'slideUp 0.5s ease-out forwards'
+          },
+          keyframes: {
+            float: {
+              '0%, 100%': { transform: 'translateY(0)' },
+              '50%': { transform: 'translateY(-15px)' },
+            },
+            fadeIn: {
+              '0%': { opacity: 0 },
+              '100%': { opacity: 1 },
+            },
+            slideUp: {
+              '0%': { opacity: 0, transform: 'translateY(20px)' },
+              '100%': { opacity: 1, transform: 'translateY(0)' },
+            }
           }
         }
       }
     };
   </script>
 
-  <!-- Font Awesome (si nécessaire) -->
+  <!-- Font Awesome -->
   <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet" />
 
 </head>
-<body class="min-h-screen flex items-center justify-center bg-gradient-to-br from-light to-slate-100 text-slate-700 font-['Inter'] p-4">
+<body class="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 to-slate-100 text-slate-700 font-['Inter'] p-4 overflow-x-hidden">
 
-  <div class="w-full max-w-md bg-white rounded-2xl shadow-card p-8 animate-fade-in">
+  <!-- Background decorative elements -->
+  <div class="fixed inset-0 -z-10 overflow-hidden">
+    <div class="absolute top-20 left-10 w-60 h-60 rounded-full bg-primary/5 blur-3xl animate-float"></div>
+    <div class="absolute bottom-10 right-10 w-80 h-80 rounded-full bg-secondary/5 blur-3xl animate-float animation-delay-2000"></div>
+    <div class="absolute top-1/4 right-1/4 w-40 h-40 rounded-full bg-accent/5 blur-3xl animate-float animation-delay-3000"></div>
+  </div>
+
+  <!-- Floating images showcase -->
+  <div class="fixed inset-0 -z-10 overflow-hidden pointer-events-none">
+    <img src="https://images.unsplash.com/photo-1521791136064-7986c2920216?ixlib=rb-4.0.3&auto=format&fit=crop&w=500&q=80"
+         alt="Service professionnel"
+         class="absolute top-1/4 left-1/10 w-68 h-68 rounded-2xl object-cover shadow-xl border-4 border-white animate-float" />
+
+    <img src="https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?ixlib=rb-4.0.3&auto=format&fit=crop&w=500&q=80"
+         alt="Service professionnel"
+         class="absolute top-1/5 right-1/4 w-40 h-40 rounded-2xl object-cover shadow-xl border-4 border-white animate-float animation-delay-1000" />
+
+    <img src="https://images.unsplash.com/photo-1517245386807-bb43f82c33c4?ixlib=rb-4.0.3&auto=format&fit=crop&w=500&q=80"
+         alt="Service professionnel"
+         class="absolute bottom-1/4 left-2/3 w-45 h-45 rounded-2xl object-cover shadow-xl border-4 border-white animate-float animation-delay-1500" />
+  </div>
+
+  <div class="w-full max-w-md bg-white/90  rounded-3xl shadow-card p-8 animate-slide-up relative overflow-hidden">
+    <!-- Decorative corner elements -->
+    <div class="absolute top-0 right-0 w-24 h-24 bg-gradient-to-br from-primary to-transparent rounded-tr-2xl"></div>
+    <div class="absolute bottom-0 left-0 w-24 h-24 bg-gradient-to-tl from-secondary to-transparent rounded-bl-2xl"></div>
+
     <!-- Logo et titre -->
-    <div class="text-center mb-8">
-      <div class="w-20 h-20 mx-auto rounded-xl bg-gradient-to-br from-worker to-employer flex items-center justify-center text-4xl font-bold text-white shadow-lg">
-        T
+    <div class="text-center mb-8 relative z-10">
+      <div class="w-20 h-20 mx-auto rounded-xl bg-gradient-to-br from-worker to-employer flex items-center justify-center text-4xl font-bold text-white shadow-lg animate-pulse-slow">
+        <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z'/%3E%3C/svg%3E"
+             alt="Logo Tratra" class="w-12 h-12" />
       </div>
       <h1 class="text-2xl font-bold text-dark mt-4">{% block title %}Tratra{% endblock %}</h1>
       <p class="text-slate-500 mt-1">{% block subtitle %}Plateforme de Services{% endblock %}</p>
@@ -52,56 +103,216 @@
 
     <!-- Messages Django -->
     {% if messages %}
-    <div class="space-y-2 mb-6">
+    <div class="space-y-2 mb-6 relative z-10 animate-fade-in">
       {% for message in messages %}
-      <div class="rounded-lg p-3 text-sm
+      <div class="rounded-lg p-3 text-sm font-medium
         {% if message.tags == 'success' %} bg-green-50 text-green-700 border border-green-200
         {% elif message.tags == 'error' %} bg-red-50 text-red-700 border border-red-200
         {% elif message.tags == 'info' %} bg-blue-50 text-blue-700 border border-blue-200
         {% elif message.tags == 'warning' %} bg-yellow-50 text-yellow-700 border border-yellow-200
-        {% endif %}
+        {% endif %} transition-all duration-300
       ">
-        {{ message }}
+        <div class="flex items-start">
+          {% if message.tags == 'success' %}
+            <i class="fas fa-check-circle mr-2 mt-0.5 text-green-600"></i>
+          {% elif message.tags == 'error' %}
+            <i class="fas fa-exclamation-circle mr-2 mt-0.5 text-red-600"></i>
+          {% elif message.tags == 'info' %}
+            <i class="fas fa-info-circle mr-2 mt-0.5 text-blue-600"></i>
+          {% elif message.tags == 'warning' %}
+            <i class="fas fa-exclamation-triangle mr-2 mt-0.5 text-yellow-600"></i>
+          {% endif %}
+          <span>{{ message }}</span>
+        </div>
       </div>
       {% endfor %}
     </div>
     {% endif %}
-{% load allauth %}
+
     <!-- Contenu principal -->
-    <div>{% block content %}{% endblock %}</div>
+    <div class="relative z-10">
+        {% block content %}
+
+    {% endblock %}</div>
 
     <!-- Diviseur Social -->
-    <div class="flex items-center my-6">
-      <div class="flex-grow h-px bg-slate-200"></div>
-      <span class="px-3 text-slate-400 text-xs uppercase">Ou</span>
-      <div class="flex-grow h-px bg-slate-200"></div>
-    </div>
+{#    <div class="flex items-center my-6 relative z-10">#}
+{#      <div class="flex-grow h-px bg-gradient-to-r from-transparent via-slate-300 to-transparent"></div>#}
+{#      <span class="px-3 text-slate-400 text-xs font-medium bg-white">Ou continuer avec</span>#}
+{#      <div class="flex-grow h-px bg-gradient-to-r from-transparent via-slate-300 to-transparent"></div>#}
+{#    </div>#}
 
-    <!-- Boutons sociaux (exemple) -->
-    <div class="space-y-3">
-      <button class="w-full flex items-center justify-center gap-2 border border-slate-200 rounded-lg py-2 hover:bg-slate-50 transition">
-        <i class="fab fa-google text-red-500"></i> Continuer avec Google
-      </button>
-      <button class="w-full flex items-center justify-center gap-2 border border-slate-200 rounded-lg py-2 hover:bg-slate-50 transition">
-        <i class="fab fa-facebook text-blue-600"></i> Continuer avec Facebook
-      </button>
-    </div>
+    <!-- Boutons sociaux -->
+{#    <div class="space-y-3 relative z-10">#}
+{#      <button class="w-full flex items-center justify-center gap-3 bg-white border border-slate-200 rounded-lg py-3 hover:bg-slate-50 transition hover:shadow-sm group">#}
+{#        <i class="fab fa-google text-red-500 group-hover:text-red-600 text-lg transition"></i>#}
+{#        <span class="font-medium">Google</span>#}
+{#      </button>#}
+{#      <button class="w-full flex items-center justify-center gap-3 bg-white border border-slate-200 rounded-lg py-3 hover:bg-slate-50 transition hover:shadow-sm group">#}
+{#        <i class="fab fa-facebook text-blue-600 group-hover:text-blue-700 text-lg transition"></i>#}
+{#        <span class="font-medium">Facebook</span>#}
+{#      </button>#}
+{#      <button class="w-full flex items-center justify-center gap-3 bg-white border border-slate-200 rounded-lg py-3 hover:bg-slate-50 transition hover:shadow-sm group">#}
+{#        <i class="fab fa-linkedin text-blue-500 group-hover:text-blue-600 text-lg transition"></i>#}
+{#        <span class="font-medium">LinkedIn</span>#}
+{#      </button>#}
+{#    </div>#}
 
     <!-- Lien pied -->
-    <div class="text-center text-slate-500 text-xs mt-8">
+    <div class="text-center text-slate-500 text-xs mt-8 relative z-10">
       © {% now "Y" %} Tratra. Tous droits réservés.
+      <div class="mt-1 flex justify-center space-x-4 text-[0.7rem]">
+        <a href="#" class="hover:text-primary transition">Conditions</a>
+        <a href="#" class="hover:text-primary transition">Confidentialité</a>
+        <a href="#" class="hover:text-primary transition">Support</a>
+      </div>
     </div>
   </div>
 
-  <!-- Animation fade-in -->
+  <!-- Floating call to action -->
+  <div class="fixed bottom-6 right-6 bg-gradient-to-br from-primary to-employer text-white p-3 rounded-full shadow-xl cursor-pointer animate-pulse-slow hover:shadow-btn-glow transition">
+    <i class="fas fa-question-circle text-xl"></i>
+  </div>
+
   <style>
-    @keyframes fade-in {
-      from { opacity: 0; transform: translateY(20px); }
-      to { opacity: 1; transform: translateY(0); }
+    /* Custom animations */
+    .animate-slide-up {
+      animation: slideUp 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+      opacity: 0;
     }
-    .animate-fade-in { animation: fade-in 0.5s ease-out forwards; }
-    
+
+    .animation-delay-1000 { animation-delay: 1s; }
+    .animation-delay-1500 { animation-delay: 1.5s; }
+    .animation-delay-2000 { animation-delay: 2s; }
+    .animation-delay-3000 { animation-delay: 3s; }
+
+    /* Style pour les indications de mot de passe */
+    ul.helptext {
+      @apply text-xs text-slate-500 italic list-disc pl-5 mb-2;
+    }
+
+    /* Floating animation for decorative images */
+    @keyframes float {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-15px); }
+    }
+
+    @keyframes slideUp {
+      0% { opacity: 0; transform: translateY(30px); }
+      100% { opacity: 1; transform: translateY(0); }
+    }
+
+    /* Form elements styling */
+    input:focus, textarea:focus {
+      box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.25);
+    }
+
+    /* Social buttons hover effect */
+    .group:hover i {
+      transform: scale(1.1);
+    }
   </style>
+
+  <script>
+    document.addEventListener('DOMContentLoaded', function () {
+      // Apply styles to form elements
+      document.querySelectorAll('input').forEach(input => {
+        input.classList.add(
+          'w-full', 'px-4', 'py-3',
+          'border', 'border-slate-300',
+          'rounded-lg',
+          'text-sm', 'text-slate-700',
+          'placeholder-slate-400',
+          'focus:outline-none', 'focus:ring-2',
+          'focus:ring-primary', 'focus:border-transparent',
+          'transition', 'shadow-sm'
+        );
+      });
+
+      document.querySelectorAll('textarea').forEach(textarea => {
+        textarea.classList.add(
+          'w-full', 'px-4', 'py-3',
+          'border', 'border-slate-300',
+          'rounded-lg',
+          'text-sm', 'text-slate-700',
+          'placeholder-slate-400',
+          'focus:outline-none', 'focus:ring-2',
+          'focus:ring-primary', 'focus:border-transparent',
+          'transition', 'shadow-sm'
+        );
+      });
+
+      document.querySelectorAll('button[type="submit"]').forEach(button => {
+        button.classList.add(
+          'w-full',
+          'bg-gradient-to-r', 'from-primary', 'to-employer',
+          'hover:from-primary/90', 'hover:to-employer/90',
+          'text-white',
+          'text-sm', 'font-semibold',
+          'py-3',
+          'rounded-lg',
+          'transition', 'transform', 'hover:scale-[1.02]',
+          'shadow-md', 'hover:shadow-lg'
+        );
+      });
+
+      document.querySelectorAll('input[type="checkbox"]').forEach(checkbox => {
+        checkbox.classList.add(
+          'h-4', 'w-4',
+          'text-primary',
+          'border-slate-300',
+          'rounded',
+          'focus:ring-primary',
+          'transition'
+        );
+      });
+
+      // Help text styling
+      document.querySelectorAll('ul').forEach(ul => {
+        ul.classList.add(
+          'text-xs',
+          'text-slate-500',
+          'italic',
+          'list-disc',
+          'pl-5',
+          'mb-3',
+          'mt-1'
+        );
+      });
+
+      document.querySelectorAll('p').forEach(p => {
+        p.classList.add(
+          'text-xs',
+          'text-slate-500',
+          'italic',
+          'mb-3',
+          'mt-1'
+        );
+      });
+
+      // Link styling
+      document.querySelectorAll('a').forEach(a => {
+        a.classList.add(
+          'text-sm',
+          'text-primary',
+          'hover:text-primary/80',
+          'hover:underline',
+          'transition'
+        );
+      });
+
+      // Add subtle animation to form elements when they appear
+      document.querySelectorAll('input, textarea, button, select').forEach(el => {
+        el.style.opacity = '0';
+        el.style.transform = 'translateY(10px)';
+        setTimeout(() => {
+          el.style.transition = 'opacity 0.4s ease-out, transform 0.4s ease-out';
+          el.style.opacity = '1';
+          el.style.transform = 'translateY(0)';
+        }, 200);
+      });
+    });
+  </script>
 
 </body>
 </html>

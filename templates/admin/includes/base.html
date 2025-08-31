@@ -1,29 +1,849 @@
-{% load static %}
-{% load django_browser_reload %}
 <!DOCTYPE html>
-
-
-<html lang="fr">
+<html lang="fr" class="h-full">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}Tratra - Plateforme des ouvriers de maison en Côte d'Ivoire{% endblock %}</title>
-    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>Tratra - Dashboard Administrateur</title>
+
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Montserrat:wght@700;800&display=swap" rel="stylesheet">
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#10b981',
+                        accent: '#f97316',
+                        dark: '#1e293b',
+                        light: '#f8fafc',
+                        premium: '#8b5cf6',
+                        success: '#22c55e',
+                        warning: '#f59e0b',
+                        danger: '#ef4444',
+                        info: '#0ea5e9'
+                    },
+                    boxShadow: {
+                        'card': '0 20px 40px -15px rgba(0, 0, 0, 0.1)',
+                        'glow': '0 0 25px rgba(59, 130, 246, 0.25)'
+                    },
+                    animation: {
+                        'float': 'float 6s ease-in-out infinite',
+                        'pulse-slow': 'pulse 4s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+                        'fade-in': 'fadeIn 0.5s ease-out forwards'
+                    },
+                    keyframes: {
+                        float: {
+                            '0%, 100%': { transform: 'translateY(0)' },
+                            '50%': { transform: 'translateY(-12px)' }
+                        },
+                        fadeIn: {
+                            '0%': { opacity: 0, transform: 'translateY(20px)' },
+                            '100%': { opacity: 1, transform: 'translateY(0)' }
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+
+    <!-- Font Awesome -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swiper@9/swiper-bundle.min.css">
-    <link rel="stylesheet" href="{% static 'css/style.css' %}">
-   {% tailwind_css %}
 
+    <!-- Alpine.js -->
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <style>
+        :root {
+            --sidebar-width: 280px;
+            --sidebar-collapsed: 80px;
+        }
+        
+        body {
+            font-family: 'Inter', sans-serif;
+            background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+            color: #334155;
+        }
+        
+        .dashboard-header {
+            background: linear-gradient(120deg, #3b82f6 0%, #2563eb 100%);
+            color: white;
+            box-shadow: 0 4px 20px rgba(37, 99, 235, 0.3);
+        }
+        
+        .sidebar {
+            background: linear-gradient(180deg, #1e293b 0%, #0f172a 100%);
+            color: #cbd5e1;
+            box-shadow: 5px 0 15px rgba(0, 0, 0, 0.1);
+        }
+        
+        .sidebar-item {
+            transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+        
+        .sidebar-item.active {
+            background: rgba(59, 130, 246, 0.25);
+            border-left: 4px solid #3b82f6;
+            color: white;
+        }
+        
+        .sidebar-item:hover:not(.active) {
+            background: rgba(100, 116, 139, 0.15);
+        }
+        
+        .notification-dot {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background-color: #ef4444;
+            box-shadow: 0 0 8px rgba(239, 68, 68, 0.7);
+        }
+        
+        .stats-card {
+            border-radius: 18px;
+            overflow: hidden;
+            position: relative;
+            transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            border: 1px solid rgba(226, 232, 240, 0.5);
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.05);
+        }
+        
+        .stats-card:hover {
+            transform: translateY(-8px);
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.15);
+        }
+        
+        .stats-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: linear-gradient(90deg, var(--card-color, #3b82f6), #10b981);
+        }
+        
+        .activity-item {
+            transition: all 0.3s ease;
+            border-radius: 14px;
+        }
+        
+        .activity-item:hover {
+            background-color: #f8fafc;
+            transform: translateX(5px);
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.05);
+        }
+        
+        .user-avatar {
+            transition: all 0.3s ease;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+        }
+        
+        .user-avatar:hover {
+            transform: scale(1.1);
+            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.15);
+        }
+        
+        .chart-container {
+            background: linear-gradient(145deg, #ffffff, #f8fafc);
+            border-radius: 18px;
+            box-shadow: 0 8px 25px -5px rgba(0, 0, 0, 0.05);
+        }
+        
+        .gradient-bg {
+            background: linear-gradient(135deg, #e0f2fe 0%, #dbeafe 100%);
+            border-radius: 18px;
+            overflow: hidden;
+        }
+        
+        .service-card {
+            transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            border-radius: 16px;
+            overflow: hidden;
+        }
+        
+        .service-card:hover {
+            transform: translateY(-5px) scale(1.02);
+            box-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.15);
+        }
+        
+        .animate-delay-100 {
+            animation-delay: 0.1s;
+        }
+        
+        .animate-delay-200 {
+            animation-delay: 0.2s;
+        }
+        
+        .animate-delay-300 {
+            animation-delay: 0.3s;
+        }
+        
+        .animate-delay-400 {
+            animation-delay: 0.4s;
+        }
+        
+        .glass-effect {
+            background: rgba(255, 255, 255, 0.08);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+    </style>
 </head>
-<body>
-    {% include 'landing/includes/header.html' %}
-    
-    {% block content %}
-    {% endblock %}
-    
-    {% include 'landing/includes/footer.html' %}
 
-    <script src="https://cdn.jsdelivr.net/npm/swiper@9/swiper-bundle.min.js"></script>
-    <script src="{% static 'js/main.js' %}"></script>
+<body class="min-h-screen flex flex-col"
+      x-data="{ sidebarOpen: window.innerWidth > 1024, mobileMenuOpen: false }">
+<!-- Top Bar -->
+<header class="dashboard-header shadow-xl">
+    <div class="flex items-center justify-between px-8 py-5">
+        <!-- Logo and Toggle -->
+        <div class="flex items-center">
+            <button @click="sidebarOpen = !sidebarOpen" class="mr-6 text-blue-200 hover:text-white transition lg:hidden">
+                <i class="fas fa-bars text-2xl"></i>
+            </button>
+            <a href="#" class="flex items-center">
+                <div class="w-12 h-12 rounded-xl bg-white flex items-center justify-center mr-4 shadow-lg">
+                    <span class="text-2xl font-bold text-primary">T</span>
+                </div>
+                <div>
+                    <span class="text-2xl font-bold text-white tracking-tight">Tratra</span>
+                    <span class="block text-xs bg-blue-200 text-blue-900 px-2 py-1 rounded-full font-bold mt-1">Plateforme Premium</span>
+                </div>
+            </a>
+        </div>
+
+        <!-- Search and User -->
+        <div class="flex items-center space-x-8">
+            <div class="relative glass-effect rounded-xl">
+                <input type="text" placeholder="Rechercher..."
+                       class="pl-14 pr-6 py-3 rounded-xl bg-transparent text-white placeholder-blue-200 focus:outline-none focus:ring-2 focus:ring-blue-300 focus:bg-blue-500/20 transition w-80">
+                <i class="fas fa-search absolute left-5 top-1/2 transform -translate-y-1/2 text-blue-200 text-lg"></i>
+            </div>
+
+            <div class="flex items-center space-x-7">
+                <!-- Notifications -->
+                <div class="relative">
+                    <button class="relative p-3 text-blue-200 hover:text-white transition transform hover:scale-110">
+                        <i class="far fa-bell text-xl"></i>
+                        <span class="notification-dot"></span>
+                    </button>
+                </div>
+                
+                <!-- Messages -->
+                <div class="relative">
+                    <button class="relative p-3 text-blue-200 hover:text-white transition transform hover:scale-110">
+                        <i class="far fa-envelope text-xl"></i>
+                        <span class="notification-dot"></span>
+                    </button>
+                </div>
+
+                <!-- User Dropdown -->
+                <div class="relative" x-data="{ open: false }">
+                    <button @click="open = !open" class="flex items-center space-x-4 focus:outline-none">
+                        <div class="w-12 h-12 rounded-xl bg-gradient-to-r from-blue-400 to-blue-600 flex items-center justify-center text-white font-bold shadow-lg user-avatar">
+                            A
+                        </div>
+                        <div class="text-left hidden md:block">
+                            <p class="text-base font-semibold text-white">Admin Tratra</p>
+                            <p class="text-xs text-blue-200">Super Administrateur</p>
+                        </div>
+                        <i class="fas fa-chevron-down text-blue-200 text-sm transform transition" :class="open ? 'rotate-180' : ''"></i>
+                    </button>
+
+                    <!-- Dropdown Menu -->
+                    <div x-show="open" @click.away="open = false" 
+                         x-transition:enter="transition ease-out duration-300"
+                         x-transition:enter-start="opacity-0 scale-95 translate-y-2"
+                         x-transition:enter-end="opacity-100 scale-100 translate-y-0"
+                         x-transition:leave="transition ease-in duration-200"
+                         x-transition:leave-start="opacity-100 scale-100"
+                         x-transition:leave-end="opacity-0 scale-95"
+                         class="absolute right-0 mt-4 w-64 bg-white rounded-2xl shadow-2xl py-3 z-50 overflow-hidden border border-gray-100">
+                         
+                        <div class="px-5 py-4 border-b border-gray-100">
+                            <div class="flex items-center">
+                                <div class="w-12 h-12 rounded-xl bg-gradient-to-r from-blue-400 to-blue-600 flex items-center justify-center text-white font-bold mr-4">
+                                    A
+                                </div>
+                                <div>
+                                    <p class="font-semibold text-gray-800">Admin Tratra</p>
+                                    <p class="text-sm text-gray-500">admin@tratra.ci</p>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <a href="#" class="flex items-center px-5 py-4 text-gray-700 hover:bg-blue-50 transition">
+                            <i class="fas fa-user-circle text-blue-500 text-xl w-8 mr-3"></i>
+                            <span>Mon profil</span>
+                        </a>
+                        <a href="#" class="flex items-center px-5 py-4 text-gray-700 hover:bg-blue-50 transition">
+                            <i class="fas fa-cog text-blue-500 text-xl w-8 mr-3"></i>
+                            <span>Paramètres</span>
+                        </a>
+                        <a href="#" class="flex items-center px-5 py-4 text-gray-700 hover:bg-blue-50 transition">
+                            <i class="fas fa-shield-alt text-blue-500 text-xl w-8 mr-3"></i>
+                            <span>Sécurité</span>
+                        </a>
+                        <div class="border-t border-gray-200 my-2"></div>
+                        <a href="#" class="flex items-center px-5 py-4 text-red-600 hover:bg-red-50 transition">
+                            <i class="fas fa-sign-out-alt text-xl w-8 mr-3"></i>
+                            <span>Déconnexion</span>
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</header>
+
+<div class="flex flex-1 overflow-hidden">
+    <!-- Sidebar -->
+    <aside 
+      class="sidebar transition-all duration-500 ease-in-out z-10"
+      :class="sidebarOpen ? 'w-[280px]' : 'w-0 lg:w-[80px]'"
+      style="min-height: calc(100vh - 90px);"
+    >
+        <div class="h-full flex flex-col">
+            <!-- Navigation -->
+            <nav class="flex-1 py-6 overflow-y-auto">
+                <ul class="space-y-2 px-3">
+                    <!-- Dashboard -->
+                    <li>
+                        <a href="#" class="sidebar-item active flex items-center px-5 py-4 text-gray-300 hover:text-white transition duration-300" :class="sidebarOpen ? 'justify-start' : 'justify-center'">
+                            <div class="w-10 h-10 rounded-xl bg-blue-500/20 flex items-center justify-center">
+                                <i class="fas fa-tachometer-alt text-blue-400 text-lg"></i>
+                            </div>
+                            <span :class="sidebarOpen ? 'ml-4' : 'hidden lg:hidden'" class="font-medium text-lg">Tableau de bord</span>
+                        </a>
+                    </li>
+                    
+                    <!-- Utilisateurs -->
+                    <li>
+                        <a href="#" class="sidebar-item flex items-center px-5 py-4 text-gray-300 hover:text-white transition duration-300" :class="sidebarOpen ? 'justify-start' : 'justify-center'">
+                            <div class="w-10 h-10 rounded-xl bg-blue-500/20 flex items-center justify-center">
+                                <i class="fas fa-users text-blue-400 text-lg"></i>
+                            </div>
+                            <span :class="sidebarOpen ? 'ml-4' : 'hidden lg:hidden'" class="font-medium text-lg">Utilisateurs</span>
+                            <span class="ml-auto bg-blue-500 text-white text-xs px-2 py-1 rounded-full animate-pulse">42</span>
+                        </a>
+                    </li>
+                    
+                    <!-- Services -->
+                    <li>
+                        <a href="#" class="sidebar-item flex items-center px-5 py-4 text-gray-300 hover:text-white transition duration-300" :class="sidebarOpen ? 'justify-start' : 'justify-center'">
+                            <div class="w-10 h-10 rounded-xl bg-green-500/20 flex items-center justify-center">
+                                <i class="fas fa-concierge-bell text-green-400 text-lg"></i>
+                            </div>
+                            <span :class="sidebarOpen ? 'ml-4' : 'hidden lg:hidden'" class="font-medium text-lg">Services</span>
+                        </a>
+                    </li>
+                    
+                    <!-- Commandes -->
+                    <li>
+                        <a href="#" class="sidebar-item flex items-center px-5 py-4 text-gray-300 hover:text-white transition duration-300" :class="sidebarOpen ? 'justify-start' : 'justify-center'">
+                            <div class="w-10 h-10 rounded-xl bg-amber-500/20 flex items-center justify-center">
+                                <i class="fas fa-shopping-cart text-amber-400 text-lg"></i>
+                            </div>
+                            <span :class="sidebarOpen ? 'ml-4' : 'hidden lg:hidden'" class="font-medium text-lg">Commandes</span>
+                            <span class="ml-auto bg-amber-500 text-white text-xs px-2 py-1 rounded-full">12</span>
+                        </a>
+                    </li>
+                    
+                    <!-- Paiements -->
+                    <li>
+                        <a href="#" class="sidebar-item flex items-center px-5 py-4 text-gray-300 hover:text-white transition duration-300" :class="sidebarOpen ? 'justify-start' : 'justify-center'">
+                            <div class="w-10 h-10 rounded-xl bg-emerald-500/20 flex items-center justify-center">
+                                <i class="fas fa-credit-card text-emerald-400 text-lg"></i>
+                            </div>
+                            <span :class="sidebarOpen ? 'ml-4' : 'hidden lg:hidden'" class="font-medium text-lg">Paiements</span>
+                        </a>
+                    </li>
+                    
+                    <!-- Avis -->
+                    <li>
+                        <a href="#" class="sidebar-item flex items-center px-5 py-4 text-gray-300 hover:text-white transition duration-300" :class="sidebarOpen ? 'justify-start' : 'justify-center'">
+                            <div class="w-10 h-10 rounded-xl bg-yellow-500/20 flex items-center justify-center">
+                                <i class="fas fa-star text-yellow-400 text-lg"></i>
+                            </div>
+                            <span :class="sidebarOpen ? 'ml-4' : 'hidden lg:hidden'" class="font-medium text-lg">Avis</span>
+                            <span class="ml-auto bg-yellow-500 text-white text-xs px-2 py-1 rounded-full">24</span>
+                        </a>
+                    </li>
+                    
+                    <!-- Statistiques -->
+                    <li>
+                        <a href="#" class="sidebar-item flex items-center px-5 py-4 text-gray-300 hover:text-white transition duration-300" :class="sidebarOpen ? 'justify-start' : 'justify-center'">
+                            <div class="w-10 h-10 rounded-xl bg-purple-500/20 flex items-center justify-center">
+                                <i class="fas fa-chart-line text-purple-400 text-lg"></i>
+                            </div>
+                            <span :class="sidebarOpen ? 'ml-4' : 'hidden lg:hidden'" class="font-medium text-lg">Statistiques</span>
+                        </a>
+                    </li>
+                    
+                    <!-- Support -->
+                    <li>
+                        <a href="#" class="sidebar-item flex items-center px-5 py-4 text-gray-300 hover:text-white transition duration-300" :class="sidebarOpen ? 'justify-start' : 'justify-center'">
+                            <div class="w-10 h-10 rounded-xl bg-red-500/20 flex items-center justify-center">
+                                <i class="fas fa-headset text-red-400 text-lg"></i>
+                            </div>
+                            <span :class="sidebarOpen ? 'ml-4' : 'hidden lg:hidden'" class="font-medium text-lg">Support</span>
+                            <span class="ml-auto bg-red-500 text-white text-xs px-2 py-1 rounded-full">3</span>
+                        </a>
+                    </li>
+                </ul>
+            </nav>
+
+            <!-- Sidebar Footer -->
+            <div class="p-5 border-t border-gray-700/50">
+                <div :class="sidebarOpen ? 'flex items-center' : 'flex justify-center'">
+                    <div class="w-12 h-12 rounded-xl bg-gray-700 flex items-center justify-center">
+                        <i class="fas fa-cog text-gray-300 text-lg"></i>
+                    </div>
+                    <div :class="sidebarOpen ? 'ml-4' : 'hidden'">
+                        <p class="text-base font-medium text-gray-300">Paramètres</p>
+                        <a href="#" class="text-sm text-blue-400 hover:underline flex items-center mt-1">
+                            <span>Gérer les préférences</span>
+                            <i class="fas fa-arrow-right ml-2 text-xs"></i>
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="flex-1 overflow-y-auto p-8">
+        <!-- Welcome Banner -->
+        <div class="gradient-bg p-8 mb-8 relative overflow-hidden rounded-2xl">
+            <div class="absolute top-0 right-0 w-1/3 h-full opacity-20">
+                <div class="absolute top-10 right-10 w-48 h-48 rounded-full bg-blue-500 blur-[100px]"></div>
+                <div class="absolute bottom-10 right-20 w-32 h-32 rounded-full bg-blue-400 blur-[80px]"></div>
+            </div>
+            
+            <div class="relative z-10 flex flex-col lg:flex-row lg:items-center">
+                <div class="lg:w-2/3">
+                    <h1 class="text-4xl font-bold text-gray-800 mb-3">Bonjour, Admin Tratra 👋</h1>
+                    <p class="text-xl text-gray-600 max-w-2xl mb-6">
+                        Voici votre tableau de bord avec les dernières statistiques et activités. 
+                        Vous avez <span class="font-semibold text-blue-600">12 tâches</span> à effectuer aujourd'hui.
+                    </p>
+                    <div class="flex gap-4">
+                        <button class="px-6 py-3.5 bg-primary hover:bg-blue-700 text-white rounded-xl font-semibold flex items-center transition transform hover:scale-[1.02] shadow-md">
+                            <i class="fas fa-plus mr-3"></i> Créer un rapport
+                        </button>
+                        <button class="px-6 py-3.5 bg-white hover:bg-gray-50 text-gray-800 rounded-xl font-semibold flex items-center transition transform hover:scale-[1.02] shadow-md">
+                            <i class="fas fa-download mr-3"></i> Exporter les données
+                        </button>
+                    </div>
+                </div>
+                <div class="mt-8 lg:mt-0 lg:w-1/3 flex justify-center">
+                    <img src="https://cdn-icons-png.flaticon.com/512/1320/1320900.png" alt="Dashboard Illustration" class="w-72 floating">
+                </div>
+            </div>
+        </div>
+
+        <!-- Stats Cards -->
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+            <!-- Users Card -->
+            <div class="stats-card bg-white animate-fade-in" style="--card-color: #3b82f6;">
+                <div class="p-6">
+                    <div class="flex items-center">
+                        <div class="w-14 h-14 rounded-2xl bg-blue-100 flex items-center justify-center">
+                            <i class="fas fa-users text-blue-600 text-2xl"></i>
+                        </div>
+                        <div class="ml-5">
+                            <p class="text-sm text-gray-500">Utilisateurs</p>
+                            <h3 class="text-3xl font-bold text-gray-800 mt-1">2,842</h3>
+                        </div>
+                    </div>
+                    <div class="mt-6 flex items-center">
+                        <div class="px-3 py-1.5 bg-green-100 text-green-800 rounded-full text-sm font-medium flex items-center">
+                            <i class="fas fa-arrow-up mr-1.5 text-xs"></i> 12.5%
+                        </div>
+                        <span class="ml-3 text-sm text-gray-500">depuis le mois dernier</span>
+                    </div>
+                </div>
+                <div class="px-6 py-4 bg-gray-50 text-sm text-gray-500 border-t border-gray-100 flex items-center">
+                    <i class="far fa-clock mr-2"></i> Mise à jour il y a 2 min
+                </div>
+            </div>
+
+            <!-- Services Card -->
+            <div class="stats-card bg-white animate-fade-in animate-delay-100" style="--card-color: #10b981;">
+                <div class="p-6">
+                    <div class="flex items-center">
+                        <div class="w-14 h-14 rounded-2xl bg-green-100 flex items-center justify-center">
+                            <i class="fas fa-concierge-bell text-green-600 text-2xl"></i>
+                        </div>
+                        <div class="ml-5">
+                            <p class="text-sm text-gray-500">Services</p>
+                            <h3 class="text-3xl font-bold text-gray-800 mt-1">156</h3>
+                        </div>
+                    </div>
+                    <div class="mt-6 flex items-center">
+                        <div class="px-3 py-1.5 bg-green-100 text-green-800 rounded-full text-sm font-medium flex items-center">
+                            <i class="fas fa-plus mr-1.5 text-xs"></i> 3 nouveaux
+                        </div>
+                        <span class="ml-3 text-sm text-gray-500">cette semaine</span>
+                    </div>
+                </div>
+                <div class="px-6 py-4 bg-gray-50 text-sm text-gray-500 border-t border-gray-100 flex items-center">
+                    <i class="far fa-clock mr-2"></i> Mise à jour aujourd'hui
+                </div>
+            </div>
+
+            <!-- Orders Card -->
+            <div class="stats-card bg-white animate-fade-in animate-delay-200" style="--card-color: #f59e0b;">
+                <div class="p-6">
+                    <div class="flex items-center">
+                        <div class="w-14 h-14 rounded-2xl bg-amber-100 flex items-center justify-center">
+                            <i class="fas fa-shopping-cart text-amber-600 text-2xl"></i>
+                        </div>
+                        <div class="ml-5">
+                            <p class="text-sm text-gray-500">Commandes</p>
+                            <h3 class="text-3xl font-bold text-gray-800 mt-1">342</h3>
+                        </div>
+                    </div>
+                    <div class="mt-6 flex items-center">
+                        <div class="px-3 py-1.5 bg-red-100 text-red-800 rounded-full text-sm font-medium flex items-center">
+                            <i class="fas fa-arrow-down mr-1.5 text-xs"></i> 2.1%
+                        </div>
+                        <span class="ml-3 text-sm text-gray-500">depuis le mois dernier</span>
+                    </div>
+                </div>
+                <div class="px-6 py-4 bg-gray-50 text-sm text-gray-500 border-t border-gray-100 flex items-center">
+                    <i class="far fa-clock mr-2"></i> Mise à jour il y a 5 min
+                </div>
+            </div>
+
+            <!-- Revenue Card -->
+            <div class="stats-card bg-white animate-fade-in animate-delay-300" style="--card-color: #8b5cf6;">
+                <div class="p-6">
+                    <div class="flex items-center">
+                        <div class="w-14 h-14 rounded-2xl bg-purple-100 flex items-center justify-center">
+                            <i class="fas fa-dollar-sign text-purple-600 text-2xl"></i>
+                        </div>
+                        <div class="ml-5">
+                            <p class="text-sm text-gray-500">Revenus</p>
+                            <h3 class="text-3xl font-bold text-gray-800 mt-1">12.4M</h3>
+                        </div>
+                    </div>
+                    <div class="mt-6 flex items-center">
+                        <div class="px-3 py-1.5 bg-green-100 text-green-800 rounded-full text-sm font-medium flex items-center">
+                            <i class="fas fa-arrow-up mr-1.5 text-xs"></i> 8.2%
+                        </div>
+                        <span class="ml-3 text-sm text-gray-500">depuis le mois dernier</span>
+                    </div>
+                </div>
+                <div class="px-6 py-4 bg-gray-50 text-sm text-gray-500 border-t border-gray-100 flex items-center">
+                    <i class="far fa-clock mr-2"></i> Mise à jour à l'instant
+                </div>
+            </div>
+        </div>
+
+        <!-- Charts and Activity -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-8">
+            <!-- Revenue Chart -->
+            <div class="lg:col-span-2 bg-white rounded-2xl shadow-sm p-7">
+                <div class="flex justify-between items-start mb-7">
+                    <div>
+                        <h2 class="text-2xl font-bold text-gray-800 mb-1">Performance des revenus</h2>
+                        <p class="text-gray-500">Évolution des revenus au cours des 6 derniers mois</p>
+                    </div>
+                    <div class="flex gap-3">
+                        <button class="px-5 py-2.5 text-sm font-medium text-gray-600 bg-gray-100 rounded-xl hover:bg-gray-200 transition flex items-center">
+                            <i class="fas fa-download mr-2"></i> Exporter
+                        </button>
+                        <button class="px-5 py-2.5 text-sm font-medium text-white bg-primary rounded-xl hover:bg-blue-700 transition flex items-center">
+                            <i class="fas fa-sync mr-2"></i> Actualiser
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="h-80">
+                    <canvas id="revenueChart"></canvas>
+                </div>
+            </div>
+            
+            <!-- Activity Feed -->
+            <div class="bg-white rounded-2xl shadow-sm p-7">
+                <div class="flex justify-between items-center mb-7">
+                    <h2 class="text-2xl font-bold text-gray-800">Activité récente</h2>
+                    <a href="#" class="text-base text-primary font-semibold flex items-center">
+                        Voir tout <i class="fas fa-arrow-right ml-2 text-xs"></i>
+                    </a>
+                </div>
+                
+                <div class="space-y-5">
+                    {% for i in "12345"|make_list %}
+                        <div class="activity-item flex items-start p-5 bg-gray-50/50">
+                            <div class="flex-shrink-0 mr-5">
+                                <div class="w-14 h-14 rounded-2xl bg-blue-100 flex items-center justify-center overflow-hidden">
+                                    <img src="https://randomuser.me/api/portraits/men/{{ forloop.counter }}.jpg" alt="User" class="w-full h-full object-cover">
+                                </div>
+                            </div>
+                            <div class="flex-1 min-w-0">
+                                <p class="text-base font-semibold text-gray-900">Nouvel utilisateur inscrit</p>
+                                <p class="text-sm text-gray-500 mt-1">Jean Dupont vient de s'inscrire en tant que prestataire</p>
+                                <div class="mt-3 flex items-center text-sm text-gray-400">
+                                    <i class="far fa-clock mr-2"></i> Il y a 15 minutes
+                                </div>
+                            </div>
+                            <div class="ml-4">
+                                <span class="px-3 py-1.5 bg-blue-100 text-blue-800 text-xs font-medium rounded-full">Nouveau</span>
+                            </div>
+                        </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+
+        <!-- Top Services -->
+        <div class="bg-white rounded-2xl shadow-sm p-7 mb-8">
+            <div class="flex justify-between items-center mb-7">
+                <div>
+                    <h2 class="text-2xl font-bold text-gray-800 mb-1">Services populaires</h2>
+                    <p class="text-gray-500">Les services les plus demandés cette semaine</p>
+                </div>
+                <div>
+                    <button class="px-6 py-3 text-base font-medium text-white bg-primary rounded-xl hover:bg-blue-700 transition flex items-center shadow-md">
+                        <i class="fas fa-plus mr-3"></i> Ajouter un service
+                    </button>
+                </div>
+            </div>
+            
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-7">
+                {% for i in "1234"|make_list %}
+                    <div class="service-card border border-gray-200">
+                        <div class="h-48 relative">
+                            <img src="https://source.unsplash.com/random/600x400/?service,cleaning,{{ forloop.counter }}" 
+                                 alt="Service" 
+                                 class="w-full h-full object-cover">
+                            <div class="absolute top-4 right-4 bg-white/90 backdrop-blur-sm px-3 py-1.5 rounded-xl text-sm font-semibold flex items-center">
+                                <i class="fas fa-star text-yellow-500 mr-1.5"></i> 4.8
+                            </div>
+                            <div class="absolute bottom-4 left-4 bg-white/90 backdrop-blur-sm px-3 py-1.5 rounded-xl text-sm font-semibold">
+                                <span class="text-primary font-bold">35.000</span> FCFA
+                            </div>
+                        </div>
+                        <div class="p-5">
+                            <h3 class="font-bold text-gray-800 text-lg mb-2">Service de nettoyage premium</h3>
+                            <div class="flex items-center justify-between">
+                                <span class="text-sm text-gray-500 flex items-center">
+                                    <i class="fas fa-user-check mr-2 text-green-500"></i> 42 clients
+                                </span>
+                                <span class="text-xs bg-green-100 text-green-800 px-2.5 py-1.5 rounded-full">
+                                    +12%
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                {% endfor %}
+            </div>
+        </div>
+
+        <!-- Recent Transactions -->
+        <div class="bg-white rounded-2xl shadow-sm p-7">
+            <div class="flex justify-between items-center mb-7">
+                <div>
+                    <h2 class="text-2xl font-bold text-gray-800 mb-1">Transactions récentes</h2>
+                    <p class="text-gray-500">Les dernières transactions financières</p>
+                </div>
+                <div>
+                    <button class="px-5 py-2.5 text-sm font-medium text-gray-600 bg-gray-100 rounded-xl hover:bg-gray-200 transition flex items-center">
+                        <i class="fas fa-file-export mr-2"></i> Exporter
+                    </button>
+                </div>
+            </div>
+            
+            <div class="overflow-x-auto">
+                <table class="w-full">
+                    <thead class="bg-gray-50 border-b border-gray-200">
+                        <tr>
+                            <th class="py-4 px-6 text-left text-gray-500 font-semibold">Transaction</th>
+                            <th class="py-4 px-6 text-left text-gray-500 font-semibold">Client</th>
+                            <th class="py-4 px-6 text-left text-gray-500 font-semibold">Montant</th>
+                            <th class="py-4 px-6 text-left text-gray-500 font-semibold">Date</th>
+                            <th class="py-4 px-6 text-left text-gray-500 font-semibold">Statut</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-100">
+                        <tr class="hover:bg-gray-50 transition">
+                            <td class="py-5 px-6">#TRX-7842</td>
+                            <td class="py-5 px-6">
+                                <div class="flex items-center">
+                                    <div class="w-10 h-10 rounded-xl bg-gray-200 mr-4 overflow-hidden">
+                                        <img src="https://randomuser.me/api/portraits/women/32.jpg" alt="User" class="w-full h-full object-cover">
+                                    </div>
+                                    <span>Fatoumata Diallo</span>
+                                </div>
+                            </td>
+                            <td class="py-5 px-6 font-semibold text-gray-800">35.000 FCFA</td>
+                            <td class="py-5 px-6 text-gray-500">12 Juin 2023</td>
+                            <td class="py-5 px-6">
+                                <span class="px-3 py-1.5 bg-green-100 text-green-800 rounded-xl text-sm font-medium">Complétée</span>
+                            </td>
+                        </tr>
+                        <tr class="hover:bg-gray-50 transition">
+                            <td class="py-5 px-6">#TRX-7841</td>
+                            <td class="py-5 px-6">
+                                <div class="flex items-center">
+                                    <div class="w-10 h-10 rounded-xl bg-gray-200 mr-4 overflow-hidden">
+                                        <img src="https://randomuser.me/api/portraits/men/44.jpg" alt="User" class="w-full h-full object-cover">
+                                    </div>
+                                    <span>Jean Kouassi</span>
+                                </div>
+                            </td>
+                            <td class="py-5 px-6 font-semibold text-gray-800">60.000 FCFA</td>
+                            <td class="py-5 px-6 text-gray-500">11 Juin 2023</td>
+                            <td class="py-5 px-6">
+                                <span class="px-3 py-1.5 bg-green-100 text-green-800 rounded-xl text-sm font-medium">Complétée</span>
+                            </td>
+                        </tr>
+                        <tr class="hover:bg-gray-50 transition">
+                            <td class="py-5 px-6">#TRX-7840</td>
+                            <td class="py-5 px-6">
+                                <div class="flex items-center">
+                                    <div class="w-10 h-10 rounded-xl bg-gray-200 mr-4 overflow-hidden">
+                                        <img src="https://randomuser.me/api/portraits/women/68.jpg" alt="User" class="w-full h-full object-cover">
+                                    </div>
+                                    <span>Aïcha Traoré</span>
+                                </div>
+                            </td>
+                            <td class="py-5 px-6 font-semibold text-gray-800">25.000 FCFA</td>
+                            <td class="py-5 px-6 text-gray-500">10 Juin 2023</td>
+                            <td class="py-5 px-6">
+                                <span class="px-3 py-1.5 bg-yellow-100 text-yellow-800 rounded-xl text-sm font-medium">En attente</span>
+                            </td>
+                        </tr>
+                        <tr class="hover:bg-gray-50 transition">
+                            <td class="py-5 px-6">#TRX-7839</td>
+                            <td class="py-5 px-6">
+                                <div class="flex items-center">
+                                    <div class="w-10 h-10 rounded-xl bg-gray-200 mr-4 overflow-hidden">
+                                        <img src="https://randomuser.me/api/portraits/men/22.jpg" alt="User" class="w-full h-full object-cover">
+                                    </div>
+                                    <span>Mohamed Diarra</span>
+                                </div>
+                            </td>
+                            <td class="py-5 px-6 font-semibold text-gray-800">40.000 FCFA</td>
+                            <td class="py-5 px-6 text-gray-500">9 Juin 2023</td>
+                            <td class="py-5 px-6">
+                                <span class="px-3 py-1.5 bg-green-100 text-green-800 rounded-xl text-sm font-medium">Complétée</span>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </main>
+</div>
+
+<script>
+    // Initialize Revenue Chart
+    document.addEventListener('DOMContentLoaded', function () {
+        const ctx = document.getElementById('revenueChart').getContext('2d');
+        const gradient = ctx.createLinearGradient(0, 0, 0, 350);
+        gradient.addColorStop(0, 'rgba(59, 130, 246, 0.4)');
+        gradient.addColorStop(1, 'rgba(59, 130, 246, 0.05)');
+        
+        const chart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Juin', 'Juil', 'Août'],
+                datasets: [{
+                    label: 'Revenus (millions FCFA)',
+                    data: [8.2, 9.1, 10.5, 11.2, 11.8, 12.4, 13.1, 14.2],
+                    backgroundColor: gradient,
+                    borderColor: '#3b82f6',
+                    borderWidth: 4,
+                    pointBackgroundColor: '#fff',
+                    pointBorderColor: '#3b82f6',
+                    pointBorderWidth: 4,
+                    pointRadius: 6,
+                    pointHoverRadius: 9,
+                    fill: true,
+                    tension: 0.3
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        display: false
+                    },
+                    tooltip: {
+                        backgroundColor: '#1e293b',
+                        padding: 15,
+                        titleFont: {
+                            size: 16,
+                            family: 'Inter'
+                        },
+                        bodyFont: {
+                            size: 14,
+                            family: 'Inter'
+                        },
+                        callbacks: {
+                            label: function(context) {
+                                return ` ${context.parsed.y.toLocaleString()}M FCFA`;
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        grid: {
+                            color: 'rgba(0, 0, 0, 0.05)'
+                        },
+                        ticks: {
+                            callback: function(value) {
+                                return value + 'M';
+                            },
+                            font: {
+                                size: 12,
+                                family: 'Inter'
+                            }
+                        }
+                    },
+                    x: {
+                        grid: {
+                            display: false
+                        },
+                        ticks: {
+                            font: {
+                                size: 12,
+                                family: 'Inter'
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    });
+
+    // Add floating animation to all elements with class "floating"
+    document.querySelectorAll('.floating').forEach(el => {
+        el.style.animation = 'float 6s ease-in-out infinite';
+    });
+
+    // Add fade-in animation to all stats cards
+    document.querySelectorAll('.animate-fade-in').forEach(el => {
+        el.style.animation = 'fadeIn 0.5s ease-out forwards';
+    });
+</script>
 </body>
 </html>

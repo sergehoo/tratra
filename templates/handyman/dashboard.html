@@ -1,0 +1,842 @@
+{% extends "handyman/base_handyman.html" %}
+
+{% block content %}
+
+    <div class="flex flex-1 overflow-hidden">
+
+        <main class="flex-1 overflow-y-auto p-8">
+
+            <!-- Welcome Banner -->
+            <div class="bg-gradient-to-r from-green-100 to-emerald-50 p-8 mb-8 rounded-2xl relative overflow-hidden">
+                <div class="absolute inset-0 opacity-10">
+                    <div class="absolute top-0 right-0 w-64 h-64 bg-green-300 rounded-full filter blur-3xl opacity-30 animate-pulse"></div>
+                    <div class="absolute bottom-0 left-0 w-48 h-48 bg-green-400 rounded-full filter blur-3xl opacity-30 animate-pulse"></div>
+                </div>
+                <div class="relative flex flex-col lg:flex-row lg:items-center">
+                    <div class="lg:w-2/3">
+                        <h1 class="text-3xl font-bold text-gray-800 mb-3">
+                            Bonjour, {{ request.user.get_full_name }} 👨🏿‍🍳
+                        </h1>
+                        <p class="text-xl text-gray-600 max-w-2xl mb-6">
+                            {% if today_missions_count > 0 %}
+                                Vous avez
+                                <span class="font-semibold text-primary">{{ today_missions_count }} mission{{ today_missions_count|pluralize }}</span>
+                                prévues aujourd'hui.
+                            {% else %}
+                                Vous n'avez pas de mission prévue aujourd'hui.
+                            {% endif %}
+
+                            {% if next_mission %}
+                                {% with next_in=next_mission.booking_date|timeuntil %}
+                                    Votre prochain service commence
+                                    <span class="font-semibold text-primary">{{ next_in }}</span>.
+                                {% endwith %}
+                            {% endif %}
+                        </p>
+                        <div class="flex gap-4">
+                            <a href="{% url 'handyman_calendar' %}"
+                               class="px-6 py-3.5 bg-primary hover:bg-green-700 text-white rounded-xl font-semibold flex items-center transition shadow-md transform hover:scale-105">
+                                <i class="fas fa-calendar-plus mr-3"></i> Ajouter disponibilité
+                            </a>
+                            <a href="#handyman_stats"
+                               class="px-6 py-3.5 bg-white hover:bg-gray-50 text-gray-800 rounded-xl font-semibold flex items-center transition shadow-md transform hover:scale-105">
+                                <i class="fas fa-chart-line mr-3"></i> Voir mes statistiques
+                            </a>
+                        </div>
+                    </div>
+                    <div class="mt-8 lg:mt-0 lg:w-1/3 flex justify-center">
+                        {% if request.user.handyman_profile.photo %}
+                            <img src="{{ request.user.handyman_profile.photo.url }}"
+                                 alt="Photo de profil"
+                                 class="w-48 h-48 object-cover rounded-full shadow-lg floating">
+                        {% else %}
+                            <div class="w-48 h-48 rounded-full bg-gradient-to-r from-green-600 to-green-700 flex items-center justify-center text-white font-bold text-6xl shadow-lg floating">
+                                {{ request.user.first_name|first|upper }}{{ request.user.last_name|first|upper }}
+                            </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+
+            <!-- Stats Cards -->
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+                <!-- Missions Card -->
+                <div class="stats-card" style="--gradient-from: #2e8b57; --gradient-to: #3cb371;">
+                    <div class="p-6">
+                        <div class="flex items-center">
+                            <div class="w-14 h-14 rounded-2xl bg-green-100 flex items-center justify-center">
+                                <i class="fas fa-tasks text-primary text-2xl"></i>
+                            </div>
+                            <div class="ml-5">
+                                <p class="text-sm text-gray-500">Missions ce mois</p>
+                                <h3 class="text-3xl font-bold text-gray-800 mt-1">{{ monthly_stats.total_missions }}</h3>
+                            </div>
+                        </div>
+                        <div class="mt-6 flex items-center">
+                            {% if monthly_stats.mission_growth > 0 %}
+                                <div class="px-3 py-1.5 bg-green-100 text-green-800 rounded-full text-sm font-medium flex items-center">
+                                    <i class="fas fa-arrow-up mr-1.5 text-xs"></i> {{ monthly_stats.mission_growth }}%
+                                </div>
+                            {% elif monthly_stats.mission_growth < 0 %}
+                                <div class="px-3 py-1.5 bg-red-100 text-red-800 rounded-full text-sm font-medium flex items-center">
+                                    <i class="fas fa-arrow-down mr-1.5 text-xs"></i> {{ monthly_stats.mission_growth }}%
+                                </div>
+                            {% else %}
+                                <div class="px-3 py-1.5 bg-gray-100 text-gray-800 rounded-full text-sm font-medium flex items-center">
+                                    <i class="fas fa-minus mr-1.5 text-xs"></i> 0%
+                                </div>
+                            {% endif %}
+                            <span class="ml-3 text-sm text-gray-500">vs mois dernier</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Revenus Card -->
+                <div class="stats-card" style="--gradient-from: #10b981; --gradient-to: #059669;">
+                    <div class="p-6">
+                        <div class="flex items-center">
+                            <div class="w-14 h-14 rounded-2xl bg-green-100 flex items-center justify-center">
+                                <i class="fas fa-wallet text-green-600 text-2xl"></i>
+                            </div>
+                            <div class="ml-5">
+                                <p class="text-sm text-gray-500">Revenus mensuels</p>
+                                <h3 class="text-3xl font-bold text-gray-800 mt-1">{{ monthly_stats.revenue|floatformat:"0" }}
+                                    FCFA</h3>
+                            </div>
+                        </div>
+                        <div class="mt-6">
+                            <div 
+  x-data="{
+    bars: {{ monthly_stats.revenue_chart|safe }},
+  }"
+  class="flex items-end space-x-1 h-32 w-full overflow-x-auto"
+>
+  <template x-for="bar in bars" :key="bar.day">
+    <div class="flex flex-col items-center">
+      <div 
+        class="w-4 bg-green-500 rounded-t"
+        :style="{ height: bar.percentage + '%'}"
+        x-tooltip="`${bar.amount} CFA`"
+      ></div>
+      <span class="text-xs mt-1 text-gray-500" x-text="new Date(bar.day).getDate()"></span>
+    </div>
+  </template>
+</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Rating Card -->
+                <div class="stats-card" style="--gradient-from: #f59e0b; --gradient-to: #d97706;">
+                    <div class="p-6">
+                        <div class="flex items-center">
+                            <div class="w-14 h-14 rounded-2xl bg-yellow-100 flex items-center justify-center">
+                                <i class="fas fa-star text-yellow-500 text-2xl"></i>
+                            </div>
+                            <div class="ml-5">
+                                <p class="text-sm text-gray-500">Note moyenne</p>
+                                <h3 class="text-3xl font-bold text-gray-800 mt-1">{{ request.user.handyman_profile.rating|floatformat:1 }}/5</h3>
+                            </div>
+                        </div>
+                        <div class="mt-6">
+                            <div class="rating-stars"
+                                 data-rating="{{ request.user.handyman_profile.rating|floatformat:1 }}">
+                                <div class="rating-fill"></div>
+                            </div>
+                            <span class="ml-2 text-gray-600">({{ request.user.handyman_profile.completed_jobs }} avis)</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Availability Card -->
+                <div class="stats-card" style="--gradient-from: #0ea5e9; --gradient-to: #0284c7;">
+                    <div class="p-6">
+                        <div class="flex items-center">
+                            <div class="w-14 h-14 rounded-2xl bg-blue-100 flex items-center justify-center">
+                                <i class="fas fa-user-clock text-blue-600 text-2xl"></i>
+                            </div>
+                            <div class="ml-5">
+                                <p class="text-sm text-gray-500">Disponibilité</p>
+                                <h3 class="text-3xl font-bold text-gray-800 mt-1">{{ monthly_stats.availability_percentage }}%</h3>
+                            </div>
+                        </div>
+                        <div class="mt-6">
+                            <div class="progress-bar">
+                                <div class="progress-value bg-primary"
+                                     style="--progress-value: {{ monthly_stats.availability_percentage }}%"></div>
+                            </div>
+                            <p class="text-xs text-gray-500 mt-2">{{ monthly_stats.availability_slots }}
+                                créneau{{ monthly_stats.availability_slots|pluralize }}
+                                disponible{{ monthly_stats.availability_slots|pluralize }} ce mois</p>
+                        </div>
+                    </div>
+                </div>
+           <div class="stats-card" style="--gradient-from: #8b5cf6; --gradient-to: #a78bfa;">
+                    <div class="p-6">
+                        <div class="flex items-center">
+                            <div class="w-14 h-14 rounded-2xl bg-purple-100 flex items-center justify-center">
+                                <i class="fas fa-shield-alt text-purple-600 text-2xl"></i>
+                            </div>
+                            <div class="ml-5">
+                                <p class="text-sm text-gray-500">Caution</p>
+                                <h3 class="text-3xl font-bold text-gray-800 mt-1">
+                                    {{ deposit_balance|floatformat:"0" }} FCFA
+                                </h3>
+                            </div>
+                        </div>
+                        <div class="mt-6">
+                            <div class="progress-bar">
+                                <div class="progress-value bg-purple-600"
+                                     style="--progress-value: {{ deposit_percentage }}%"></div>
+                            </div>
+                            <p class="text-xs text-gray-500 mt-2">
+                                {{ deposit_percentage|floatformat:"0" }}% du seuil recommandé
+                                {% if deposit_balance < deposit_threshold %}
+                                    <span class="text-red-500 font-medium">(Recharger)</span>
+                                {% endif %}
+                            </p>
+                        </div>
+                    </div>
+                </div>
+             <!-- Deposit Warning -->
+            {% if deposit_balance < deposit_threshold %}
+            <div class="bg-yellow-50 border-l-4 border-yellow-400 p-4 mb-8 rounded">
+                <div class="flex">
+                    <div class="flex-shrink-0">
+                        <i class="fas fa-exclamation-triangle text-yellow-400 text-xl"></i>
+                    </div>
+                    <div class="ml-3">
+                        <h3 class="text-sm font-medium text-yellow-800">Attention !</h3>
+                        <div class="mt-2 text-sm text-yellow-700">
+                            <p>
+                                Votre caution est en dessous du seuil recommandé ({{ deposit_threshold|floatformat:"0" }} FCFA). 
+                                <a href="#'handyman_deposit'" class="font-medium underline text-yellow-800 hover:text-yellow-900">
+                                    Rechargez votre caution
+                                </a> pour continuer à accepter des missions.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+
+            </div>
+            <!-- Tabs -->
+            <div class="flex border-b border-gray-200 mb-8">
+                <button @click="activeTab = 'upcoming'" :class="{'active text-primary': activeTab === 'upcoming'}"
+                        class="tab-button">Missions à venir
+                </button>
+                <button @click="activeTab = 'requests'" :class="{'active text-primary': activeTab === 'requests'}"
+                        class="tab-button">Demandes récentes
+                </button>
+                <button @click="activeTab = 'history'" :class="{'active text-primary': activeTab === 'history'}"
+                        class="tab-button">Historique
+                </button>
+                <button @click="activeTab = 'availability'"
+                        :class="{'active text-primary': activeTab === 'availability'}" class="tab-button">Disponibilités
+                </button>
+                  <button @click="activeTab = 'deposit'"
+                        :class="{'border-b-2 border-primary text-primary': activeTab === 'deposit'}" 
+                        class="tab-button">Caution
+                </button>
+            </div>
+
+            <!-- Tab Content -->
+            <template x-if="activeTab === 'upcoming'">
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-8">
+                    <!-- Upcoming Missions -->
+                    <div class="lg:col-span-2 bg-white rounded-2xl shadow-sm p-7">
+                        <div class="flex justify-between items-center mb-7">
+                            <h2 class="text-2xl font-bold text-gray-800">Mes prochaines missions</h2>
+                            <a href="{% url 'handyman_calendar' %}"
+                               class="text-base text-primary font-semibold flex items-center">
+                                Voir calendrier <i class="fas fa-arrow-right ml-2 text-xs"></i>
+                            </a>
+                        </div>
+
+                        <div class="space-y-5">
+                            {% for booking in upcoming_bookings %}
+                                <div class="flex items-start p-5 bg-green-50/50 rounded-2xl hover:bg-green-100/30 transition">
+                                    <div class="flex-shrink-0 mr-5">
+                                        <div class="w-14 h-14 rounded-2xl bg-green-100 flex items-center justify-center">
+                                            {% if booking.service.category.icon %}
+                                                <i class="{{ booking.service.category.icon }} text-primary text-2xl"></i>
+                                            {% else %}
+                                                <i class="fas fa-tools text-primary text-2xl"></i>
+                                            {% endif %}
+                                        </div>
+                                    </div>
+                                    <div class="flex-1 min-w-0">
+                                        <p class="text-base font-semibold text-gray-900">
+                                            <a href="{% url 'handy_booking_detail' booking_id=booking.pk %}">{{ booking.service.title }}</a>
+                                        </p>
+                                        <p class="text-sm text-gray-500 mt-1">
+                                            {{ booking.address }}, {{ booking.city }}
+                                        </p>
+                                        <div class="mt-3 flex items-center text-sm text-gray-400">
+                                            <i class="far fa-clock mr-2"></i>
+                                            {{ booking.booking_date|date:"d/m/Y" }},
+                                            {{ booking.booking_date|time }} -
+                                            {% if booking.end_date %}
+                                                {{ booking.end_date|time }}
+                                            {% else %}
+                                                (Durée non spécifiée)
+                                            {% endif %}
+                                        </div>
+                                    </div>
+                                    <div class="ml-4">
+                        <span class="px-3 py-1.5 text-xs font-medium rounded-full
+                            {% if booking.status == 'confirmed' %}bg-green-100 text-green-800
+                            {% elif booking.status == 'pending' %}bg-yellow-100 text-yellow-800
+                            {% elif booking.status == 'in_progress' %}bg-blue-100 text-blue-800
+                            {% else %}bg-gray-100 text-gray-800{% endif %}">
+                            {{ booking.get_status_display }}
+                        </span>
+                                    </div>
+                                </div>
+                            {% empty %}
+                                <div class="text-center py-8">
+                                    <i class="fas fa-calendar-alt text-4xl text-gray-300 mb-4"></i>
+                                    <p class="text-gray-500">Aucune mission à venir</p>
+                                    <p class="text-sm text-gray-400 mt-2">Vos prochaines missions apparaîtront ici</p>
+                                </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+
+                    <!-- Profile and Rating -->
+                    <div class="bg-white rounded-2xl shadow-sm p-7">
+                        <div class="flex flex-col items-center mb-7">
+                            {% if request.user.handyman_profile.photo %}
+                                <img src="{{ request.user.handyman_profile.photo.url }}"
+                                     alt="Photo de profil"
+                                     class="w-24 h-24 rounded-2xl object-cover shadow-lg mb-4 floating">
+                            {% else %}
+                                <div class="w-24 h-24 rounded-2xl bg-gradient-to-r from-green-600 to-green-700 flex items-center justify-center text-white font-bold text-4xl shadow-lg mb-4 floating">
+                                    {{ request.user.first_name|first|upper }}{{ request.user.last_name|first|upper }}
+                                </div>
+                            {% endif %}
+                            <h2 class="text-2xl font-bold text-gray-800">{{ request.user.get_full_name }}</h2>
+                            <p class="text-gray-500">
+                                {% if request.user.handyman_profile.bio %}
+                                    {{ request.user.handyman_profile.bio|truncatechars:50 }}
+                                {% else %}
+                                    Artisan sur Tratra
+                                {% endif %}
+                            </p>
+                            <div class="mt-3 flex items-center">
+                                <div class="flex items-center text-yellow-400">
+                                    {% for i in "12345" %}
+                                        {% if forloop.counter <= request.user.handyman_profile.rating|add:"0" %}
+                                            <i class="fas fa-star"></i>
+                                        {% else %}
+                                            <i class="far fa-star"></i>
+                                        {% endif %}
+                                    {% endfor %}
+                                </div>
+                                <span class="ml-2 text-gray-600">
+                        {{ request.user.handyman_profile.rating|floatformat:1 }}
+                        ({{ request.user.handyman_profile.completed_jobs }} avis)
+                    </span>
+                            </div>
+                        </div>
+
+                        <div class="space-y-4">
+                            <!-- Vérification & complétion -->
+                            {% with profile=request.user.handyman_profile %}
+                                <div class="flex items-center p-4
+                    {% if profile.is_approved %}bg-green-50 border border-green-200 hover:bg-green-100
+                    {% elif profile.profile_completion > 50 %}bg-yellow-50 border border-yellow-200 hover:bg-yellow-100
+                    {% else %}bg-red-50 border border-red-200 hover:bg-red-100{% endif %}
+                    rounded-xl transition">
+                                    <div class="w-12 h-12 rounded-xl flex items-center justify-center mr-4
+                        {% if profile.is_approved %}bg-green-100 text-green-600
+                        {% elif profile.profile_completion > 50 %}bg-yellow-100 text-yellow-600
+                        {% else %}bg-red-100 text-red-600{% endif %}">
+                                        <i class="fas
+                            {% if profile.is_approved %}fa-check-circle
+                            {% elif profile.profile_completion > 50 %}fa-exclamation-circle
+                            {% else %}fa-times-circle{% endif %}"></i>
+                                    </div>
+                                    <div>
+                                        <p class="font-semibold
+                            {% if profile.is_approved %}text-green-700
+                            {% elif profile.profile_completion > 50 %}text-yellow-700
+                            {% else %}text-red-700{% endif %}">
+                                            {% if profile.is_approved %}Profil vérifié
+                                            {% elif profile.profile_completion > 50 %}Profil incomplet
+                                            {% else %}Profil non configuré{% endif %}
+                                        </p>
+                                        <p class="text-sm
+                            {% if profile.is_approved %}text-green-600
+                            {% elif profile.profile_completion > 50 %}text-yellow-600
+                            {% else %}text-red-600{% endif %}">
+                                            {% if profile.is_approved %}
+                                                Tous vos documents sont à jour et validés.
+                                            {% elif profile.profile_completion > 50 %}
+                                                Votre profil est complété à
+                                                <strong>{{ profile.profile_completion }}%</strong>.
+                                            {% else %}
+                                                Complétez votre profil pour apparaître comme recommandé.
+                                            {% endif %}
+                                        </p>
+                                    </div>
+                                </div>
+                            {% endwith %}
+
+                            <!-- Disponibilités -->
+                            <div class="flex items-center p-4 bg-gray-50 rounded-xl hover:bg-gray-100 transition">
+                                <div class="w-12 h-12 rounded-xl bg-green-100 flex items-center justify-center mr-4">
+                                    <i class="fas fa-calendar-check text-primary"></i>
+                                </div>
+                                <div>
+                                    <p class="font-semibold">Disponibilité</p>
+                                    <p class="text-sm text-gray-500">
+                                        {% with slots=request.user.handyman_profile.availability %}
+                                            {% if slots %}
+                                                {{ slots|length }} créneau{{ slots|length|pluralize }} ouvert
+                                                {{ slots|length|pluralize:"s" }}
+                                            {% else %}
+                                                Aucun créneau défini
+                                            {% endif %}
+                                        {% endwith %}
+                                    </p>
+                                </div>
+                            </div>
+
+                            <!-- Statistiques rapides -->
+                            <div class="flex items-center p-4 bg-blue-50 rounded-xl hover:bg-blue-100 transition">
+                                <div class="w-12 h-12 rounded-xl bg-blue-100 flex items-center justify-center mr-4">
+                                    <i class="fas fa-chart-line text-blue-600"></i>
+                                </div>
+                                <div>
+                                    <p class="font-semibold">Statistiques</p>
+                                    <p class="text-sm text-gray-500">
+                                        {{ request.user.services.count }}
+                                        service{{ request.user.services.count|pluralize }},
+                                        {{ request.user.handyman_bookings.count }}
+                                        mission{{ request.user.handyman_bookings.count|pluralize }}
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </template>
+
+            <template x-if="activeTab === 'requests'">
+                <div class="bg-white rounded-2xl shadow-sm p-7 mb-8">
+                    <h2 class="text-2xl font-bold text-gray-800 mb-7">Demandes récentes</h2>
+
+                    {% if booking_requests %}
+                        <div class="overflow-x-auto">
+                            <table class="min-w-full divide-y divide-gray-200">
+                                <thead class="bg-gray-50">
+                                <tr>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        Service
+                                    </th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        Client
+                                    </th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        Date
+                                    </th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        Statut
+                                    </th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        Actions
+                                    </th>
+                                </tr>
+                                </thead>
+                                <tbody class="bg-white divide-y divide-gray-200">
+                                {% for booking in booking_requests %}
+                                    <tr>
+                                        <td class="px-6 py-4 whitespace-nowrap">
+                                            <div class="flex items-center">
+                                                {% if booking.service.images.first %}
+                                                    <div class="flex-shrink-0 h-10 w-10">
+                                                        <img class="h-10 w-10 rounded-full object-cover"
+                                                             src="{{ booking.service.images.first.image.url }}"
+                                                             alt="{{ booking.service.title }}">
+                                                    </div>
+                                                {% endif %}
+                                                <div class="ml-4">
+                                                    <div class="text-sm font-medium text-gray-900">{{ booking.service.title }}</div>
+                                                    <div class="text-sm text-gray-500">{{ booking.service.category.name }}</div>
+                                                </div>
+                                            </div>
+                                        </td>
+                                        <td class="px-6 py-4 whitespace-nowrap">
+                                            <div class="text-sm text-gray-900">{{ booking.client.get_full_name }}</div>
+                                            <div class="text-sm text-gray-500">{{ booking.client.phone }}</div>
+                                        </td>
+                                        <td class="px-6 py-4 whitespace-nowrap">
+                                            <div class="text-sm text-gray-900">{{ booking.booking_date|date:"d/m/Y" }}</div>
+                                            <div class="text-sm text-gray-500">{{ booking.booking_date|time }}</div>
+                                        </td>
+                                        <td class="px-6 py-4 whitespace-nowrap">
+                            <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-yellow-100 text-yellow-800">
+                                {{ booking.get_status_display }}
+                            </span>
+                                        </td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                                            <a href="{% url 'booking_respond' booking.id %}"
+                                               class="text-green-600 hover:text-green-900 mr-3">
+                                                <i class="fas fa-check-circle"></i> Répondre
+                                            </a>
+                                            <a href="#" class="text-red-600 hover:text-red-900">
+                                                <i class="fas fa-times-circle"></i> Refuser
+                                            </a>
+                                        </td>
+                                    </tr>
+                                {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    {% else %}
+                        <div class="text-center py-12">
+                            <i class="fas fa-inbox text-4xl text-gray-300 mb-4"></i>
+                            <p class="text-gray-500">Aucune demande récente</p>
+                        </div>
+                    {% endif %}
+                </div>
+            </template>
+
+            <template x-if="activeTab === 'history'">
+                <div class="bg-white rounded-2xl shadow-sm p-7 mb-8">
+                    <h2 class="text-2xl font-bold text-gray-800 mb-7">Historique des missions</h2>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                        {% for booking in completed_bookings %}
+                            <div class="border border-gray-200 rounded-xl p-5 hover:shadow-md transition">
+                                <div class="flex justify-between items-start mb-4">
+                                    <div>
+                                        <h3 class="font-bold text-lg">{{ booking.service.title }}</h3>
+                                        <p class="text-sm text-gray-500">{{ booking.booking_date|date:"d/m/Y" }}</p>
+                                    </div>
+                                    <span class="px-3 py-1 bg-green-100 text-green-800 text-xs rounded-full">
+                        Terminée
+                    </span>
+                                </div>
+
+                                <div class="flex items-center mb-4">
+                                    <div class="mr-3">
+                                        {% if booking.client.profile_picture %}
+                                            <img src="{{ booking.client.profile_picture.url }}"
+                                                 alt="{{ booking.client.get_full_name }}"
+                                                 class="w-10 h-10 rounded-full object-cover">
+                                        {% else %}
+                                            <div class="bg-gray-200 border-2 border-dashed rounded-xl w-10 h-10 flex items-center justify-center text-gray-400">
+                                                <i class="fas fa-user"></i>
+                                            </div>
+                                        {% endif %}
+                                    </div>
+                                    <div>
+                                        <p class="font-medium">{{ booking.client.get_full_name }}</p>
+                                        <p class="text-sm text-gray-500">{{ booking.city }}</p>
+                                    </div>
+                                </div>
+
+                                <div class="flex justify-between items-center">
+                                    <div>
+                                        <p class="text-sm font-medium">Montant gagné</p>
+                                        <p class="text-lg font-bold text-green-600">
+                                            {% if booking.payment %}
+                                                {{ booking.payment.amount|floatformat:"0" }} FCFA
+                                            {% else %}
+                                                Non payé
+                                            {% endif %}
+                                        </p>
+                                    </div>
+                                    <a href="{% url 'handy_booking_detail' booking.id %}"
+                                       class="text-primary hover:text-green-700">
+                                        <i class="fas fa-eye"></i> Détails
+                                    </a>
+                                </div>
+                            </div>
+                        {% empty %}
+                            <div class="col-span-full text-center py-12">
+                                <i class="fas fa-history text-4xl text-gray-300 mb-4"></i>
+                                <p class="text-gray-500">Aucune mission terminée</p>
+                            </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            </template>
+
+            <template x-if="activeTab === 'availability'">
+                <div class="bg-white rounded-2xl shadow-sm p-7 mb-8">
+                    <div class="flex justify-between items-center mb-7">
+                        <h2 class="text-2xl font-bold text-gray-800">Mes disponibilités</h2>
+                        <a href="{% url 'handyman_profile_update' %}"
+                           class="px-4 py-2 bg-green-100 text-green-800 rounded-lg hover:bg-green-200 transition">
+                            <i class="fas fa-edit mr-2"></i> Modifier
+                        </a>
+                    </div>
+
+                    <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+                        {% for day, hours in request.user.handyman_profile.availability.items %}
+                            <div class="border border-gray-200 rounded-xl p-5 hover:shadow-md transition">
+                                <h3 class="font-bold text-lg mb-3 capitalize">{{ day }}</h3>
+
+                                {% if hours %}
+                                    <div class="space-y-3">
+                                        {% for slot in hours %}
+                                            <div class="flex items-center justify-between bg-green-50 px-3 py-2 rounded-lg">
+                                                <span class="text-sm font-medium">{{ slot.0 }}h</span>
+                                                <span class="mx-2">-</span>
+                                                <span class="text-sm font-medium">{{ slot.1 }}h</span>
+                                            </div>
+                                        {% endfor %}
+                                    </div>
+                                {% else %}
+                                    <div class="text-center py-4 text-gray-400">
+                                        <i class="fas fa-times-circle mb-2"></i>
+                                        <p>Non disponible</p>
+                                    </div>
+                                {% endif %}
+                            </div>
+                        {% empty %}
+                            <div class="col-span-full text-center py-12">
+                                <i class="fas fa-calendar-times text-4xl text-gray-300 mb-4"></i>
+                                <p class="text-gray-500">Aucune disponibilité définie</p>
+                                <a href="{% url 'handyman_profile_update' %}"
+                                   class="mt-4 inline-block px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition">
+                                    <i class="fas fa-plus mr-2"></i> Ajouter des disponibilités
+                                </a>
+                            </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            </template>
+        
+        <!-- Deposit Tab -->
+            <div x-show="activeTab === 'deposit'" class="bg-white rounded-2xl shadow-sm p-7 mb-8">
+                <div class="flex justify-between items-center mb-7">
+                    <h2 class="text-2xl font-bold text-gray-800">Gestion de la caution</h2>
+                    <a href="#'handyman_deposit'"
+                       class="px-6 py-3 text-base font-medium text-white bg-purple-600 rounded-xl hover:bg-purple-700 transition flex items-center">
+                        <i class="fas fa-plus-circle mr-3"></i> Recharger la caution
+                    </a>
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                    <!-- Deposit Status -->
+                    <div class="bg-purple-50 rounded-xl p-6">
+                        <h3 class="text-lg font-semibold text-purple-800 mb-4">État de votre caution</h3>
+                        
+                        <div class="space-y-4">
+                            <div class="flex justify-between items-center">
+                                <span class="text-gray-600">Solde actuel</span>
+                                <span class="text-xl font-bold">{{ deposit_balance|floatformat:"0" }} FCFA</span>
+                            </div>
+                            
+                            <div class="flex justify-between items-center">
+                                <span class="text-gray-600">Seuil recommandé</span>
+                                <span class="text-lg">{{ deposit_threshold|floatformat:"0" }} FCFA</span>
+                            </div>
+                            
+                            <div class="mt-4 pt-4 border-t border-purple-100">
+                                <div class="flex justify-between items-center mb-2">
+                                    <span class="text-gray-600">Niveau de sécurité</span>
+                                    <span class="font-medium {% if deposit_percentage > 80 %}text-green-600{% elif deposit_percentage > 50 %}text-yellow-600{% else %}text-red-600{% endif %}">
+                                        {{ deposit_percentage|floatformat:"0" }}%
+                                    </span>
+                                </div>
+                                <div class="progress-bar w-full">
+                                    <div class="progress-value bg-purple-600" 
+                                         style="--progress-value: {{ deposit_percentage }}%"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Deposit History -->
+                    <div>
+                        <h3 class="text-lg font-semibold text-gray-800 mb-4">Historique des transactions</h3>
+                        
+                        <div class="overflow-hidden rounded-lg border border-gray-200">
+                            <table class="min-w-full divide-y divide-gray-200">
+                                <thead class="bg-gray-50">
+                                    <tr>
+                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
+                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Montant</th>
+                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Statut</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="bg-white divide-y divide-gray-200">
+                                    {% for transaction in deposit_transactions %}
+                                    <tr>
+                                        <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
+                                            {{ transaction.date|date:"d/m/Y" }}
+                                        </td>
+                                        <td class="px-4 py-3 whitespace-nowrap text-sm font-medium">
+                                            {{ transaction.get_type_display }}
+                                        </td>
+                                        <td class="px-4 py-3 whitespace-nowrap text-sm {% if transaction.type == 'deposit' %}text-green-600{% else %}text-red-600{% endif %}">
+                                            {{ transaction.amount|floatformat:"0" }} FCFA
+                                        </td>
+                                        <td class="px-4 py-3 whitespace-nowrap">
+                                            <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full 
+                                                {% if transaction.status == 'completed' %}bg-green-100 text-green-800
+                                                {% elif transaction.status == 'pending' %}bg-yellow-100 text-yellow-800
+                                                {% else %}bg-red-100 text-red-800{% endif %}">
+                                                {{ transaction.get_status_display }}
+                                            </span>
+                                        </td>
+                                    </tr>
+                                    {% empty %}
+                                    <tr>
+                                        <td colspan="4" class="px-4 py-4 text-center text-gray-500">
+                                            Aucune transaction récente
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                        
+                        <div class="mt-6 bg-blue-50 rounded-lg p-4">
+                            <div class="flex">
+                                <div class="flex-shrink-0">
+                                    <i class="fas fa-info-circle text-blue-400"></i>
+                                </div>
+                                <div class="ml-3">
+                                    <h3 class="text-sm font-medium text-blue-800">À propos de la caution</h3>
+                                    <div class="mt-2 text-sm text-blue-700">
+                                        <p>
+                                            La caution correspond à 11% du montant de chaque mission. 
+                                            Elle est déduite automatiquement après chaque mission terminée.
+                                        </p>
+                                        <p class="mt-2">
+                                            <a href="#" class="font-medium underline text-blue-800 hover:text-blue-900">
+                                                En savoir plus sur le système de caution
+                                            </a>
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Services Offered -->
+            <div class="bg-white rounded-2xl shadow-sm p-7 mb-8">
+                <div class="flex justify-between items-center mb-7">
+                    <div>
+                        <h2 class="text-2xl font-bold text-gray-800 mb-1">Mes services proposés</h2>
+                        <p class="text-gray-500">Services que vous proposez aux clients</p>
+                    </div>
+                    <div>
+                        <a href="{% url 'service_create' %}"
+                           class="px-6 py-3 text-base font-medium text-white bg-primary rounded-xl hover:bg-green-700 transition flex items-center shadow-md transform hover:scale-105">
+                            <i class="fas fa-plus mr-3"></i> Ajouter un service
+                        </a>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-7">
+                    {% for service in request.user.services.all %}
+                        <div class="service-card border border-gray-200 rounded-xl overflow-hidden hover:shadow-md transition-shadow">
+                            <div class="h-48 relative overflow-hidden">
+                                {% if service.images.first %}
+                                    <img src="{{ service.images.first.image.url }}"
+                                         alt="{{ service.images.first.alt_text|default:service.title }}"
+                                         class="w-full h-full object-cover transition-transform duration-500 hover:scale-110">
+                                {% else %}
+                                    <div class="w-full h-full bg-gray-100 flex items-center justify-center">
+                                        <i class="fas fa-tools text-gray-300 text-4xl"></i>
+                                    </div>
+                                {% endif %}
+
+                                <div class="absolute bottom-0 left-0 w-full bg-gradient-to-t from-black/70 to-transparent p-4 text-white">
+                                    <h3 class="font-bold text-lg">{{ service.title }}</h3>
+                                    <p class="text-sm">{{ service.category.name }}</p>
+                                </div>
+
+                                {% if service.is_active %}
+                                    <div class="absolute top-4 left-4 bg-green-100 text-green-800 px-3 py-1.5 rounded-xl text-sm font-semibold">
+                                        Actif
+                                    </div>
+                                {% else %}
+                                    <div class="absolute top-4 left-4 bg-gray-100 text-gray-800 px-3 py-1.5 rounded-xl text-sm font-semibold">
+                                        Inactif
+                                    </div>
+                                {% endif %}
+                            </div>
+
+                            <div class="p-5">
+                                <p class="text-gray-600 mb-4 text-sm line-clamp-2">{{ service.description }}</p>
+
+                                <div class="flex items-center justify-between">
+                    <span class="text-xl font-bold text-primary">
+                        {% if service.price_type == 'hourly' %}
+                            {{ service.price|floatformat:"0" }} FCFA/h
+                        {% elif service.price_type == 'fixed' %}
+                            {{ service.price|floatformat:"0" }} FCFA
+                        {% else %}
+                            Sur devis
+                        {% endif %}
+                    </span>
+
+                                    <span class="text-sm bg-green-100 text-green-800 px-3 py-1 rounded-full">
+                        {{ service.bookings.count }} missions
+                    </span>
+                                </div>
+
+                                <div class="mt-4 flex justify-between">
+                                    <a href="{% url 'service_update' service.id %}"
+                                       class="px-4 py-2 text-sm bg-green-100 text-primary rounded-lg hover:bg-green-200 transition">
+                                        <i class="fas fa-edit mr-2"></i> Modifier
+                                    </a>
+                                    <a href="{% url 'service_stats' service.id %}"
+                                       class="px-4 py-2 text-sm bg-primary text-white rounded-lg hover:bg-green-700 transition">
+                                        <i class="fas fa-chart-bar mr-2"></i> Statistiques
+                                    </a>
+                                </div>
+
+                                <div class="mt-4 text-xs text-gray-500 flex justify-between">
+                    <span>
+                        <i class="far fa-clock mr-1"></i>
+                        {% if service.duration %}
+                            {{ service.duration }} min
+                        {% else %}
+                            Durée variable
+                        {% endif %}
+                    </span>
+                                    <span>
+                        <i class="far fa-calendar mr-1"></i>
+                        {{ service.created_at|date:"d/m/Y" }}
+                    </span>
+                                </div>
+                            </div>
+                        </div>
+                    {% empty %}
+                        <div class="col-span-full text-center py-12">
+                            <div class="mx-auto w-24 h-24 bg-green-100 rounded-full flex items-center justify-center text-green-600 mb-6">
+                                <i class="fas fa-tools text-3xl"></i>
+                            </div>
+                            <h3 class="text-xl font-bold text-gray-800 mb-2">Aucun service enregistré</h3>
+                            <p class="text-gray-500 mb-6">Commencez par ajouter vos premiers services</p>
+                            <a href="{% url 'service_create' %}"
+                               class="px-6 py-3 inline-block text-base font-medium text-white bg-primary rounded-xl hover:bg-green-700 transition">
+                                <i class="fas fa-plus mr-2"></i> Créer un service
+                            </a>
+                        </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </main>
+    </div>
+    <script>
+  document.addEventListener('alpine:init', () => {
+    Alpine.directive('tooltip', (el, { expression }) => {
+      el.setAttribute('title', expression)
+    })
+  })
+</script>
+{% endblock %}

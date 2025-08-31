@@ -1,0 +1,246 @@
+{% extends 'employeur/base_employer.html' %}
+{% load custom_filters %}
+
+{% block content %}
+<div class="container mx-auto px-4 py-8">
+    <div class="grid grid-cols-1 lg:grid-cols-4 gap-8">
+        <!-- Sidebar avec filtres -->
+        <div class="lg:col-span-1">
+            <div class="bg-white rounded-xl shadow-sm p-6 sticky top-4">
+                <h3 class="text-xl font-bold mb-6">Filtrer les résultats</h3>
+                
+                <!-- Formulaire de recherche -->
+                <form method="GET" action="{% url 'service_search' %}">
+                    <!-- Champ de recherche -->
+                    <div class="mb-6">
+                        <label class="block text-sm font-medium mb-2">Recherche</label>
+                        <input type="text" name="q" value="{{ current_query }}" 
+                               class="w-full px-4 py-2 border rounded-lg" 
+                               placeholder="Plombier, électricien...">
+                    </div>
+                    
+                    <!-- Localisation -->
+                    <div class="mb-6">
+                        <label class="block text-sm font-medium mb-2">Localisation</label>
+                        <input type="text" name="location" value="{{ current_location }}" 
+                               class="w-full px-4 py-2 border rounded-lg" 
+                               placeholder="Ville ou code postal">
+                    </div>
+                    
+                    <!-- Catégories -->
+                    <div class="mb-6">
+                        <label class="block text-sm font-medium mb-2">Catégorie</label>
+                        <select name="category" class="w-full px-4 py-2 border rounded-lg">
+                            <option value="">Toutes catégories</option>
+                            {% for category in categories %}
+                            <option value="{{ category.slug }}" 
+                                {% if current_category == category.slug %}selected{% endif %}>
+                                {{ category.name }} ({{ category.service_count }})
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    
+                    <!-- Prix -->
+                    <div class="mb-6">
+                        <label class="block text-sm font-medium mb-2">
+                            Prix ({{ min_price_range|floatformat:0 }} CFA - {{ max_price_range|floatformat:0 }} CFA)
+                        </label>
+                        <div class="grid grid-cols-2 gap-4">
+                            <input type="number" name="min_price" value="{{ current_min_price }}" 
+                                   min="0" max="{{ max_price_range }}" step="5"
+                                   class="w-full px-3 py-2 border rounded-lg" placeholder="Min">
+                            <input type="number" name="max_price" value="{{ current_max_price }}" 
+                                   min="0" max="{{ max_price_range }}" step="5"
+                                   class="w-full px-3 py-2 border rounded-lg" placeholder="Max">
+                        </div>
+                    </div>
+                    
+                    <!-- Type de prix -->
+                    <div class="mb-6">
+                        <label class="block text-sm font-medium mb-2">Type de tarif</label>
+                        <select name="price_type" class="w-full px-4 py-2 border rounded-lg">
+                            <option value="">Tous types</option>
+                            <option value="hourly" {% if current_price_type == 'hourly' %}selected{% endif %}>À l'heure</option>
+                            <option value="fixed" {% if current_price_type == 'fixed' %}selected{% endif %}>Prix fixe</option>
+                            <option value="quote" {% if current_price_type == 'quote' %}selected{% endif %}>Sur devis</option>
+                        </select>
+                    </div>
+                    
+                    <!-- Note minimum -->
+                    <div class="mb-6">
+                        <label class="block text-sm font-medium mb-2">Note minimum</label>
+                        <select name="rating" class="w-full px-4 py-2 border rounded-lg">
+                            <option value="">Toutes notes</option>
+                            <option value="4.5" {% if current_rating == '4.5' %}selected{% endif %}>4.5 étoiles et +</option>
+                            <option value="4" {% if current_rating == '4' %}selected{% endif %}>4 étoiles et +</option>
+                            <option value="3" {% if current_rating == '3' %}selected{% endif %}>3 étoiles et +</option>
+                        </select>
+                    </div>
+                    
+                    <!-- Tri -->
+                    <div class="mb-6">
+                        <label class="block text-sm font-medium mb-2">Trier par</label>
+                        <select name="sort_by" class="w-full px-4 py-2 border rounded-lg">
+                            <option value="newest" {% if current_sort == 'newest' %}selected{% endif %}>Plus récents</option>
+                            <option value="popular" {% if current_sort == 'popular' %}selected{% endif %}>Plus populaires</option>
+                            <option value="rating" {% if current_sort == 'rating' %}selected{% endif %}>Meilleures notes</option>
+                            <option value="price_low" {% if current_sort == 'price_low' %}selected{% endif %}>Prix croissant</option>
+                            <option value="price_high" {% if current_sort == 'price_high' %}selected{% endif %}>Prix décroissant</option>
+                        </select>
+                    </div>
+                    
+                    <button type="submit" class="w-full bg-employer text-white py-3 rounded-lg font-medium hover:bg-blue-700 transition">
+                        Appliquer les filtres
+                    </button>
+                </form>
+            </div>
+            
+            <!-- Services populaires -->
+            <div class="mt-8 bg-white rounded-xl shadow-sm p-6">
+                <h3 class="text-xl font-bold mb-4">Services populaires</h3>
+                <div class="space-y-4">
+                    {% for service in popular_services %}
+                    <a href="# url 'service_detail' service.id" class="flex items-center group">
+                        <div class="w-16 h-16 rounded-xl overflow-hidden flex-shrink-0">
+                            {% if service.images.first %}
+                            <img src="{{ service.images.first.image.url }}" alt="{{ service.title }}" class="w-full h-full object-cover">
+                            {% else %}
+                            <div class="bg-gray-200 border-2 border-dashed rounded-xl w-full h-full"></div>
+                            {% endif %}
+                        </div>
+                        <div class="ml-4">
+                            <h4 class="font-medium group-hover:text-employer transition">{{ service.title|truncatechars:30 }}</h4>
+                            <p class="text-sm text-gray-500">{{ service.handyman.get_full_name }}</p>
+                            <div class="flex items-center mt-1">
+                                <div class="flex text-yellow-400">
+                                    {% for i in "12345" %}
+                                    <i class="fas fa-star {% if forloop.counter <= service.avg_rating|default:0 %}text-yellow-400{% else %}text-gray-300{% endif %} text-xs"></i>
+                                    {% endfor %}
+                                </div>
+                                <span class="text-xs text-gray-500 ml-1">({{ service.booking_count }})</span>
+                            </div>
+                        </div>
+                    </a>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+        
+        <!-- Résultats de recherche -->
+        <div class="lg:col-span-3">
+            <div class="mb-6 flex justify-between items-center">
+                <h1 class="text-2xl font-bold">
+                    {% if services %}Résultats de recherche ({{ paginator.count }}){% else %}Aucun service trouvé{% endif %}
+                </h1>
+                <div class="text-sm text-gray-500">
+                    Affichage {{ page_obj.start_index }} - {{ page_obj.end_index }} sur {{ paginator.count }}
+                </div>
+            </div>
+            
+            {% if services %}
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {% for service in services %}
+                <div class="service-card bg-white rounded-xl shadow-sm overflow-hidden hover:shadow-md transition">
+                    <div class="relative">
+                        <a href="{% url 'service_detail' service.id %}  ">
+                            {% if service.images.first %}
+                            <img src="{{ service.images.first.image.url }}" alt="{{ service.title }}" class="w-full h-48 object-cover">
+                            {% else %}
+                            <div class="bg-gray-200 border-2 border-dashed rounded-t-xl w-full h-48 flex items-center justify-center">
+                                <i class="fas fa-image text-3xl text-gray-400"></i>
+                            </div>
+                            {% endif %}
+                        </a>
+                        <div class="absolute top-4 right-4 bg-white/90 px-3 py-1 rounded-full text-sm font-medium flex items-center">
+                            <i class="fas fa-star text-yellow-500 mr-1"></i>
+                            <span>{{ service.handyman.avg_rating|default:"0.0" }}</span>
+                        </div>
+                    </div>
+                    <div class="p-5">
+                        <div class="flex justify-between items-start">
+                            <a href="# url 'service_detail' service.id" class="group">
+                                <h3 class="font-bold text-lg group-hover:text-employer transition">{{ service.title }}</h3>
+                            </a>
+                            <span class="bg-employer/10 text-employer text-xs font-medium px-2 py-1 rounded">
+                                {{ service.get_price_type_display }}
+                            </span>
+                        </div>
+                        <p class="text-sm text-gray-500 mt-1">
+                            Par <a href="#url 'worker_profile' service.handyman.id" class="text-employer hover:underline">{{ service.handyman.get_full_name }}</a>
+                        </p>
+                        
+                        <div class="mt-4 flex items-center">
+                            <div class="flex text-yellow-400">
+                                {% for i in "12345" %}
+                                <i class="fas fa-star {% if forloop.counter <= service.handyman.avg_rating|default:0 %}text-yellow-400{% else %}text-gray-300{% endif %} text-xs"></i>
+                                {% endfor %}
+                            </div>
+                            <span class="text-xs text-gray-500 ml-1">({{ service.handyman.review_count|default:0 }} avis)</span>
+                        </div>
+                        
+                        <div class="mt-4">
+                            <p class="text-gray-700 text-sm mb-2">{{ service.description|truncatewords:15 }}</p>
+                        </div>
+                        
+                        <div class="mt-6 flex justify-between items-center">
+                            <span class="text-lg font-bold">
+                                {% if service.price %}
+                                {{ service.price }} CFA
+                                {% if service.price_type == 'hourly' %}/h{% endif %}
+                                {% else %}
+                                Sur devis
+                                {% endif %}
+                            </span>
+                            <a href="{% url 'service_detail' service.id %}" class="px-4 py-2 bg-employer text-white rounded-lg text-sm hover:bg-blue-700 transition">
+                                Voir détails
+                            </a>
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            
+            <!-- Pagination -->
+            {% if page_obj.has_other_pages %}
+            <div class="mt-10 flex justify-center">
+                <nav class="flex items-center space-x-2">
+                    {% if page_obj.has_previous %}
+                    <a href="?{% param_replace page=page_obj.previous_page_number %}" class="px-3 py-2 rounded-lg border hover:bg-gray-50">
+                        &laquo; Précédent
+                    </a>
+                    {% endif %}
+                    
+                    {% for num in page_obj.paginator.page_range %}
+                    {% if page_obj.number == num %}
+                    <span class="px-4 py-2 bg-employer text-white rounded-lg">{{ num }}</span>
+                    {% elif num > page_obj.number|add:'-3' and num < page_obj.number|add:'3' %}
+                    <a href="?{% param_replace page=num %}" class="px-4 py-2 rounded-lg border hover:bg-gray-50">{{ num }}</a>
+                    {% endif %}
+                    {% endfor %}
+                    
+                    {% if page_obj.has_next %}
+                    <a href="?{% param_replace page=page_obj.next_page_number %}" class="px-3 py-2 rounded-lg border hover:bg-gray-50">
+                        Suivant &raquo;
+                    </a>
+                    {% endif %}
+                </nav>
+            </div>
+            {% endif %}
+            
+            {% else %}
+            <div class="text-center py-20">
+                <div class="mx-auto w-24 h-24 rounded-full bg-blue-100 flex items-center justify-center mb-6">
+                    <i class="fas fa-search text-employer text-3xl"></i>
+                </div>
+                <h3 class="text-xl font-bold mb-2">Aucun service trouvé</h3>
+                <p class="text-gray-600 mb-6">Essayez de modifier vos critères de recherche</p>
+                <a href="{% url 'service_search' %}" class="px-6 py-3 bg-employer text-white rounded-lg font-medium hover:bg-blue-700 transition">
+                    Réinitialiser les filtres
+                </a>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}

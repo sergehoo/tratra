@@ -1,0 +1,101 @@
+{% extends 'handyman/base_handyman.html' %}
+{% load humanize %}
+
+{% block content %}
+<div class="container mx-auto px-4 py-8 max-w-3xl">
+    <div class="bg-white rounded-xl shadow-sm p-6">
+        <h1 class="text-2xl font-bold mb-6">Répondre à la demande de réservation</h1>
+        
+        <div class="mb-8 border-b pb-6">
+            <h2 class="text-lg font-semibold mb-4">Détails de la demande</h2>
+            
+            <div class="flex flex-col md:flex-row gap-6">
+                <div class="md:w-1/3">
+                    <div class="aspect-w-1 aspect-h-1 rounded-xl overflow-hidden bg-gray-100">
+                        {% if service.images.first %}
+                        <img src="{{ service.images.first.image.url }}" 
+                             alt="{{ service.title }}" 
+                             class="w-full h-full object-cover"
+                             loading="lazy">
+                        {% else %}
+                        <div class="w-full h-full flex items-center justify-center">
+                            <i class="fas fa-image text-3xl text-gray-300"></i>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+                
+                <div class="md:w-2/3">
+                    <h3 class="font-bold text-lg">{{ service.title }}</h3>
+                    <p class="text-gray-600 mt-1">Demandé par {{ client.get_full_name }}</p>
+                    
+                    <div class="mt-4 grid grid-cols-2 gap-4">
+                        <div>
+                            <p class="text-sm text-gray-500">Date demandée</p>
+                            <p class="font-medium">{{ booking.booking_date|date:"d M Y à H:i" }}</p>
+                        </div>
+                        <div>
+                            <p class="text-sm text-gray-500">Lieu</p>
+                            <p class="font-medium">{{ booking.address }}, {{ booking.postal_code }} {{ booking.city }}</p>
+                        </div>
+                        <div class="col-span-2">
+                            <p class="text-sm text-gray-500">Description</p>
+                            <p class="font-medium">{{ booking.description }}</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <form method="post">
+            {% csrf_token %}
+            
+            <div class="mb-6">
+                <label class="block text-sm font-medium mb-2">Votre réponse</label>
+                <div class="space-y-3">
+                    {% for choice in form.status %}
+                    <div class="flex items-center p-4 border rounded-lg hover:bg-gray-50 transition">
+                        {{ choice.tag }}
+                        <label for="{{ choice.id_for_label }}" class="ml-3 font-medium">
+                            {{ choice.choice_label }}
+                        </label>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            
+            {% if form.proposed_price %}
+            <div class="mb-6">
+                <label class="block text-sm font-medium mb-2">{{ form.proposed_price.label }}</label>
+                <div class="relative">
+                    <span class="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500">CFA</span>
+                    {{ form.proposed_price }}
+                </div>
+                {% if form.proposed_price.errors %}
+                <p class="text-red-500 text-sm mt-1">{{ form.proposed_price.errors.0 }}</p>
+                {% endif %}
+                <p class="text-sm text-gray-500 mt-2">
+                    Prix initial: {{ service.price|intcomma|default:"Sur devis" }} CFA
+                </p>
+            </div>
+            {% endif %}
+            
+            <div class="mb-6">
+                <label class="block text-sm font-medium mb-2">{{ form.handyman_comment.label }}</label>
+                {{ form.handyman_comment }}
+            </div>
+            
+            <div class="border-t pt-6 flex justify-between">
+                <a href="{% url 'handydash' %}" 
+                   class="px-6 py-3 border border-gray-300 rounded-lg font-medium hover:bg-gray-50 transition">
+                    Annuler
+                </a>
+                <button type="submit" 
+                        class="px-6 py-3 bg-employer text-white rounded-lg font-medium hover:bg-blue-700 transition">
+                    Envoyer la réponse
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

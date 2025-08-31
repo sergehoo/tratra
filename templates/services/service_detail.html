@@ -1,0 +1,597 @@
+{% extends 'employeur/base_employer.html' %}
+{% load humanize %}
+
+{% block content %}
+    <style>
+    /* Styles pour la galerie modale */
+    .gallery-modal {
+        display: none;
+        position: fixed;
+        z-index: 1000;
+        left: 0;
+        top: 0;
+        width: 100%;
+        height: 100%;
+        background-color: rgba(0, 0, 0, 0.9);
+        align-items: center;
+        justify-content: center;
+        opacity: 0;
+        transition: opacity 0.3s ease;
+    }
+    
+    .gallery-modal.active {
+        display: flex;
+        opacity: 1;
+    }
+    
+    .modal-content {
+        max-width: 90%;
+        max-height: 90%;
+        transition: transform 0.3s ease;
+    }
+    
+    .modal-content.zoomed {
+        transform: scale(1.05);
+    }
+    
+    .close-btn {
+        position: absolute;
+        top: 20px;
+        right: 30px;
+        color: white;
+        font-size: 40px;
+        cursor: pointer;
+        transition: color 0.3s;
+    }
+    
+    .close-btn:hover {
+        color: #ddd;
+    }
+    
+    .gallery-nav {
+        position: absolute;
+        top: 50%;
+        transform: translateY(-50%);
+        color: white;
+        font-size: 30px;
+        cursor: pointer;
+        padding: 10px;
+        background: rgba(0,0,0,0.5);
+        border-radius: 50%;
+        transition: all 0.3s;
+    }
+    
+    .gallery-nav:hover {
+        background: rgba(0,0,0,0.8);
+    }
+    
+    .prev-btn {
+        left: 20px;
+    }
+    
+    .next-btn {
+        right: 20px;
+    }
+    
+    .thumbnails {
+        position: absolute;
+        bottom: 20px;
+        left: 0;
+        right: 0;
+        display: flex;
+        justify-content: center;
+        gap: 10px;
+        padding: 10px;
+    }
+    
+    .thumbnail {
+        width: 60px;
+        height: 60px;
+        object-fit: cover;
+        cursor: pointer;
+        opacity: 0.6;
+        transition: opacity 0.3s, transform 0.3s;
+        border: 2px solid transparent;
+    }
+    
+    .thumbnail:hover, .thumbnail.active {
+        opacity: 1;
+        transform: scale(1.1);
+    }
+    
+    .thumbnail.active {
+        border-color: white;
+    }
+    
+    /* Animation pour les miniatures */
+    .gallery-thumb {
+        transition: transform 0.3s ease;
+    }
+    
+    .gallery-thumb:hover {
+        transform: scale(1.05);
+        z-index: 10;
+    }
+    
+    /* Effet de zoom au survol pour l'image principale */
+    .main-image-container {
+        overflow: hidden;
+        border-radius: 0.75rem;
+        position: relative;
+    }
+    
+    .main-image {
+        transition: transform 0.5s ease;
+    }
+    
+    .main-image-container:hover .main-image {
+        transform: scale(1.05);
+    }
+    
+    .zoom-indicator {
+        position: absolute;
+        bottom: 10px;
+        right: 10px;
+        background: rgba(0,0,0,0.7);
+        color: white;
+        padding: 4px 8px;
+        border-radius: 4px;
+        font-size: 12px;
+        opacity: 0;
+        transition: opacity 0.3s;
+    }
+    
+    .main-image-container:hover .zoom-indicator {
+        opacity: 1;
+    }
+</style>
+<div class="container mx-auto px-4 py-8">
+<div class="gallery-modal" id="galleryModal">
+        <span class="close-btn" id="closeModal">&times;</span>
+        <img class="modal-content" id="modalImage" src="">
+        <a class="gallery-nav prev-btn" id="prevBtn">&#10094;</a>
+        <a class="gallery-nav next-btn" id="nextBtn">&#10095;</a>
+        <div class="thumbnails" id="thumbnailsContainer"></div>
+    </div>
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <!-- Colonne principale -->
+        <div class="lg:col-span-2">
+            <!-- En-tête avec titre et informations -->
+            <div class="bg-white rounded-xl shadow-sm p-6 mb-6">
+                <div class="flex flex-col md:flex-row">
+                    <div class="md:w-1/3 mb-6 md:mb-0">
+                        <!-- Image principale -->
+                        <div class="aspect-w-1 aspect-h-1 rounded-xl overflow-hidden bg-gray-100">
+                            {% if service.images.first %}
+                             <img src="{{ service.images.first.image.url }}" 
+                                 alt="{{ service.title }}" 
+                                 class="main-image w-full h-full object-cover cursor-zoom-in"
+                                 loading="lazy"
+                                 id="mainImage"
+                                 data-index="0">
+                            <div class="zoom-indicator">Cliquez pour agrandir</div>
+
+                            {% else %}
+                            <div class="w-full h-full flex items-center justify-center">
+                                <i class="fas fa-image text-4xl text-gray-300"></i>
+                            </div>
+                            {% endif %}
+                        </div>
+                        
+                        <!-- Miniatures -->
+                        <div class="mt-4 grid grid-cols-3 gap-2">
+                            {% for image in service.images.all|slice:"1:4" %}
+                            <div class="aspect-w-1 aspect-h-1 rounded overflow-hidden bg-gray-100">
+                               <img src="{{ image.image.url }}" 
+                                     alt="{{ service.title }}" 
+                                     class="w-full h-full object-cover cursor-pointer"
+                                     loading="lazy"
+                                     data-index="{{ forloop.counter0 }}"
+                                     onclick="openModal({{ forloop.counter0 }})">
+                            </div>
+                            {% empty %}
+                            <div class="col-span-3 text-center py-4 text-gray-500">
+                                Pas d'images supplémentaires
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    
+                    <div class="md:w-2/3 md:pl-6">
+                        <div class="flex justify-between items-start">
+                            <div>
+                                <h1 class="text-2xl font-bold">{{ service.title }}</h1>
+                                <p class="text-employer mt-1">
+                                    Par <a href="{% url 'worker_profile' service.handyman.id %}" 
+                                          class="font-medium hover:underline">
+                                        {{ service.handyman.get_full_name }}
+                                    </a>
+                                </p>
+                            </div>
+                            <div class="bg-employer/10 text-employer text-xs font-medium px-2 py-1 rounded">
+                                {{ service.get_price_type_display }}
+                            </div>
+                        </div>
+                        
+                        <!-- Rating -->
+                        <div class="mt-4 flex items-center">
+                            <div class="flex text-yellow-400">
+                                {% for i in "12345" %}
+                                <i class="fas fa-star {% if forloop.counter <= avg_rating %}text-yellow-400{% else %}text-gray-300{% endif %}"></i>
+                                {% endfor %}
+                            </div>
+                            <span class="ml-2 text-gray-600">({{ review_count }} avis)</span>
+                        </div>
+                        
+                        <!-- Description -->
+                        <div class="mt-6">
+                            <h3 class="font-bold text-lg">Description du service</h3>
+                            <p class="mt-2 text-gray-700 whitespace-pre-line">{{ service.description }}</p>
+                        </div>
+                        
+                        <!-- Détails -->
+                        <div class="mt-6">
+                            <h3 class="font-bold text-lg">Détails du service</h3>
+                            <ul class="mt-3 space-y-2">
+                                <li class="flex flex-wrap">
+                                    <span class="w-32 text-gray-500">Prix</span>
+                                    <span class="font-medium flex-1">
+                                        {% if service.price %}
+                                        {{ service.price|intcomma }} CFA
+                                        {% if service.price_type == 'hourly' %}/h{% endif %}
+                                        {% else %}
+                                        Sur devis
+                                        {% endif %}
+                                    </span>
+                                </li>
+                                <li class="flex flex-wrap">
+                                    <span class="w-32 text-gray-500">Durée</span>
+                                    <span class="font-medium flex-1">
+                                        {% if service.duration %}
+                                        {{ service.duration }} minutes
+                                        {% else %}
+                                        Variable
+                                        {% endif %}
+                                    </span>
+                                </li>
+                                <li class="flex flex-wrap">
+                                    <span class="w-32 text-gray-500">Catégorie</span>
+                                    <span class="font-medium flex-1">{{ service.category.name }}</span>
+                                </li>
+                                <li class="flex flex-wrap">
+                                    <span class="w-32 text-gray-500">Localisation</span>
+                                    <span class="font-medium flex-1">
+                                        {{ service.handyman.city }}{% if service.handyman.postal_code %}, {{ service.handyman.postal_code }}{% endif %}
+                                    </span>
+                                </li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Section Avis -->
+            <div class="bg-white rounded-xl shadow-sm p-6 mb-6">
+                <div class="flex justify-between items-center mb-6">
+                    <h2 class="text-xl font-bold">Avis ({{ review_count }})</h2>
+                    <div class="flex items-center">
+                        <span class="text-2xl font-bold mr-2">{{ avg_rating|floatformat:1 }}</span>
+                        <div class="flex flex-col">
+                            <div class="flex text-yellow-400">
+                                {% for i in "12345" %}
+                                <i class="fas fa-star {% if forloop.counter <= avg_rating %}text-yellow-400{% else %}text-gray-300{% endif %} text-sm"></i>
+                                {% endfor %}
+                            </div>
+                            <span class="text-xs text-gray-500">Note moyenne</span>
+                        </div>
+                    </div>
+                </div>
+                
+                {% if reviews %}
+                <div class="space-y-6">
+                    {% for review in reviews %}
+                    <div class="border-b pb-6 last:border-0 last:pb-0">
+                        <div class="flex justify-between flex-wrap gap-2">
+                            <div class="flex items-center">
+                                <div class="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center overflow-hidden shrink-0">
+                                    {% if review.booking.client.profile_picture %}
+                                    <img src="{{ review.booking.client.profile_picture.url }}" 
+                                         alt="{{ review.booking.client.get_full_name }}" 
+                                         class="w-full h-full object-cover"
+                                         loading="lazy">
+                                    {% else %}
+                                    <i class="fas fa-user text-gray-400"></i>
+                                    {% endif %}
+                                </div>
+                                <div class="ml-3">
+                                    <p class="font-medium">{{ review.booking.client.get_full_name }}</p>
+                                    <p class="text-xs text-gray-500">{{ review.created_at|date:"d M Y" }}</p>
+                                </div>
+                            </div>
+                            <div class="flex text-yellow-400 items-start">
+                                {% for i in "12345" %}
+                                <i class="fas fa-star {% if forloop.counter <= review.rating %}text-yellow-400{% else %}text-gray-300{% endif %} text-sm"></i>
+                                {% endfor %}
+                            </div>
+                        </div>
+                        <p class="mt-4 text-gray-700 whitespace-pre-line">{{ review.comment }}</p>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <div class="text-center py-10">
+                    <i class="fas fa-comment-alt text-4xl text-gray-300 mb-4"></i>
+                    <p class="text-gray-500">Aucun avis pour ce service</p>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+        
+        <!-- Sidebar -->
+        <div class="lg:col-span-1 space-y-8 z-20">
+            <!-- Carte de réservation -->
+            <div class="bg-white rounded-xl shadow-sm p-6 sticky top-4">
+                <h2 class="text-xl font-bold mb-6">Réserver ce service</h2>
+                
+                {% if not request.user.is_authenticated %}
+                <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+                    <p class="text-blue-800">
+                        <i class="fas fa-info-circle mr-2"></i>
+                        Vous devez être connecté pour réserver ce service
+                    </p>
+                    <div class="mt-4 grid grid-cols-2 gap-3">
+                        <a href="{% url 'account_login' %}?next={% url 'service_detail' service.id %}" 
+                           class="px-4 py-2 bg-employer text-white rounded-lg text-center hover:bg-blue-700 transition">
+                            Se connecter
+                        </a>
+                        <a href="{% url 'account_signup' %}" 
+                           class="px-4 py-2 border border-employer text-employer rounded-lg text-center hover:bg-blue-50 transition">
+                            S'inscrire
+                        </a>
+                    </div>
+                </div>
+                {% elif user_has_booked %}
+                <div class="bg-green-50 border border-green-200 rounded-lg p-4 mb-6">
+                    <p class="text-green-800">
+                        <i class="fas fa-check-circle mr-2"></i>
+                        Vous avez déjà réservé ce service
+                    </p>
+                    <a href="{% url 'my_bookings' %}" 
+                       class="mt-4 inline-block px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition">
+                        Voir mes réservations
+                    </a>
+                </div>
+                {% else %}
+                <form method="post" action="{% url 'create_booking' service.id %}">
+                    {% csrf_token %}
+                    <div class="mb-4">
+                        <label class="block text-sm font-medium mb-2">Date et heure</label>
+                        <input type="datetime-local" name="booking_date" 
+                               class="w-full px-4 py-2 border rounded-lg" 
+                               min="{{ today|date:'Y-m-d' }}T08:00"
+                               required>
+                    </div>
+                    
+                    <div class="mb-4">
+                        <label class="block text-sm font-medium mb-2">Adresse</label>
+                        <textarea name="address" class="w-full px-4 py-2 border rounded-lg" 
+                                  placeholder="Où le service doit-il être effectué ?" required></textarea>
+                    </div>
+                    
+                    <div class="grid grid-cols-2 gap-4 mb-6">
+                        <div>
+                            <label class="block text-sm font-medium mb-2">Ville</label>
+                            <input type="text" name="city" class="w-full px-4 py-2 border rounded-lg" required>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium mb-2">Code postal</label>
+                            <input type="text" name="postal_code" class="w-full px-4 py-2 border rounded-lg" required>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-6">
+                        <label class="block text-sm font-medium mb-2">Description détaillée</label>
+                        <textarea name="description" class="w-full px-4 py-2 border rounded-lg" 
+                                  placeholder="Décrivez en détail votre besoin..."></textarea>
+                    </div>
+                    
+                    <button type="submit" 
+                            class="w-full bg-employer text-white py-3 rounded-lg font-bold hover:bg-blue-700 transition">
+                        Réserver pour 
+                        {% if service.price %}
+                        {{ service.price|intcomma }} CFA
+                        {% else %}
+                        Demander un devis
+                        {% endif %}
+                    </button>
+                </form>
+                {% endif %}
+                
+                <!-- Informations du prestataire -->
+                <div class="mt-8 pt-8 border-t">
+                    <div class="flex items-center mb-4">
+                        <div class="w-16 h-16 rounded-full bg-gray-200 flex items-center justify-center overflow-hidden shrink-0">
+                            {% if service.handyman.profile_picture %}
+                            <img src="{{ service.handyman.profile_picture.url }}" 
+                                 alt="{{ service.handyman.get_full_name }}" 
+                                 class="w-full h-full object-cover"
+                                 loading="lazy">
+                            {% else %}
+                            <i class="fas fa-user text-gray-400 text-2xl"></i>
+                            {% endif %}
+                        </div>
+                        <div class="ml-4 min-w-0">
+                            <h3 class="font-bold truncate">{{ service.handyman.get_full_name }}</h3>
+                            <p class="text-sm text-gray-500 truncate">
+                                {{ service.handyman.city }}{% if service.handyman.postal_code %}, {{ service.handyman.postal_code }}{% endif %}
+                            </p>
+                        </div>
+                    </div>
+                    
+                    <div class="grid grid-cols-2 gap-4 mb-6">
+                        <div class="bg-gray-50 rounded-lg p-3 text-center">
+                            <p class="text-xl font-bold">{{ handyman_stats.total_services }}</p>
+                            <p class="text-xs text-gray-500">Services</p>
+                        </div>
+                        <div class="bg-gray-50 rounded-lg p-3 text-center">
+                            <p class="text-xl font-bold">{{ handyman_stats.total_bookings }}</p>
+                            <p class="text-xs text-gray-500">Réservations</p>
+                        </div>
+                        <div class="bg-gray-50 rounded-lg p-3 text-center">
+                            <p class="text-xl font-bold">{{ handyman_stats.response_rate }}%</p>
+                            <p class="text-xs text-gray-500">Taux de réponse</p>
+                        </div>
+                        <div class="bg-gray-50 rounded-lg p-3 text-center">
+                            <p class="text-xl font-bold">{{ handyman_stats.member_since }}</p>
+                            <p class="text-xs text-gray-500">Membre depuis</p>
+                        </div>
+                    </div>
+                    
+                    <a href="{% url 'worker_profile' service.handyman.id %}" 
+                       class="block w-full text-center py-2 border border-employer text-employer rounded-lg hover:bg-blue-50 transition">
+                        Voir le profil complet
+                    </a>
+                </div>
+            </div>
+            
+            <!-- Services similaires -->
+            <div class="bg-white rounded-xl shadow-sm p-6">
+                <h2 class="text-xl font-bold mb-4">Services similaires</h2>
+                <div class="space-y-4">
+                    {% for similar_service in similar_services %}
+                    <a href="{% url 'service_detail' similar_service.id %}" class="flex items-center group">
+                        <div class="w-16 h-16 rounded-xl overflow-hidden flex-shrink-0 bg-gray-100">
+                            {% if similar_service.images.first %}
+                            <img src="{{ similar_service.images.first.image.url }}" 
+                                 alt="{{ similar_service.title }}" 
+                                 class="w-full h-full object-cover"
+                                 loading="lazy">
+                            {% else %}
+                            <div class="w-full h-full flex items-center justify-center">
+                                <i class="fas fa-image text-gray-300"></i>
+                            </div>
+                            {% endif %}
+                        </div>
+                        <div class="ml-4 min-w-0">
+                            <h4 class="font-medium group-hover:text-employer transition truncate">{{ similar_service.title }}</h4>
+                            <p class="text-sm text-gray-500 truncate">{{ similar_service.handyman.get_full_name }}</p>
+                            <div class="flex items-center mt-1">
+                                <div class="flex text-yellow-400">
+                                    {% for i in "12345" %}
+                                    <i class="fas fa-star {% if forloop.counter <= similar_service.avg_rating|default:0 %}text-yellow-400{% else %}text-gray-300{% endif %} text-xs"></i>
+                                    {% endfor %}
+                                </div>
+                                <span class="text-xs text-gray-500 ml-1">
+                                    ({{ similar_service.review_count|default:0 }})
+                                </span>
+                            </div>
+                        </div>
+                    </a>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+    <script>
+    // Configuration de la galerie
+    let currentImageIndex = 0;
+    const images = [
+        {% for image in service.images.all %}
+        "{{ image.image.url }}",
+        {% endfor %}
+    ];
+    
+    // Fonction pour ouvrir la modal
+    function openModal(index) {
+        currentImageIndex = index;
+        const modal = document.getElementById('galleryModal');
+        const modalImg = document.getElementById('modalImage');
+        const thumbnailsContainer = document.getElementById('thumbnailsContainer');
+        
+        // Charger l'image principale
+        modalImg.src = images[index];
+        modal.classList.add('active');
+        
+        // Créer les miniatures
+        thumbnailsContainer.innerHTML = '';
+        images.forEach((img, i) => {
+            const thumb = document.createElement('img');
+            thumb.src = img;
+            thumb.classList.add('thumbnail');
+            if (i === index) thumb.classList.add('active');
+            thumb.onclick = () => changeImage(i);
+            thumbnailsContainer.appendChild(thumb);
+        });
+        
+        // Empêcher le défilement de la page
+        document.body.style.overflow = 'hidden';
+    }
+    
+    // Fonction pour changer d'image dans la modal
+    function changeImage(index) {
+        currentImageIndex = index;
+        const modalImg = document.getElementById('modalImage');
+        const thumbnails = document.querySelectorAll('.thumbnail');
+        
+        // Effet d'animation
+        modalImg.classList.remove('zoomed');
+        setTimeout(() => {
+            modalImg.src = images[index];
+            modalImg.classList.add('zoomed');
+            
+            // Mettre à jour les miniatures actives
+            thumbnails.forEach((thumb, i) => {
+                if (i === index) {
+                    thumb.classList.add('active');
+                } else {
+                    thumb.classList.remove('active');
+                }
+            });
+        }, 150);
+    }
+    
+    // Navigation dans la galerie
+    function navigate(direction) {
+        let newIndex = currentImageIndex + direction;
+        if (newIndex < 0) newIndex = images.length - 1;
+        if (newIndex >= images.length) newIndex = 0;
+        changeImage(newIndex);
+    }
+    
+    // Fermer la modal
+    function closeModal() {
+        const modal = document.getElementById('galleryModal');
+        modal.classList.remove('active');
+        document.body.style.overflow = 'auto';
+    }
+    
+    // Initialisation des événements
+    document.addEventListener('DOMContentLoaded', function() {
+        // Ouverture de la modal au clic sur l'image principale
+        document.getElementById('mainImage')?.addEventListener('click', function() {
+            openModal(parseInt(this.getAttribute('data-index')));
+        });
+        
+        // Événements pour la modal
+        document.getElementById('closeModal')?.addEventListener('click', closeModal);
+        document.getElementById('prevBtn')?.addEventListener('click', () => navigate(-1));
+        document.getElementById('nextBtn')?.addEventListener('click', () => navigate(1));
+        
+        // Fermer la modal en cliquant en dehors de l'image
+        document.getElementById('galleryModal')?.addEventListener('click', function(e) {
+            if (e.target === this) closeModal();
+        });
+        
+        // Navigation au clavier
+        document.addEventListener('keydown', function(e) {
+            const modal = document.getElementById('galleryModal');
+            if (!modal.classList.contains('active')) return;
+            
+            if (e.key === 'Escape') closeModal();
+            if (e.key === 'ArrowLeft') navigate(-1);
+            if (e.key === 'ArrowRight') navigate(1);
+        });
+    });
+</script>
+{% endblock %}

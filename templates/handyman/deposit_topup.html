@@ -1,0 +1,230 @@
+{% extends "handyman/base_handyman.html" %}
+{% load static %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto py-8 px-4 sm:px-6 lg:px-8">
+  <!-- En-tête avec navigation -->
+  <div class="mb-8">
+    <a href="{% url 'handydash' %}" class="inline-flex items-center text-primary hover:text-green-700 transition">
+      <i class="fas fa-arrow-left mr-2"></i> Retour au tableau de bord
+    </a>
+    <h1 class="text-3xl font-bold text-gray-900 mt-4">Gestion de votre caution</h1>
+    <p class="text-gray-600 mt-2">Rechargez votre caution pour continuer à accepter des missions</p>
+  </div>
+
+  <!-- Cartes d'informations -->
+  <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+    <!-- Carte Solde actuel -->
+    <div class="bg-white rounded-xl shadow p-6 border-l-4 border-purple-500">
+      <div class="flex items-center">
+        <div class="w-12 h-12 rounded-xl bg-purple-100 flex items-center justify-center mr-4">
+          <i class="fas fa-wallet text-purple-600 text-xl"></i>
+        </div>
+        <div>
+          <p class="text-sm text-gray-500">Solde actuel</p>
+          <h3 class="text-2xl font-bold text-gray-800">{{ current_balance|floatformat:"0" }} FCFA</h3>
+        </div>
+      </div>
+    </div>
+
+    <!-- Carte Seuil recommandé -->
+    <div class="bg-white rounded-xl shadow p-6 border-l-4 border-blue-500">
+      <div class="flex items-center">
+        <div class="w-12 h-12 rounded-xl bg-blue-100 flex items-center justify-center mr-4">
+          <i class="fas fa-shield-alt text-blue-600 text-xl"></i>
+        </div>
+        <div>
+          <p class="text-sm text-gray-500">Seuil recommandé</p>
+          <h3 class="text-2xl font-bold text-gray-800">{{ deposit_threshold|floatformat:"0" }} FCFA</h3>
+        </div>
+      </div>
+    </div>
+
+    <!-- Carte Niveau de sécurité -->
+    <div class="bg-white rounded-xl shadow p-6 border-l-4 border-{% if deposit_percentage > 80 %}green{% elif deposit_percentage > 50 %}yellow{% else %}red{% endif %}-500">
+      <div class="flex items-center">
+        <div class="w-12 h-12 rounded-xl bg-{% if deposit_percentage > 80 %}green{% elif deposit_percentage > 50 %}yellow{% else %}red{% endif %}-100 flex items-center justify-center mr-4">
+          <i class="fas fa-{% if deposit_percentage > 80 %}check-circle{% elif deposit_percentage > 50 %}exclamation-triangle{% else %}times-circle{% endif %} text-{% if deposit_percentage > 80 %}green{% elif deposit_percentage > 50 %}yellow{% else %}red{% endif %}-600 text-xl"></i>
+        </div>
+        <div>
+          <p class="text-sm text-gray-500">Niveau de sécurité</p>
+          <h3 class="text-2xl font-bold text-gray-800">{{ deposit_percentage|floatformat:"0" }}%</h3>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Barre de progression -->
+  <div class="bg-white rounded-xl shadow p-6 mb-8">
+    <div class="flex justify-between mb-2">
+      <span class="text-sm font-medium text-gray-700">Votre progression</span>
+      <span class="text-sm font-medium text-gray-700">{{ deposit_percentage|floatformat:"0" }}%</span>
+    </div>
+    <div class="w-full bg-gray-200 rounded-full h-4">
+      <div class="bg-purple-600 h-4 rounded-full" style="width: {{ deposit_percentage }}%"></div>
+    </div>
+    <p class="text-sm text-gray-500 mt-3">
+      {% if deposit_percentage >= 100 %}
+        <i class="fas fa-check-circle text-green-500 mr-1"></i> Votre caution couvre toutes vos missions en cours
+      {% elif deposit_percentage > 50 %}
+        <i class="fas fa-exclamation-triangle text-yellow-500 mr-1"></i> Votre caution est presque suffisante
+      {% else %}
+        <i class="fas fa-exclamation-circle text-red-500 mr-1"></i> Rechargez votre caution pour accepter de nouvelles missions
+      {% endif %}
+    </p>
+  </div>
+
+  <!-- Formulaire de recharge -->
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+    <div class="lg:col-span-2 bg-white rounded-xl shadow p-6">
+      <h2 class="text-xl font-bold text-gray-800 mb-6">Recharger ma caution</h2>
+      
+      <form method="post" class="space-y-6">
+        {% csrf_token %}
+        
+        <!-- Champ Montant avec suggestions -->
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-2">Montant de recharge</label>
+          {{ form.amount }}
+          {% if form.amount.errors %}
+            <p class="mt-1 text-sm text-red-600">{{ form.amount.errors.0 }}</p>
+          {% endif %}
+          
+          <div class="mt-3 flex flex-wrap gap-3">
+            <button type="button" data-amount="5000" class="amount-suggestion-btn bg-gray-100 hover:bg-gray-200 text-gray-800 px-4 py-2 rounded-lg text-sm transition">
+              +5 000 FCFA
+            </button>
+            <button type="button" data-amount="10000" class="amount-suggestion-btn bg-gray-100 hover:bg-gray-200 text-gray-800 px-4 py-2 rounded-lg text-sm transition">
+              +10 000 FCFA
+            </button>
+            <button type="button" data-amount="20000" class="amount-suggestion-btn bg-gray-100 hover:bg-gray-200 text-gray-800 px-4 py-2 rounded-lg text-sm transition">
+              +20 000 FCFA
+            </button>
+            <button type="button" data-amount="{{ recommended_amount }}" class="amount-suggestion-btn bg-purple-100 hover:bg-purple-200 text-purple-700 px-4 py-2 rounded-lg text-sm font-medium transition">
+              <i class="fas fa-bolt mr-1"></i> {{ recommended_amount|floatformat:"0" }} FCFA (recommandé)
+            </button>
+          </div>
+        </div>
+        
+        <!-- Méthode de paiement -->
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-2">Méthode de paiement</label>
+          <div class="grid grid-cols-2 gap-4">
+            <div class="payment-method bg-gray-50 border-2 border-gray-300 rounded-lg p-4 cursor-pointer hover:border-purple-400 transition">
+              <div class="flex items-center">
+                <i class="fab fa-cc-mastercard text-2xl text-blue-800 mr-3"></i>
+                <div>
+                  <p class="font-medium">Carte bancaire</p>
+                  <p class="text-sm text-gray-500">Visa, Mastercard</p>
+                </div>
+              </div>
+            </div>
+            <div class="payment-method bg-gray-50 border-2 border-gray-300 rounded-lg p-4 cursor-pointer hover:border-purple-400 transition">
+              <div class="flex items-center">
+                <i class="fas fa-mobile-alt text-2xl text-green-600 mr-3"></i>
+                <div>
+                  <p class="font-medium">Mobile Money</p>
+                  <p class="text-sm text-gray-500">Orange Money, MTN Mobile Money</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <!-- Bouton de soumission -->
+        <div class="pt-4">
+          <button type="submit" class="w-full bg-purple-600 hover:bg-purple-700 text-white font-medium py-3 rounded-lg shadow-md transition flex items-center justify-center">
+            <i class="fas fa-lock mr-2"></i> Payer et recharger
+          </button>
+        </div>
+      </form>
+    </div>
+    
+    <!-- Historique des transactions -->
+    <div class="bg-white rounded-xl shadow p-6">
+      <h2 class="text-xl font-bold text-gray-800 mb-6">Dernières transactions</h2>
+      
+      {% if transactions %}
+      <div class="space-y-4">
+        {% for transaction in transactions %}
+        <div class="flex items-center justify-between py-3 border-b border-gray-100">
+          <div class="flex items-center">
+            <div class="w-10 h-10 rounded-full flex items-center justify-center mr-3
+                      {% if transaction.type == 'deposit' %}bg-green-100 text-green-600{% else %}bg-red-100 text-red-600{% endif %}">
+              <i class="fas 
+                {% if transaction.type == 'deposit' %}fa-arrow-down{% else %}fa-arrow-up{% endif %}"></i>
+            </div>
+            <div>
+              <p class="font-medium">{{ transaction.get_type_display }}</p>
+              <p class="text-sm text-gray-500">{{ transaction.date|date:"d/m/Y" }}</p>
+            </div>
+          </div>
+          <div class="text-right">
+            <p class="font-medium {% if transaction.type == 'deposit' %}text-green-600{% else %}text-red-600{% endif %}">
+              {% if transaction.type == 'deposit' %}+{% else %}-{% endif %}{{ transaction.amount|floatformat:"0" }} FCFA
+            </p>
+            <span class="px-2 py-1 text-xs rounded-full
+                {% if transaction.status == 'completed' %}bg-green-100 text-green-800
+                {% elif transaction.status == 'pending' %}bg-yellow-100 text-yellow-800
+                {% else %}bg-red-100 text-red-800{% endif %}">
+              {{ transaction.get_status_display }}
+            </span>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="text-center py-8">
+        <div class="mx-auto w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center text-gray-400 mb-4">
+          <i class="fas fa-exchange-alt text-xl"></i>
+        </div>
+        <p class="text-gray-500">Aucune transaction récente</p>
+      </div>
+      {% endif %}
+      
+      <div class="mt-8 bg-blue-50 rounded-lg p-4">
+        <div class="flex">
+          <div class="flex-shrink-0">
+            <i class="fas fa-info-circle text-blue-400 text-xl"></i>
+          </div>
+          <div class="ml-3">
+            <h3 class="text-sm font-medium text-blue-800">À propos de la caution</h3>
+            <div class="mt-2 text-sm text-blue-700">
+              <p>
+                La caution correspond à 11% du montant de chaque mission. 
+                Elle est déduite automatiquement après chaque mission terminée.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  // Gestion des suggestions de montant
+  document.querySelectorAll('.amount-suggestion-btn').forEach(btn => {
+    btn.addEventListener('click', function() {
+      const amount = this.getAttribute('data-amount');
+      document.getElementById('id_amount').value = amount;
+    });
+  });
+  
+  // Gestion de la sélection des méthodes de paiement
+  document.querySelectorAll('.payment-method').forEach(method => {
+    method.addEventListener('click', function() {
+      document.querySelectorAll('.payment-method').forEach(m => {
+        m.classList.remove('border-purple-500', 'bg-purple-50');
+        m.classList.add('border-gray-300');
+      });
+      this.classList.add('border-purple-500', 'bg-purple-50');
+      this.classList.remove('border-gray-300');
+    });
+  });
+});
+</script>
+{% endblock %}

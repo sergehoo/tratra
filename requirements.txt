@@ -1,0 +1,37 @@
+asgiref==3.8.1
+Django~=4.2.23
+django-cors-headers==4.7.0
+middleware==1.2.3
+pillow==11.1.0
+sqlparse==0.5.3
+typing_extensions==4.13.1
+
+django-allauth
+django-axes
+django-two-factor-auth
+django-environ
+django-cors-headers
+django-storages
+boto3                # Si tu utilises AWS S3
+django-cleanup
+django-simple-history
+django-activity-stream
+django-channels
+channels-redis       # Redis pour Channels
+django-push-notifications
+dj-stripe
+django-money
+django-filter
+django-haystack      # Si plein texte (ou elasticsearch-dsl)
+django-grappelli     # ou django-jazzmin
+django-import-export
+django-health-check
+celery
+django-celery-beat
+flower
+sentry-sdk
+pytest-django
+coverage
+psycopg[binary]      # PostgreSQL
+channels~=4.2.2
+djangorestframework~=3.16.0

@@ -1,0 +1,194 @@
+##docker-compose.yml
+version: "3.9"
+
+# ----- Réseau interne -----
+networks:
+  web:
+    driver: bridge
+
+# ----- Volumes persistants -----
+volumes:
+  traefik_letsencrypt:
+  postgres_data:
+  static_volume:
+  media_volume:
+
+services:
+  # --- Reverse proxy + TLS ---
+  traefik:
+    image: traefik:v3.1
+    command:
+      - --api.dashboard=false
+      - --providers.docker=true
+      - --entrypoints.websecure.address=:443
+      - --certificatesresolvers.lets.acme.tlschallenge=true
+      - --certificatesresolvers.lets.acme.email=${ACME_EMAIL}
+      - --certificatesresolvers.lets.acme.storage=/letsencrypt/acme.json
+    ports:
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - traefik_letsencrypt:/letsencrypt
+    networks: [web]
+    restart: unless-stopped
+
+  # --- Base de données Postgres + PostGIS ---
+  db:
+    image: postgis/postgis:16-3.4
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    networks: [web]
+    restart: unless-stopped
+
+  # --- Redis (broker + résultats Celery + Channels layer) ---
+  redis:
+    image: redis:7
+    command: ["redis-server","--save","","--appendonly","no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "PING"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    networks: [web]
+    restart: unless-stopped
+
+  # --- API Django/ASGI + Channels ---
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file: .env
+    command: ["/app/docker/entrypoint.sh", "daphne", "-b", "0.0.0.0", "-p", "8000", "tratra.asgi:application"]
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.api.rule=Host(`${API_HOST}`)
+      - traefik.http.routers.api.entrypoints=websecure
+      - traefik.http.routers.api.tls.certresolver=lets
+      - traefik.http.services.api.loadbalancer.server.port=8000
+      # Sécurité/perfs
+      - traefik.http.middlewares.api-rl.ratelimit.average=150
+      - traefik.http.middlewares.api-rl.ratelimit.burst=250
+      - traefik.http.routers.api.middlewares=api-rl@docker
+    volumes:
+      - static_volume:/app/staticfiles
+      - media_volume:/app/media
+    networks: [web]
+    restart: unless-stopped
+
+  # --- Celery Worker ---
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file: .env
+    command: celery -A tratra worker -l info --prefetch-multiplier=1 --max-tasks-per-child=200 --queues=default,notifications
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks: [web]
+    restart: unless-stopped
+
+  # --- Celery Beat (planificateur) ---
+  beat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file: .env
+    command: celery -A tratra beat -l info --scheduler django_celery_beat.schedulers:DatabaseScheduler
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks: [web]
+    restart: unless-stopped
+
+  # --- (Optionnel) Flower monitoring ---
+  # flower:
+  #   image: mher/flower
+  #   command: flower --broker=${REDIS_URL}
+  #   environment:
+  #     FLOWER_BASIC_AUTH: ${FLOWER_AUTH}
+  #   labels:
+  #     - traefik.enable=true
+  #     - traefik.http.routers.flower.rule=Host(`${FLOWER_HOST}`)
+  #     - traefik.http.routers.flower.entrypoints=websecure
+  #     - traefik.http.routers.flower.tls.certresolver=lets
+  #     - traefik.http.services.flower.loadbalancer.server.port=5555
+  #   networks: [web]
+  #   restart: unless-stopped
+
+#services:
+#  tratraDB:
+#    image: postgres:15
+#    environment:
+#      POSTGRES_USER: postgres
+#      POSTGRES_PASSWORD: postgres
+#      POSTGRES_DB: tratra
+#    volumes:
+#      - postgres_data:/var/lib/postgresql/data
+#    ports:
+#      - "5432:5432"
+#
+#  redis:
+#    image: redis:7
+#    ports:
+#      - "6379:6379"
+#
+#  tratraweb:
+#    build: .
+#    command: >
+#      sh -c "python manage.py migrate &&
+#             python manage.py runserver 0.0.0.0:8000"
+#    volumes:
+#      - .:/app
+#    ports:
+#      - "8000:8000"
+#    depends_on:
+#      - tratraDB
+#      - redis
+#
+#  celery:
+#    build: .
+#    command: celery -A tratra worker -l info
+#    volumes:
+#      - .:/app
+#    depends_on:
+#      - db
+#      - redis
+#
+#  celery-beat:
+#    build: .
+#    command: celery -A tratra beat -l info --scheduler django_celery_beat.schedulers:DatabaseScheduler
+#    volumes:
+#      - .:/app
+#    depends_on:
+#      - tratraDB
+#      - redis
+#
+#  flower:
+#    image: mher/flower
+#    command: flower --broker=redis://redis:6379/0
+#    ports:
+#      - "5555:5555"
+#    depends_on:
+#      - redis
+#
+#volumes:
+#  postgres_data:
