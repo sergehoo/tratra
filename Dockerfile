@@ -36,7 +36,7 @@ RUN #useradd -m appuser && chown -R appuser:appuser /app
 RUN python -m compileall -q .
 
 # Entrypoint: migrations + collectstatic puis lance daphne
-COPY docker/entrypoint.sh /app/docker/entrypoint.sh
+COPY entrypoint.sh /app/docker/entrypoint.sh
 RUN chmod +x /app/docker/entrypoint.sh
 
 EXPOSE 8000
