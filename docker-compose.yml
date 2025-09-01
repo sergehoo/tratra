@@ -103,7 +103,7 @@ services:
     env_file: .env
     command: celery -A tratra worker -l info --prefetch-multiplier=1 --max-tasks-per-child=200 --queues=default,notifications
     depends_on:
-      db:
+      tratradb:
         condition: service_healthy
       redis:
         condition: service_healthy
@@ -118,7 +118,7 @@ services:
     env_file: .env
     command: celery -A tratra beat -l info --scheduler django_celery_beat.schedulers:DatabaseScheduler
     depends_on:
-      db:
+      tratradb:
         condition: service_healthy
       redis:
         condition: service_healthy
