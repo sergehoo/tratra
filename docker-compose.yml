@@ -1,7 +1,7 @@
 networks:
-  web:          # réseau interne de l’app
+  web:
     driver: bridge
-  proxy:        # réseau partagé avec Traefik (externe)
+  proxy:
     external: true
 
 volumes:
@@ -10,7 +10,6 @@ volumes:
   media_volume:
 
 services:
-  # --- Base de données Postgres + PostGIS ---
   tratradb:
     image: postgis/postgis:16-3.4
     environment:
@@ -27,7 +26,6 @@ services:
     networks: [web]
     restart: unless-stopped
 
-  # --- Redis (broker Celery + cache + Channels) ---
   redis:
     image: redis:7
     command: ["redis-server","--save","","--appendonly","no"]
@@ -39,16 +37,14 @@ services:
     networks: [web]
     restart: unless-stopped
 
-  # --- API Django/ASGI (Daphne) ---
   tratraweb:
     build:
       context: .
-    dockerfile: Dockerfile
+      dockerfile: Dockerfile   # <— bien SOUS build:
     env_file: .env
     environment:
-      # sécurise les valeurs critiques au cas où .env ne serait pas lu
       DJANGO_SETTINGS_MODULE: "tratra.settings.prod"
-      DB_HOST: "tratradb"          # <— IMPORTANT : correspond au service DB
+      DB_HOST: "tratradb"
       DB_PORT: "5432"
       CELERY_BROKER_URL: "redis://redis:6379/0"
       CELERY_RESULT_BACKEND: "redis://redis:6379/0"
@@ -60,16 +56,10 @@ services:
         condition: service_healthy
     labels:
       - traefik.enable=true
-
-      # FQDN de l’API exposée par Traefik (mets la variable dans .env)
       - traefik.http.routers.tratraweb.rule=Host(`${TRATRA_HOST}`)
       - traefik.http.routers.tratraweb.entrypoints=websecure
       - traefik.http.routers.tratraweb.tls.certresolver=lets
-
-      # Port interne du conteneur à publier via Traefik
       - traefik.http.services.tratraweb.loadbalancer.server.port=8000
-
-      # Middlewares (sécurité / compression / rate-limit)
       - traefik.http.middlewares.tratraweb-sec-headers.headers.stsSeconds=31536000
       - traefik.http.middlewares.tratraweb-sec-headers.headers.stsIncludeSubdomains=true
       - traefik.http.middlewares.tratraweb-sec-headers.headers.stsPreload=true
@@ -80,16 +70,12 @@ services:
       - traefik.http.middlewares.tratraweb-rl.ratelimit.average=150
       - traefik.http.middlewares.tratraweb-rl.ratelimit.burst=250
       - traefik.http.routers.tratraweb.middlewares=tratraweb-sec-headers@docker,tratraweb-compress@docker,tratraweb-rl@docker
-
     volumes:
       - static_volume:/app/staticfiles
       - media_volume:/app/media
-    networks:
-      - web
-      - proxy
+    networks: [web, proxy]
     restart: unless-stopped
 
-  # --- Celery Worker ---
   worker:
     build:
       context: .
@@ -110,7 +96,6 @@ services:
     networks: [web]
     restart: unless-stopped
 
-  # --- Celery Beat (planificateur) ---
   beat:
     build:
       context: .
