@@ -1,7 +1,3 @@
-# docker-compose.yml (stack de l’app tratra — sans Traefik)
-# Traefik tourne dans un autre compose et expose 80/443
-# Assure-toi que le réseau externe "proxy" existe:  docker network ls | grep proxy || docker network create proxy
-
 networks:
   web:          # réseau interne de l’app
     driver: bridge
@@ -43,32 +39,37 @@ services:
     networks: [web]
     restart: unless-stopped
 
-  # --- tratraweb Django/ASGI (Daphne) ---
+  # --- API Django/ASGI (Daphne) ---
   tratraweb:
     build:
       context: .
-      dockerfile: Dockerfile
+    dockerfile: Dockerfile
     env_file: .env
-    # Entrypoint qui fait: check DB/Redis, migrate, collectstatic… puis Daphne
+    environment:
+      # sécurise les valeurs critiques au cas où .env ne serait pas lu
+      DJANGO_SETTINGS_MODULE: "tratra.settings.prod"
+      DB_HOST: "tratradb"          # <— IMPORTANT : correspond au service DB
+      DB_PORT: "5432"
+      CELERY_BROKER_URL: "redis://redis:6379/0"
+      CELERY_RESULT_BACKEND: "redis://redis:6379/0"
     command: ["/app/docker/entrypoint.sh", "daphne", "-b", "0.0.0.0", "-p", "8000", "tratra.asgi:application"]
     depends_on:
-      db:
+      tratradb:
         condition: service_healthy
       redis:
         condition: service_healthy
-    # Labels Traefik: route HTTPS -> service tratraweb:8000
     labels:
       - traefik.enable=true
 
-      # Remplace par ton FQDN d’tratraweb (ex .env: tratraweb_HOST=tratraweb.tratra.ci ou tratra.ci/tratraweb si tu préfères un sous-chemin)
-      - traefik.http.routers.tratraweb.rule=Host(`${tratraweb_HOST}`)
+      # FQDN de l’API exposée par Traefik (mets la variable dans .env)
+      - traefik.http.routers.tratraweb.rule=Host(`${TRATRA_HOST}`)
       - traefik.http.routers.tratraweb.entrypoints=websecure
       - traefik.http.routers.tratraweb.tls.certresolver=lets
 
-      # Port cible dans le conteneur
+      # Port interne du conteneur à publier via Traefik
       - traefik.http.services.tratraweb.loadbalancer.server.port=8000
 
-      # Middlewares utiles (sécurité / compression / rate-limit)
+      # Middlewares (sécurité / compression / rate-limit)
       - traefik.http.middlewares.tratraweb-sec-headers.headers.stsSeconds=31536000
       - traefik.http.middlewares.tratraweb-sec-headers.headers.stsIncludeSubdomains=true
       - traefik.http.middlewares.tratraweb-sec-headers.headers.stsPreload=true
@@ -78,21 +79,14 @@ services:
       - traefik.http.middlewares.tratraweb-compress.compress=true
       - traefik.http.middlewares.tratraweb-rl.ratelimit.average=150
       - traefik.http.middlewares.tratraweb-rl.ratelimit.burst=250
-
-      # Chaine de middlewares sur le routeur
       - traefik.http.routers.tratraweb.middlewares=tratraweb-sec-headers@docker,tratraweb-compress@docker,tratraweb-rl@docker
-
-      # (Optionnel) Sticky / circuit breaker si tu scales l’tratraweb
-      # - traefik.http.services.tratraweb.loadbalancer.sticky.cookie.name=tratra_tratraweb
-      # - traefik.http.services.tratraweb.loadbalancer.healthcheck.path=/healthz
-      # - traefik.http.services.tratraweb.loadbalancer.healthcheck.interval=10s
 
     volumes:
       - static_volume:/app/staticfiles
       - media_volume:/app/media
     networks:
-      - web     # parle à db/redis
-      - proxy   # exposé à Traefik
+      - web
+      - proxy
     restart: unless-stopped
 
   # --- Celery Worker ---
@@ -101,9 +95,15 @@ services:
       context: .
       dockerfile: Dockerfile
     env_file: .env
+    environment:
+      DJANGO_SETTINGS_MODULE: "tratra.settings.prod"
+      DB_HOST: "tratradb"
+      DB_PORT: "5432"
+      CELERY_BROKER_URL: "redis://redis:6379/0"
+      CELERY_RESULT_BACKEND: "redis://redis:6379/0"
     command: celery -A tratra worker -l info --prefetch-multiplier=1 --max-tasks-per-child=200 --queues=default,notifications
     depends_on:
-      db:
+      tratradb:
         condition: service_healthy
       redis:
         condition: service_healthy
@@ -116,9 +116,15 @@ services:
       context: .
       dockerfile: Dockerfile
     env_file: .env
+    environment:
+      DJANGO_SETTINGS_MODULE: "tratra.settings.prod"
+      DB_HOST: "tratradb"
+      DB_PORT: "5432"
+      CELERY_BROKER_URL: "redis://redis:6379/0"
+      CELERY_RESULT_BACKEND: "redis://redis:6379/0"
     command: celery -A tratra beat -l info --scheduler django_celery_beat.schedulers:DatabaseScheduler
     depends_on:
-      db:
+      tratradb:
         condition: service_healthy
       redis:
         condition: service_healthy
