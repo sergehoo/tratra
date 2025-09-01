@@ -8,7 +8,7 @@ warn()  { printf "\033[1;33m[WARN]\033[0m %s\n" "$*"; }
 error() { printf "\033[1;31m[ERR ]\033[0m %s\n" "$*" >&2; }
 
 # Defaults
-: "${DJANGO_SETTINGS_MODULE:=abmci.settings.prod}"
+: "${DJANGO_SETTINGS_MODULE:=abmci.settings}"
 : "${DEBUG:=False}"
 : "${DB_HOST:=}"
 : "${DB_PORT:=5432}"
