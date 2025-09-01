@@ -43,8 +43,8 @@ services:
     networks: [web]
     restart: unless-stopped
 
-  # --- API Django/ASGI (Daphne) ---
-  api:
+  # --- tratraweb Django/ASGI (Daphne) ---
+  tratraweb:
     build:
       context: .
       dockerfile: Dockerfile
@@ -56,36 +56,36 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    # Labels Traefik: route HTTPS -> service api:8000
+    # Labels Traefik: route HTTPS -> service tratraweb:8000
     labels:
       - traefik.enable=true
 
-      # Remplace par ton FQDN d’API (ex .env: API_HOST=api.tratra.ci ou tratra.ci/api si tu préfères un sous-chemin)
-      - traefik.http.routers.api.rule=Host(`${API_HOST}`)
-      - traefik.http.routers.api.entrypoints=websecure
-      - traefik.http.routers.api.tls.certresolver=lets
+      # Remplace par ton FQDN d’tratraweb (ex .env: tratraweb_HOST=tratraweb.tratra.ci ou tratra.ci/tratraweb si tu préfères un sous-chemin)
+      - traefik.http.routers.tratraweb.rule=Host(`${tratraweb_HOST}`)
+      - traefik.http.routers.tratraweb.entrypoints=websecure
+      - traefik.http.routers.tratraweb.tls.certresolver=lets
 
       # Port cible dans le conteneur
-      - traefik.http.services.api.loadbalancer.server.port=8000
+      - traefik.http.services.tratraweb.loadbalancer.server.port=8000
 
       # Middlewares utiles (sécurité / compression / rate-limit)
-      - traefik.http.middlewares.api-sec-headers.headers.stsSeconds=31536000
-      - traefik.http.middlewares.api-sec-headers.headers.stsIncludeSubdomains=true
-      - traefik.http.middlewares.api-sec-headers.headers.stsPreload=true
-      - traefik.http.middlewares.api-sec-headers.headers.contentTypeNosniff=true
-      - traefik.http.middlewares.api-sec-headers.headers.frameDeny=true
-      - traefik.http.middlewares.api-sec-headers.headers.referrerPolicy=no-referrer
-      - traefik.http.middlewares.api-compress.compress=true
-      - traefik.http.middlewares.api-rl.ratelimit.average=150
-      - traefik.http.middlewares.api-rl.ratelimit.burst=250
+      - traefik.http.middlewares.tratraweb-sec-headers.headers.stsSeconds=31536000
+      - traefik.http.middlewares.tratraweb-sec-headers.headers.stsIncludeSubdomains=true
+      - traefik.http.middlewares.tratraweb-sec-headers.headers.stsPreload=true
+      - traefik.http.middlewares.tratraweb-sec-headers.headers.contentTypeNosniff=true
+      - traefik.http.middlewares.tratraweb-sec-headers.headers.frameDeny=true
+      - traefik.http.middlewares.tratraweb-sec-headers.headers.referrerPolicy=no-referrer
+      - traefik.http.middlewares.tratraweb-compress.compress=true
+      - traefik.http.middlewares.tratraweb-rl.ratelimit.average=150
+      - traefik.http.middlewares.tratraweb-rl.ratelimit.burst=250
 
       # Chaine de middlewares sur le routeur
-      - traefik.http.routers.api.middlewares=api-sec-headers@docker,api-compress@docker,api-rl@docker
+      - traefik.http.routers.tratraweb.middlewares=tratraweb-sec-headers@docker,tratraweb-compress@docker,tratraweb-rl@docker
 
-      # (Optionnel) Sticky / circuit breaker si tu scales l’API
-      # - traefik.http.services.api.loadbalancer.sticky.cookie.name=tratra_api
-      # - traefik.http.services.api.loadbalancer.healthcheck.path=/healthz
-      # - traefik.http.services.api.loadbalancer.healthcheck.interval=10s
+      # (Optionnel) Sticky / circuit breaker si tu scales l’tratraweb
+      # - traefik.http.services.tratraweb.loadbalancer.sticky.cookie.name=tratra_tratraweb
+      # - traefik.http.services.tratraweb.loadbalancer.healthcheck.path=/healthz
+      # - traefik.http.services.tratraweb.loadbalancer.healthcheck.interval=10s
 
     volumes:
       - static_volume:/app/staticfiles
