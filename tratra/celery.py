@@ -2,7 +2,7 @@
 import os
 from celery import Celery
 
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "tratra.settings.prod")  # ou .dev selon ton env
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "tratra.settings")  # ou .dev selon ton env
 
 app = Celery("tratra")
 
