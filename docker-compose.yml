@@ -47,7 +47,7 @@ services:
   tratraweb:
     build:
       context: .
-    dockerfile: Dockerfile
+      dockerfile: Dockerfile
     env_file: .env
     # Entrypoint qui fait: check DB/Redis, migrate, collectstatic… puis Daphne
     command: ["/app/docker/entrypoint.sh", "daphne", "-b", "0.0.0.0", "-p", "8000", "tratra.asgi:application"]
