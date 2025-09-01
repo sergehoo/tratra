@@ -1,37 +1,19 @@
-##docker-compose.yml
-version: "3.9"
+# docker-compose.yml (stack de l’app tratra — sans Traefik)
+# Traefik tourne dans un autre compose et expose 80/443
+# Assure-toi que le réseau externe "proxy" existe:  docker network ls | grep proxy || docker network create proxy
 
-# ----- Réseau interne -----
 networks:
-  web:
+  web:          # réseau interne de l’app
     driver: bridge
+  proxy:        # réseau partagé avec Traefik (externe)
+    external: true
 
-# ----- Volumes persistants -----
 volumes:
-  traefik_letsencrypt:
   postgres_data:
   static_volume:
   media_volume:
 
 services:
-  # --- Reverse proxy + TLS ---
-  traefik:
-    image: traefik:v3.1
-    command:
-      - --api.dashboard=false
-      - --providers.docker=true
-      - --entrypoints.websecure.address=:443
-      - --certificatesresolvers.lets.acme.tlschallenge=true
-      - --certificatesresolvers.lets.acme.email=${ACME_EMAIL}
-      - --certificatesresolvers.lets.acme.storage=/letsencrypt/acme.json
-    ports:
-      - "443:443"
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - traefik_letsencrypt:/letsencrypt
-    networks: [web]
-    restart: unless-stopped
-
   # --- Base de données Postgres + PostGIS ---
   db:
     image: postgis/postgis:16-3.4
@@ -49,7 +31,7 @@ services:
     networks: [web]
     restart: unless-stopped
 
-  # --- Redis (broker + résultats Celery + Channels layer) ---
+  # --- Redis (broker Celery + cache + Channels) ---
   redis:
     image: redis:7
     command: ["redis-server","--save","","--appendonly","no"]
@@ -61,32 +43,56 @@ services:
     networks: [web]
     restart: unless-stopped
 
-  # --- API Django/ASGI + Channels ---
+  # --- API Django/ASGI (Daphne) ---
   api:
     build:
       context: .
       dockerfile: Dockerfile
     env_file: .env
+    # Entrypoint qui fait: check DB/Redis, migrate, collectstatic… puis Daphne
     command: ["/app/docker/entrypoint.sh", "daphne", "-b", "0.0.0.0", "-p", "8000", "tratra.asgi:application"]
     depends_on:
       db:
         condition: service_healthy
       redis:
         condition: service_healthy
+    # Labels Traefik: route HTTPS -> service api:8000
     labels:
       - traefik.enable=true
+
+      # Remplace par ton FQDN d’API (ex .env: API_HOST=api.tratra.ci ou tratra.ci/api si tu préfères un sous-chemin)
       - traefik.http.routers.api.rule=Host(`${API_HOST}`)
       - traefik.http.routers.api.entrypoints=websecure
       - traefik.http.routers.api.tls.certresolver=lets
+
+      # Port cible dans le conteneur
       - traefik.http.services.api.loadbalancer.server.port=8000
-      # Sécurité/perfs
+
+      # Middlewares utiles (sécurité / compression / rate-limit)
+      - traefik.http.middlewares.api-sec-headers.headers.stsSeconds=31536000
+      - traefik.http.middlewares.api-sec-headers.headers.stsIncludeSubdomains=true
+      - traefik.http.middlewares.api-sec-headers.headers.stsPreload=true
+      - traefik.http.middlewares.api-sec-headers.headers.contentTypeNosniff=true
+      - traefik.http.middlewares.api-sec-headers.headers.frameDeny=true
+      - traefik.http.middlewares.api-sec-headers.headers.referrerPolicy=no-referrer
+      - traefik.http.middlewares.api-compress.compress=true
       - traefik.http.middlewares.api-rl.ratelimit.average=150
       - traefik.http.middlewares.api-rl.ratelimit.burst=250
-      - traefik.http.routers.api.middlewares=api-rl@docker
+
+      # Chaine de middlewares sur le routeur
+      - traefik.http.routers.api.middlewares=api-sec-headers@docker,api-compress@docker,api-rl@docker
+
+      # (Optionnel) Sticky / circuit breaker si tu scales l’API
+      # - traefik.http.services.api.loadbalancer.sticky.cookie.name=tratra_api
+      # - traefik.http.services.api.loadbalancer.healthcheck.path=/healthz
+      # - traefik.http.services.api.loadbalancer.healthcheck.interval=10s
+
     volumes:
       - static_volume:/app/staticfiles
       - media_volume:/app/media
-    networks: [web]
+    networks:
+      - web     # parle à db/redis
+      - proxy   # exposé à Traefik
     restart: unless-stopped
 
   # --- Celery Worker ---
@@ -118,7 +124,6 @@ services:
         condition: service_healthy
     networks: [web]
     restart: unless-stopped
-
   # --- (Optionnel) Flower monitoring ---
   # flower:
   #   image: mher/flower
