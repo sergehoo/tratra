@@ -1,9 +1,8 @@
 # settings/prod.py
-
+import os
 from .base import *
 
-import os
-
+DEBUG = False
 
 DATABASES = {
     'default': {
