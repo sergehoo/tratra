@@ -62,11 +62,13 @@ services:
       - traefik.enable=true
       # Traefik doit utiliser le réseau "proxy"
       - traefik.docker.network=proxy
+      - traefik.http.routers.tratraweb-1934.rule=Host(`afriqconsulting.site`)
+
 
       # Router provisoire en clair sur 1934
-      - traefik.http.routers.tratraweb-1934.rule=Host(`${tratraweb_HOST}`)
+#      - traefik.http.routers.tratraweb-1934.rule=Host(`${tratraweb_HOST}`)
       - traefik.http.routers.tratraweb-1934.entrypoints=debug1934
-
+      - traefik.http.routers.tratraweb-1934.service=tratraweb-svc
       # Router unique pour l’app
 #      - traefik.http.routers.tratraweb-app.rule=Host(`${tratraweb_HOST}`)
 #      - traefik.http.routers.tratraweb-app.entrypoints=websecure
