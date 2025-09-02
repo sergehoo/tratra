@@ -200,6 +200,7 @@ AUTH_USER_MODEL = 'handy.User'  # Remplacez 'handy' par le nom de votre app
 
 # === CHANNELS ===
 ASGI_APPLICATION = 'tratra.asgi.application'
+
 CHANNEL_LAYERS = {
     'default': {
         'BACKEND': 'channels_redis.core.RedisChannelLayer',
@@ -208,6 +209,7 @@ CHANNEL_LAYERS = {
         },
     },
 }
+
 TAILWIND_APP_NAME = 'theme'
 INTERNAL_IPS = ['127.0.0.1']
 # === CELERY ===
@@ -265,10 +267,11 @@ AXES_FAILURE_LIMIT = 5
 AXES_COOLOFF_TIME = 1  # heure
 AXES_LOCK_OUT_AT_FAILURE = True
 AXES_ENABLE_ADMIN = True
-AXES_ONLY_USER_FAILURES = False
 AXES_VERBOSE = True
 AXES_LOCKOUT_TEMPLATE = '403.html'  # Utilise un template custom si bloqué
-
+SECURE_HSTS_SECONDS = 31536000
+SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+SECURE_HSTS_PRELOAD = True
 # === OTHER ===
 ACCOUNT_FORMS = {
     'signup': 'handy.forms.CustomSignupForm',

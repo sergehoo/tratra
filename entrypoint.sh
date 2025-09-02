@@ -1,3 +1,4 @@
+#entrypoint.sh
 #!/usr/bin/env bash
 set -euo pipefail
 
@@ -85,7 +86,23 @@ print("Timeout waiting for Redis", file=sys.stderr); sys.exit(1)
 PYCODE
   ok "Redis prêt."
 }
-
+channels_preflight() {
+  log "Vérification Channels/ASGI…"
+  python - <<'PY'
+import sys, importlib, pkgutil, channels
+print("channels file:", channels.__file__)
+print("channels __version__:", getattr(channels, "__version__", None))
+print("has DEFAULT_CHANNEL_LAYER:", hasattr(channels, "DEFAULT_CHANNEL_LAYER"))
+mods=[m.name for m in pkgutil.iter_modules() if m.name.startswith("channels")]
+print("installed modules:", mods)
+try:
+    importlib.import_module("channels.consumer")
+    print("import channels.consumer: OK")
+except Exception as e:
+    print("import channels.consumer: FAIL ->", e)
+    sys.exit(2)
+PY
+}
 # ---------- Django checks / migrations / static ----------
 django_checks() {
   log "Django system check…"
@@ -168,6 +185,7 @@ log "DJANGO_SETTINGS_MODULE=${DJANGO_SETTINGS_MODULE} | DEBUG=${DEBUG}"
 wait_for_postgres
 wait_for_redis
 django_checks
+channels_preflight
 run_migrations
 collect_static
 ensure_dirs_permissions

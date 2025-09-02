@@ -21,8 +21,21 @@ COPY requirements.txt /app/
 
 RUN pip install --no-cache-dir --upgrade pip \
  && pip uninstall -y django-channels || true \
- && pip uninstall -y channels daphne || true \
+ && pip uninstall -y channels-redis channels_redis channels daphne asgiref || true \
+ && python - <<'PY'
+import shutil, glob, site
+paths = site.getsitepackages() + [site.getusersitepackages()]
+for p in paths:
+    for pat in ("channels*",):
+        for f in glob.glob(p + "/" + pat):
+            try: shutil.rmtree(f)
+            except Exception: pass
+PY
  && pip install --no-cache-dir -r requirements.txt
+
+
+
+
 # Option B (si vous utilisez Poetry) :
 # COPY pyproject.toml poetry.lock* /app/
 # RUN pip install poetry && poetry config virtualenvs.create false \
