@@ -141,7 +141,8 @@ ACCOUNT_EMAIL_REQUIRED = True
 LOGIN_REDIRECT_URL = 'handydash'
 ACCOUNT_LOGOUT_REDIRECT_URL = '/'
 ACCOUNT_USERNAME_REQUIRED = False  # Ne pas exiger le champ username
-ACCOUNT_AUTHENTICATION_METHOD = 'email'  # Auth via email uniquement
+# ACCOUNT_AUTHENTICATION_METHOD = 'email'  # Auth via email uniquement
+ACCOUNT_LOGIN_METHODS = {"email"}  # ou {"email","username"} selon ton besoin
 ACCOUNT_UNIQUE_EMAIL = True  # Empêche les doublons
 
 REST_FRAMEWORK = {
@@ -263,7 +264,7 @@ AXES_FAILURE_LIMIT = 5
 AXES_COOLOFF_TIME = 1  # heure
 AXES_LOCK_OUT_AT_FAILURE = True
 AXES_ENABLE_ADMIN = True
-AXES_USE_USER_AGENT = True
+AXES_ONLY_USER_FAILURES = False
 AXES_VERBOSE = True
 AXES_LOCKOUT_TEMPLATE = '403.html'  # Utilise un template custom si bloqué
 
