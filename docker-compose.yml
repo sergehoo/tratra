@@ -1,3 +1,4 @@
+#/Users/ogahserge/Documents/tratra/docker-compose.yml
 # docker-compose.yml (stack de l’app tratra — sans Traefik)
 # Traefik tourne dans un autre compose et expose 80/443
 # Assure-toi que le réseau externe "proxy" existe:  docker network ls | grep proxy || docker network create proxy
@@ -59,16 +60,24 @@ services:
     # Labels Traefik: route HTTPS -> service tratraweb:8000
     labels:
       - traefik.enable=true
+      # Traefik doit utiliser le réseau "proxy"
+      - traefik.docker.network=proxy
+      -
+      # Router provisoire en clair sur 1934
+      - traefik.http.routers.tratraweb-1934.rule=Host(`${tratraweb_HOST}`)
+      - traefik.http.routers.tratraweb-1934.entrypoints=debug1934
 
-      # Remplace par ton FQDN d’tratraweb (ex .env: tratraweb_HOST=tratraweb.tratra.ci ou tratra.ci/tratraweb si tu préfères un sous-chemin)
-      - traefik.http.routers.tratraweb.rule=Host(`${tratraweb_HOST}`)
-      - traefik.http.routers.tratraweb.entrypoints=websecure
-      - traefik.http.routers.tratraweb.tls.certresolver=lets
+      # Router unique pour l’app
+#      - traefik.http.routers.tratraweb-app.rule=Host(`${tratraweb_HOST}`)
+#      - traefik.http.routers.tratraweb-app.entrypoints=websecure
+#      - traefik.http.routers.tratraweb-app.tls.certresolver=lets
+      # Chaîne de middlewares (renommée pour éviter toute collision de noms globaux)
+#      - traefik.http.routers.tratraweb-app.middlewares=tratraweb-sec-headers@docker,tratraweb-compress@docker,tratraweb-rl@docker
 
-      # Port cible dans le conteneur
-      - traefik.http.services.tratraweb.loadbalancer.server.port=8000
+      # Service séparé (nom explicite)
+      - traefik.http.services.tratraweb-svc.loadbalancer.server.port=8000
 
-      # Middlewares utiles (sécurité / compression / rate-limit)
+      # Middlewares (noms préfixés "tratraweb-")
       - traefik.http.middlewares.tratraweb-sec-headers.headers.stsSeconds=31536000
       - traefik.http.middlewares.tratraweb-sec-headers.headers.stsIncludeSubdomains=true
       - traefik.http.middlewares.tratraweb-sec-headers.headers.stsPreload=true
@@ -78,14 +87,6 @@ services:
       - traefik.http.middlewares.tratraweb-compress.compress=true
       - traefik.http.middlewares.tratraweb-rl.ratelimit.average=150
       - traefik.http.middlewares.tratraweb-rl.ratelimit.burst=250
-
-      # Chaine de middlewares sur le routeur
-      - traefik.http.routers.tratraweb.middlewares=tratraweb-sec-headers@docker,tratraweb-compress@docker,tratraweb-rl@docker
-
-      # (Optionnel) Sticky / circuit breaker si tu scales l’tratraweb
-      # - traefik.http.services.tratraweb.loadbalancer.sticky.cookie.name=tratra_tratraweb
-      # - traefik.http.services.tratraweb.loadbalancer.healthcheck.path=/healthz
-      # - traefik.http.services.tratraweb.loadbalancer.healthcheck.interval=10s
 
     volumes:
       - static_volume:/app/staticfiles
