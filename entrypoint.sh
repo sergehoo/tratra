@@ -1,6 +1,5 @@
-#entrypoint.sh
-#!/usr/bin/env bash
-set -euo pipefail
+#!/bin/sh
+set -eu
 
 # ---------- Helpers ----------
 log()   { printf "\033[1;34m[entrypoint]\033[0m %s\n" "$*"; }
@@ -9,7 +8,7 @@ warn()  { printf "\033[1;33m[WARN]\033[0m %s\n" "$*"; }
 error() { printf "\033[1;31m[ERR ]\033[0m %s\n" "$*" >&2; }
 
 # ---------- Defaults (adaptés à Docker) ----------
-: "${DJANGO_SETTINGS_MODULE:=tratra.settings}"   # <- mets ton module réel ici
+: "${DJANGO_SETTINGS_MODULE:=tratra.settings}"
 : "${DEBUG:=False}"
 
 # DB dans Docker : service "tratradb"
@@ -56,13 +55,15 @@ for _ in range(60):
             try_psycopg3()
         print("DB up")
         sys.exit(0)
-    except Exception as e:
+    except Exception:
         time.sleep(2)
 
 print("Timeout waiting for DB", file=sys.stderr)
 sys.exit(1)
 PYCODE
-  do sleep 2; done
+  do
+    sleep 2
+  done
   ok "Postgres prêt."
 }
 
@@ -86,11 +87,18 @@ print("Timeout waiting for Redis", file=sys.stderr); sys.exit(1)
 PYCODE
   ok "Redis prêt."
 }
+
+# ---------- Préflight Channels ----------
 channels_preflight() {
   log "Vérification Channels/ASGI…"
   python - <<'PY'
-import sys, importlib, pkgutil, channels
-print("channels file:", channels.__file__)
+import sys, importlib, pkgutil
+try:
+    import channels
+except Exception as e:
+    print("import channels: FAIL ->", e); sys.exit(2)
+
+print("channels file:", getattr(channels, "__file__", "?"))
 print("channels __version__:", getattr(channels, "__version__", None))
 print("has DEFAULT_CHANNEL_LAYER:", hasattr(channels, "DEFAULT_CHANNEL_LAYER"))
 mods=[m.name for m in pkgutil.iter_modules() if m.name.startswith("channels")]
@@ -103,6 +111,7 @@ except Exception as e:
     sys.exit(2)
 PY
 }
+
 # ---------- Django checks / migrations / static ----------
 django_checks() {
   log "Django system check…"
