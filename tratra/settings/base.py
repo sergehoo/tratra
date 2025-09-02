@@ -137,12 +137,13 @@ AUTHENTICATION_BACKENDS = (
     'allauth.account.auth_backends.AuthenticationBackend',
 )
 
-ACCOUNT_EMAIL_REQUIRED = True
+# ACCOUNT_EMAIL_REQUIRED = True
 LOGIN_REDIRECT_URL = 'handydash'
 ACCOUNT_LOGOUT_REDIRECT_URL = '/'
-ACCOUNT_USERNAME_REQUIRED = False  # Ne pas exiger le champ username
+# ACCOUNT_USERNAME_REQUIRED = False  # Ne pas exiger le champ username
 # ACCOUNT_AUTHENTICATION_METHOD = 'email'  # Auth via email uniquement
 ACCOUNT_LOGIN_METHODS = {"email"}  # ou {"email","username"} selon ton besoin
+ACCOUNT_SIGNUP_FIELDS = ["email*", "password1*", "password2*"]
 ACCOUNT_UNIQUE_EMAIL = True  # Empêche les doublons
 
 REST_FRAMEWORK = {
