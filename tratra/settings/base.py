@@ -34,8 +34,24 @@ SECRET_KEY = config('SECRET_KEY')
 
 # SECURITY WARNING: don't run with debug turned on in production!
 
+ALLOWED_HOSTS = [
+    "afriqconsulting.site",
+    "www.afriqconsulting.site",
+    "127.0.0.1",
+    "localhost",
+    "tratraweb",      # nom de service docker (utile pour tests internes)
+]
 
-ALLOWED_HOSTS = []
+# Pendant l’accès provisoire en HTTP sur :1934, ne force pas HTTPS
+SECURE_SSL_REDIRECT = False
+
+# CSRF (pas strictement nécessaire pour /admin en même origine, mais utile si tu postes depuis un front)
+CSRF_TRUSTED_ORIGINS = [
+    "http://afriqconsulting.site",
+    "https://afriqconsulting.site",
+    "http://afriqconsulting.site:1934",
+]
+
 
 # Application definition
 
@@ -290,3 +306,4 @@ LOGGING = {
         'level': 'DEBUG',
     },
 }
+
