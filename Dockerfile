@@ -18,8 +18,11 @@ WORKDIR /app
 
 # Option A: requirements.txt
 COPY requirements.txt /app/
-RUN pip install -r requirements.txt
 
+RUN pip install --no-cache-dir --upgrade pip \
+ && pip uninstall -y django-channels || true \
+ && pip uninstall -y channels daphne || true \
+ && pip install --no-cache-dir -r requirements.txt
 # Option B (si vous utilisez Poetry) :
 # COPY pyproject.toml poetry.lock* /app/
 # RUN pip install poetry && poetry config virtualenvs.create false \
