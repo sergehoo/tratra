@@ -62,7 +62,7 @@ services:
       - traefik.enable=true
       # Traefik doit utiliser le réseau "proxy"
       - traefik.docker.network=proxy
-      -
+
       # Router provisoire en clair sur 1934
       - traefik.http.routers.tratraweb-1934.rule=Host(`${tratraweb_HOST}`)
       - traefik.http.routers.tratraweb-1934.entrypoints=debug1934
