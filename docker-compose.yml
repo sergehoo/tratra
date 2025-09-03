@@ -45,6 +45,21 @@ services:
       - "9001:9001"   # Console web
     networks: [web]
     restart: unless-stopped
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=proxy
+
+      # API S3
+      - traefik.http.routers.minio-api.rule=Host(`afriqconsulting.site`)
+      - traefik.http.routers.minio-api.entrypoints=websecure
+      - traefik.http.routers.minio-api.tls.certresolver=lets
+      - traefik.http.services.minio-api.loadbalancer.server.port=9000
+
+      # Console web
+      - traefik.http.routers.minio-console.rule=Host(`console.afriqconsulting.site`)
+      - traefik.http.routers.minio-console.entrypoints=websecure
+      - traefik.http.routers.minio-console.tls.certresolver=lets
+      - traefik.http.services.minio-console.loadbalancer.server.port=9001
 
   # --- Redis (broker Celery + cache + Channels) ---
   redis:
