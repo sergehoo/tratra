@@ -230,18 +230,18 @@ if MINIO_ENABLED:
     # path-style URLs (best for MinIO)
 
     AWS_STORAGE_BUCKET_NAME = config('AWS_STORAGE_BUCKET_NAME', default='tratra-media')
-    AWS_S3_ENDPOINT_URL     = config('AWS_S3_ENDPOINT_URL', default='http://minio:9000')  # service docker
-    AWS_S3_REGION_NAME      = config('AWS_S3_REGION_NAME', default='us-east-1')
+    AWS_S3_ENDPOINT_URL= config('AWS_S3_ENDPOINT_URL', default='http://minio:9000')  # service docker
+    AWS_S3_REGION_NAME= config('AWS_S3_REGION_NAME', default='us-east-1')
 
-    AWS_S3_ADDRESSING_STYLE   = 'path'   # indispensable pour MinIO derrière Traefik/DNS
-    AWS_S3_SIGNATURE_VERSION  = 's3v4'
-    AWS_S3_VERIFY             = config('AWS_S3_VERIFY', default='0').lower() in ('1','true','yes')  # ← par défaut False si HTTP
+    AWS_S3_ADDRESSING_STYLE= 'path'   # indispensable pour MinIO derrière Traefik/DNS
+    AWS_S3_SIGNATURE_VERSION= 's3v4'
+    AWS_S3_VERIFY= config('AWS_S3_VERIFY', default='0').lower() in ('1','true','yes')  # ← par défaut False si HTTP
 
     # URLs publiques non signées ? (utile si tu sers les médias directement via Nginx/Traefik)
     AWS_QUERYSTRING_AUTH = config('AWS_QUERYSTRING_AUTH', default='0').lower() in ('1','true','yes')
 
     # Optionnel si tu exposes MinIO publiquement sous un domaine :
-    AWS_S3_CUSTOM_DOMAIN = config('AWS_S3_CUSTOM_DOMAIN', default=None) or None
+    # AWS_S3_CUSTOM_DOMAIN = config('AWS_S3_CUSTOM_DOMAIN', default=None) or None
 else:
     STORAGES = {
         "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},  # MEDIA → disque local

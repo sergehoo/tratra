@@ -7,6 +7,11 @@ from django.contrib.auth.admin import UserAdmin
 from .models import User, HandymanProfile, HandymanDocument
 from django.utils.html import format_html
 
+admin.site.site_header = 'Handyman'
+admin.site.site_title = 'TRATRA Super Admin Pannel'
+admin.site.site_url = 'http://tratra.ci/'
+admin.site.index_title = 'TRATRA'
+admin.empty_value_display = '**Empty**'
 
 class CustomUserAdmin(UserAdmin):
     model = User
