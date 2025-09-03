@@ -205,8 +205,7 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/4.2/howto/static-files/
 from decouple import config
-
-# … (tes imports existants)
+import os
 
 # ---------- STATIC & MEDIA ----------
 STATIC_URL = '/static/'
@@ -214,55 +213,40 @@ STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 
-# Active/désactive MinIO via variable d'env (par défaut ON)
 MINIO_ENABLED = config('MINIO_ENABLED', default='1').lower() in ('1', 'true', 'yes')
 
 if MINIO_ENABLED:
-    # === MinIO (S3) pour les médias ===
     STORAGES = {
-        "default": {  # fichiers uploadés (MEDIA)
-            "BACKEND": "storages.backends.s3boto3.S3Boto3Storage",
-        },
-        "staticfiles": {  # assets collectés (STATIC)
-            "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
-        },
+        "default": {"BACKEND": "storages.backends.s3boto3.S3Boto3Storage"},  # MEDIA → MinIO
+        "staticfiles": {"BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"},  # STATIC → WhiteNoise
     }
 
-    AWS_ACCESS_KEY_ID = config('AWS_ACCESS_KEY_ID')
-    AWS_SECRET_ACCESS_KEY = config('AWS_SECRET_ACCESS_KEY')
+    # Creds (AWS_* en priorité, sinon MINIO_ROOT_*)
+    AWS_ACCESS_KEY_ID = config('AWS_ACCESS_KEY_ID', default=config('MINIO_ROOT_USER', default='minioadmin'))
+    AWS_SECRET_ACCESS_KEY = config('AWS_SECRET_ACCESS_KEY', default=config('MINIO_ROOT_PASSWORD', default='minioadmin'))
+
     AWS_STORAGE_BUCKET_NAME = config('AWS_STORAGE_BUCKET_NAME', default='tratra-media')
+    AWS_S3_ENDPOINT_URL     = config('AWS_S3_ENDPOINT_URL', default='http://minio:9000')  # service docker
+    AWS_S3_REGION_NAME      = config('AWS_S3_REGION_NAME', default='us-east-1')
 
-    # URL du service MinIO (dans Docker : service "minio")
-    AWS_S3_ENDPOINT_URL = config('AWS_S3_ENDPOINT_URL', default='http://minio:9000')
-    AWS_S3_REGION_NAME = config('AWS_S3_REGION_NAME', default='us-east-1')
+    AWS_S3_ADDRESSING_STYLE   = 'path'   # indispensable pour MinIO derrière Traefik/DNS
+    AWS_S3_SIGNATURE_VERSION  = 's3v4'
+    AWS_S3_VERIFY             = config('AWS_S3_VERIFY', default='0').lower() in ('1','true','yes')  # ← par défaut False si HTTP
 
-    # Bonnes pratiques MinIO
-    AWS_S3_ADDRESSING_STYLE = 'path'             # évite le virtual-hosting style
-    AWS_S3_SIGNATURE_VERSION = 's3v4'
-    AWS_S3_VERIFY = config('AWS_S3_VERIFY', default='1').lower() in ('1','true','yes')
-
-    # Si tu veux des URLs publiques sans signature
+    # URLs publiques non signées ? (utile si tu sers les médias directement via Nginx/Traefik)
     AWS_QUERYSTRING_AUTH = config('AWS_QUERYSTRING_AUTH', default='0').lower() in ('1','true','yes')
 
-    # Optionnel : domaine custom (ex: media.afriqconsulting.site) si tu publies MinIO derrière Traefik
+    # Optionnel si tu exposes MinIO publiquement sous un domaine :
     AWS_S3_CUSTOM_DOMAIN = config('AWS_S3_CUSTOM_DOMAIN', default=None) or None
-
 else:
-    # === FileSystem local (fallback) ===
     STORAGES = {
-        "default": {
-            "BACKEND": "django.core.files.storage.FileSystemStorage",
-        },
-        "staticfiles": {
-            "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
-        },
+        "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},  # MEDIA → disque local
+        "staticfiles": {"BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"},
     }
 
-# WhiteNoise
 DEBUG = os.getenv("DEBUG", "False").lower() in ("1", "true", "yes")
 WHITENOISE_AUTOREFRESH = DEBUG
 WHITENOISE_MAX_AGE = 60 * 60 * 24 * 365
-
 # Default primary key field type
 # https://docs.djangoproject.com/en/4.2/ref/settings/#default-auto-field
 
