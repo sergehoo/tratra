@@ -45,8 +45,8 @@ ALLOWED_HOSTS = [
 # Pendant l’accès provisoire en HTTP sur :1934, ne force pas HTTPS
 SECURE_SSL_REDIRECT = False
 # pour le retour en HTTPS strict
-# USE_X_FORWARDED_HOST = True
-# SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+USE_X_FORWARDED_HOST = True
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 # CSRF (pas strictement nécessaire pour /admin en même origine, mais utile si tu postes depuis un front)
 CSRF_TRUSTED_ORIGINS = [
     "http://afriqconsulting.site",
@@ -54,6 +54,8 @@ CSRF_TRUSTED_ORIGINS = [
     "http://afriqconsulting.site:1934",
     "https://media.afriqconsulting.site",
     "http://media.afriqconsulting.site",
+    "http://afriqconsulting.site:1934",
+    "https://afriqconsulting.site:1934",
 ]
 
 
