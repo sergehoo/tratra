@@ -225,7 +225,7 @@ if MINIO_ENABLED:
     AWS_ACCESS_KEY_ID = config('AWS_ACCESS_KEY_ID', default=config('MINIO_ROOT_USER', default='minioadmin'))
     AWS_SECRET_ACCESS_KEY = config('AWS_SECRET_ACCESS_KEY', default=config('MINIO_ROOT_PASSWORD', default='minioadmin'))
     # public URL base (what .url will return)
-    AWS_S3_CUSTOM_DOMAIN = "s3.afriqconsulting.site"
+    AWS_S3_CUSTOM_DOMAIN = "afriqconsulting.site"
 
     # path-style URLs (best for MinIO)
 

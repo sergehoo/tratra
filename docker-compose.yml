@@ -53,7 +53,7 @@ services:
 
       # ⚠️ Évite de réutiliser le même host que l’app.
       # Donne un host dédié à l’API S3 et à la console
-      - traefik.http.routers.minio-api.rule=Host(`s3.afriqconsulting.site`)
+      - traefik.http.routers.minio-api.rule=Host(`afriqconsulting.site`)
       - traefik.http.routers.minio-api.entrypoints=websecure
       - traefik.http.routers.minio-api.tls.certresolver=lets
       - traefik.http.services.minio-api.loadbalancer.server.port=9000
