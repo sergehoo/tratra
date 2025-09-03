@@ -224,6 +224,10 @@ if MINIO_ENABLED:
     # Creds (AWS_* en priorité, sinon MINIO_ROOT_*)
     AWS_ACCESS_KEY_ID = config('AWS_ACCESS_KEY_ID', default=config('MINIO_ROOT_USER', default='minioadmin'))
     AWS_SECRET_ACCESS_KEY = config('AWS_SECRET_ACCESS_KEY', default=config('MINIO_ROOT_PASSWORD', default='minioadmin'))
+    # public URL base (what .url will return)
+    AWS_S3_CUSTOM_DOMAIN = "s3.afriqconsulting.site"
+
+    # path-style URLs (best for MinIO)
 
     AWS_STORAGE_BUCKET_NAME = config('AWS_STORAGE_BUCKET_NAME', default='tratra-media')
     AWS_S3_ENDPOINT_URL     = config('AWS_S3_ENDPOINT_URL', default='http://minio:9000')  # service docker
