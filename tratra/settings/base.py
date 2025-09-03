@@ -202,53 +202,64 @@ USE_TZ = True
 
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/4.2/howto/static-files/
+from decouple import config
 
-# --- Static (servi par WhiteNoise) ---
-STATICFILES_DIRS = [os.path.join(BASE_DIR, 'static')]
+# … (tes imports existants)
+
+# ---------- STATIC & MEDIA ----------
 STATIC_URL = '/static/'
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
+MEDIA_URL = '/media/'
+MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 
-STORAGES = {
-    # MEDIA (uploads) → MinIO via django-storages (S3Boto3)
-    "default": {
-        "BACKEND": "storages.backends.s3boto3.S3Boto3Storage",
-    },
-    # STATIC collecté → WhiteNoise (compressé + manifest)
-    "staticfiles": {
-        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
-    },
-}
+# Active/désactive MinIO via variable d'env (par défaut ON)
+MINIO_ENABLED = config('MINIO_ENABLED', default='1').lower() in ('1', 'true', 'yes')
 
-# Perfs/Debug WhiteNoise
+if MINIO_ENABLED:
+    # === MinIO (S3) pour les médias ===
+    STORAGES = {
+        "default": {  # fichiers uploadés (MEDIA)
+            "BACKEND": "storages.backends.s3boto3.S3Boto3Storage",
+        },
+        "staticfiles": {  # assets collectés (STATIC)
+            "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+        },
+    }
+
+    AWS_ACCESS_KEY_ID = config('AWS_ACCESS_KEY_ID')
+    AWS_SECRET_ACCESS_KEY = config('AWS_SECRET_ACCESS_KEY')
+    AWS_STORAGE_BUCKET_NAME = config('AWS_STORAGE_BUCKET_NAME', default='tratra-media')
+
+    # URL du service MinIO (dans Docker : service "minio")
+    AWS_S3_ENDPOINT_URL = config('AWS_S3_ENDPOINT_URL', default='http://minio:9000')
+    AWS_S3_REGION_NAME = config('AWS_S3_REGION_NAME', default='us-east-1')
+
+    # Bonnes pratiques MinIO
+    AWS_S3_ADDRESSING_STYLE = 'path'             # évite le virtual-hosting style
+    AWS_S3_SIGNATURE_VERSION = 's3v4'
+    AWS_S3_VERIFY = config('AWS_S3_VERIFY', default='1').lower() in ('1','true','yes')
+
+    # Si tu veux des URLs publiques sans signature
+    AWS_QUERYSTRING_AUTH = config('AWS_QUERYSTRING_AUTH', default='0').lower() in ('1','true','yes')
+
+    # Optionnel : domaine custom (ex: media.afriqconsulting.site) si tu publies MinIO derrière Traefik
+    AWS_S3_CUSTOM_DOMAIN = config('AWS_S3_CUSTOM_DOMAIN', default=None) or None
+
+else:
+    # === FileSystem local (fallback) ===
+    STORAGES = {
+        "default": {
+            "BACKEND": "django.core.files.storage.FileSystemStorage",
+        },
+        "staticfiles": {
+            "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+        },
+    }
+
+# WhiteNoise
 DEBUG = os.getenv("DEBUG", "False").lower() in ("1", "true", "yes")
 WHITENOISE_AUTOREFRESH = DEBUG
 WHITENOISE_MAX_AGE = 60 * 60 * 24 * 365
-
-# --- MinIO (API S3 compatible) pour MEDIA ---
-# NOTE: pas besoin d'AWS ; on garde ces noms car django-storages/boto3 les utilisent.
-AWS_ACCESS_KEY_ID = config("AWS_ACCESS_KEY_ID")
-AWS_SECRET_ACCESS_KEY = config("AWS_SECRET_ACCESS_KEY")
-AWS_S3_ENDPOINT_URL = config("AWS_S3_ENDPOINT_URL", default="http://minio:9000")
-AWS_S3_REGION_NAME = config("AWS_S3_REGION_NAME", default="us-east-1")
-AWS_STORAGE_BUCKET_NAME = config("AWS_STORAGE_BUCKET_NAME", default="tratra-media")
-
-# MinIO : addressing style et signature
-AWS_S3_ADDRESSING_STYLE = "path"
-AWS_S3_SIGNATURE_VERSION = "s3v4"
-
-# Fichiers médias publics (URLs simples) — mets à True si tu veux des URLs signées temporaires
-AWS_QUERYSTRING_AUTH = False
-AWS_DEFAULT_ACL = None  # requis par django-storages >= 1.13
-
-# (optionnel) domaine public/Traefik pour servir les médias (ex: media.afriqconsulting.site)
-AWS_S3_CUSTOM_DOMAIN = config("AWS_S3_CUSTOM_DOMAIN", default="") or None
-
-# MEDIA_URL construit selon le domaine choisi
-if AWS_S3_CUSTOM_DOMAIN:
-    MEDIA_URL = f"https://{AWS_S3_CUSTOM_DOMAIN}/"
-else:
-    # URL directe MinIO (évite d'exposer 9000 en public ; préfère un router Traefik)
-    MEDIA_URL = f"{AWS_S3_ENDPOINT_URL}/{AWS_STORAGE_BUCKET_NAME}/"
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/4.2/ref/settings/#default-auto-field
@@ -277,7 +288,7 @@ CELERY_BEAT_SCHEDULE = {}
 
 # === STATIC & MEDIA ===
 
-DEFAULT_FILE_STORAGE = 'django.core.files.storage.FileSystemStorage'
+# DEFAULT_FILE_STORAGE = 'django.core.files.storage.FileSystemStorage'
 
 # DEFAULT_FILE_STORAGE = 'storages.backends.s3boto3.S3Boto3Storage'
 # AWS_ACCESS_KEY_ID = config('AWS_ACCESS_KEY_ID')
