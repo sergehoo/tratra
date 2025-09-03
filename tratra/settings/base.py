@@ -44,7 +44,9 @@ ALLOWED_HOSTS = [
 
 # Pendant l’accès provisoire en HTTP sur :1934, ne force pas HTTPS
 SECURE_SSL_REDIRECT = False
-
+# pour le retour en HTTPS strict
+# USE_X_FORWARDED_HOST = True
+# SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 # CSRF (pas strictement nécessaire pour /admin en même origine, mais utile si tu postes depuis un front)
 CSRF_TRUSTED_ORIGINS = [
     "http://afriqconsulting.site",
@@ -106,8 +108,8 @@ INSTALLED_APPS += ["corsheaders"]
 CORS_ALLOW_ALL_ORIGINS = True
 
 MIDDLEWARE = [
-
     'django.middleware.security.SecurityMiddleware',
+    "whitenoise.middleware.WhiteNoiseMiddleware",
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -202,6 +204,23 @@ USE_TZ = True
 STATICFILES_DIRS = [os.path.join(BASE_DIR, 'static')]
 STATIC_URL = '/static/'
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
+# (optionnel) si tu as un dossier 'static' en plus :
+# STATICFILES_DIRS = [os.path.join(BASE_DIR, "static")]
+
+# Django 4.2+ : utiliser STORAGES
+STORAGES = {
+    "default": {
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
+    },
+    "staticfiles": {
+        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+    },
+}
+
+# Perfs/Debug
+DEBUG = os.getenv("DEBUG", "False").lower() in ("1", "true", "yes")
+WHITENOISE_AUTOREFRESH = DEBUG          # reload fichiers en dev
+WHITENOISE_MAX_AGE = 60 * 60 * 24 * 365 # 1 an (cache immuable des assets hashés)
 
 # STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 
