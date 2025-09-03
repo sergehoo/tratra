@@ -13,6 +13,7 @@ volumes:
   postgres_data:
   static_volume:
   media_volume:
+  minio_data: { }
 
 services:
   # --- Base de données Postgres + PostGIS ---
@@ -142,76 +143,3 @@ services:
         condition: service_healthy
     networks: [web]
     restart: unless-stopped
-  # --- (Optionnel) Flower monitoring ---
-  # flower:
-  #   image: mher/flower
-  #   command: flower --broker=${REDIS_URL}
-  #   environment:
-  #     FLOWER_BASIC_AUTH: ${FLOWER_AUTH}
-  #   labels:
-  #     - traefik.enable=true
-  #     - traefik.http.routers.flower.rule=Host(`${FLOWER_HOST}`)
-  #     - traefik.http.routers.flower.entrypoints=websecure
-  #     - traefik.http.routers.flower.tls.certresolver=lets
-  #     - traefik.http.services.flower.loadbalancer.server.port=5555
-  #   networks: [web]
-  #   restart: unless-stopped
-
-#services:
-#  tratraDB:
-#    image: postgres:15
-#    environment:
-#      POSTGRES_USER: postgres
-#      POSTGRES_PASSWORD: postgres
-#      POSTGRES_DB: tratra
-#    volumes:
-#      - postgres_data:/var/lib/postgresql/data
-#    ports:
-#      - "5432:5432"
-#
-#  redis:
-#    image: redis:7
-#    ports:
-#      - "6379:6379"
-#
-#  tratraweb:
-#    build: .
-#    command: >
-#      sh -c "python manage.py migrate &&
-#             python manage.py runserver 0.0.0.0:8000"
-#    volumes:
-#      - .:/app
-#    ports:
-#      - "8000:8000"
-#    depends_on:
-#      - tratraDB
-#      - redis
-#
-#  celery:
-#    build: .
-#    command: celery -A tratra worker -l info
-#    volumes:
-#      - .:/app
-#    depends_on:
-#      - db
-#      - redis
-#
-#  celery-beat:
-#    build: .
-#    command: celery -A tratra beat -l info --scheduler django_celery_beat.schedulers:DatabaseScheduler
-#    volumes:
-#      - .:/app
-#    depends_on:
-#      - tratraDB
-#      - redis
-#
-#  flower:
-#    image: mher/flower
-#    command: flower --broker=redis://redis:6379/0
-#    ports:
-#      - "5555:5555"
-#    depends_on:
-#      - redis
-#
-#volumes:
-#  postgres_data:
