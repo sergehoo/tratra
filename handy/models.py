@@ -548,6 +548,7 @@ class Device(models.Model):
         ('web', 'Web'),
     ])
     last_active = models.DateTimeField(auto_now=True)
+    created_at=models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
         return f"Device {self.device_type} pour {self.user}"
