@@ -100,7 +100,7 @@ services:
 
       # Router unique (HTTPS) – utilise une variable d'env claire
       # Dans .env : TRATRA_HOST=tratra.net
-      - traefik.http.routers.tratraweb.rule=Host(`${TRATRA_HOST}`)
+      - traefik.http.routers.tratraweb.rule=Host(`${tratraweb_HOST}`)
       - traefik.http.routers.tratraweb.entrypoints=websecure
       - traefik.http.routers.tratraweb.tls.certresolver=lets
 
