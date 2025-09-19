@@ -89,26 +89,36 @@ PYCODE
 }
 
 # ---------- Préflight Channels ----------
+# ---------- Préflight Channels (compatible Channels 4) ----------
 channels_preflight() {
-  log "Vérification Channels/ASGI…"
+  log "Vérification ASGI…"
   python - <<'PY'
-import sys, importlib, pkgutil
-try:
-    import channels
-except Exception as e:
-    print("import channels: FAIL ->", e); sys.exit(2)
+import os, sys, importlib
 
-print("channels file:", getattr(channels, "__file__", "?"))
-print("channels __version__:", getattr(channels, "__version__", None))
-print("has DEFAULT_CHANNEL_LAYER:", hasattr(channels, "DEFAULT_CHANNEL_LAYER"))
-mods=[m.name for m in pkgutil.iter_modules() if m.name.startswith("channels")]
-print("installed modules:", mods)
+# Django setup
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", os.getenv("DJANGO_SETTINGS_MODULE","tratra.settings"))
+
 try:
-    importlib.import_module("channels.consumer")
-    print("import channels.consumer: OK")
+    import django
+    django.setup()
 except Exception as e:
-    print("import channels.consumer: FAIL ->", e)
+    print("django.setup() FAILED:", e)
     sys.exit(2)
+
+# Charge l'app ASGI
+try:
+    app = importlib.import_module("tratra.asgi")
+except Exception as e:
+    print("import tratra.asgi FAILED:", e)
+    sys.exit(2)
+
+# Vérifie la présence de l'application ASGI
+if not hasattr(app, "application"):
+    print("No 'application' attribute found in tratra.asgi")
+    sys.exit(2)
+
+print("ASGI application loaded OK")
+sys.exit(0)
 PY
 }
 
