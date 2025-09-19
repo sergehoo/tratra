@@ -1,6 +1,7 @@
 # handy/api/urls.py
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
+from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
 from .views import (
     UserViewSet, HandymanProfileViewSet, ServiceCategoryViewSet, ServiceViewSet, ServiceImageViewSet,
@@ -11,6 +12,8 @@ from .views import (
 
 router = DefaultRouter()
 router.register(r'users', UserViewSet, basename='users')
+path('api/auth/jwt/create/', TokenObtainPairView.as_view(), name='jwt-create'),
+path('api/auth/jwt/refresh/', TokenRefreshView.as_view(), name='jwt-refresh'),
 router.register(r'handymen', HandymanProfileViewSet, basename='handymen')
 router.register(r'categories', ServiceCategoryViewSet, basename='categories')
 router.register(r'services', ServiceViewSet, basename='services')

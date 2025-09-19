@@ -21,7 +21,7 @@ from tratra.settings import env
 
 # env = environ.Env()
 # environ.Env.read_env()
-
+DEBUG = os.getenv("DEBUG", "False").lower() in ("1", "true", "yes")
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 SECRET_KEY = config('SECRET_KEY')
@@ -45,20 +45,9 @@ ALLOWED_HOSTS = [
 ]
 
 # Pendant l’accès provisoire en HTTP sur :1934, ne force pas HTTPS
-SECURE_SSL_REDIRECT = False
-# pour le retour en HTTPS strict
-USE_X_FORWARDED_HOST = True
-SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
 # CSRF (pas strictement nécessaire pour /admin en même origine, mais utile si tu postes depuis un front)
-CSRF_TRUSTED_ORIGINS = [
-    "http://afriqconsulting.site",
-    "https://afriqconsulting.site",
-    "http://afriqconsulting.site:1934",
-    "https://media.afriqconsulting.site",
-    "http://media.afriqconsulting.site",
-    "http://afriqconsulting.site:1934",
-    "https://afriqconsulting.site:1934",
-]
+
 
 
 # Application definition
@@ -93,6 +82,7 @@ INSTALLED_APPS = [
     'djstripe',
     'django_filters',
     'rest_framework',
+    'rest_framework_simplejwt',
     'tailwind',
     'theme',
     'grappelli',
@@ -114,6 +104,7 @@ CORS_ALLOW_ALL_ORIGINS = True
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     "whitenoise.middleware.WhiteNoiseMiddleware",
+    'corsheaders.middleware.CorsMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -122,7 +113,7 @@ MIDDLEWARE = [
 
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
-    'corsheaders.middleware.CorsMiddleware',
+
     'axes.middleware.AxesMiddleware',
     'handy.middleware.IPBlacklistMiddleware',
 
@@ -170,6 +161,9 @@ ACCOUNT_UNIQUE_EMAIL = True  # Empêche les doublons
 REST_FRAMEWORK = {
     # Use Django's standard `django.contrib.auth` permissions,
     # or allow read-only access for unauthenticated users.
+'DEFAULT_AUTHENTICATION_CLASSES': (
+        'rest_framework_simplejwt.authentication.JWTAuthentication',  # ✅ plus de SessionAuthentication
+    ),
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.DjangoModelPermissionsOrAnonReadOnly'
     ]
@@ -212,6 +206,20 @@ STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 
+STATICFILES_DIRS = [
+    os.path.join(BASE_DIR, 'static'),
+]
+
+if DEBUG:
+    # Assurez-vous que whitenoise est correctement configuré
+    MIDDLEWARE.insert(1, "whitenoise.middleware.WhiteNoiseMiddleware")
+
+    # Configuration pour servir les fichiers média en développement
+    from django.conf.urls.static import static
+
+    urlpatterns = [] + static(STATIC_URL, document_root=STATIC_ROOT)
+    urlpatterns += static(MEDIA_URL, document_root=MEDIA_ROOT)
+
 MINIO_ENABLED = config('MINIO_ENABLED', default='1').lower() in ('1', 'true', 'yes')
 
 if MINIO_ENABLED:
@@ -224,7 +232,7 @@ if MINIO_ENABLED:
     AWS_ACCESS_KEY_ID = config('AWS_ACCESS_KEY_ID', default=config('MINIO_ROOT_USER', default='minioadmin'))
     AWS_SECRET_ACCESS_KEY = config('AWS_SECRET_ACCESS_KEY', default=config('MINIO_ROOT_PASSWORD', default='minioadmin'))
     # public URL base (what .url will return)
-    AWS_S3_CUSTOM_DOMAIN = "afriqconsulting.site"
+    AWS_S3_CUSTOM_DOMAIN = "tratra.net"
 
     # path-style URLs (best for MinIO)
 
@@ -247,7 +255,7 @@ else:
         "staticfiles": {"BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"},
     }
 
-DEBUG = os.getenv("DEBUG", "False").lower() in ("1", "true", "yes")
+
 WHITENOISE_AUTOREFRESH = DEBUG
 WHITENOISE_MAX_AGE = 60 * 60 * 24 * 365
 # Default primary key field type
@@ -274,18 +282,6 @@ INTERNAL_IPS = ['127.0.0.1']
 CELERY_BROKER_URL = config('REDIS_URL', default='redis://redis:6379/0')
 CELERY_RESULT_BACKEND = CELERY_BROKER_URL
 CELERY_BEAT_SCHEDULE = {}
-
-# === STATIC & MEDIA ===
-
-# DEFAULT_FILE_STORAGE = 'django.core.files.storage.FileSystemStorage'
-
-# DEFAULT_FILE_STORAGE = 'storages.backends.s3boto3.S3Boto3Storage'
-# AWS_ACCESS_KEY_ID = config('AWS_ACCESS_KEY_ID')
-# AWS_SECRET_ACCESS_KEY = config('AWS_SECRET_ACCESS_KEY')
-# AWS_STORAGE_BUCKET_NAME = config('AWS_STORAGE_BUCKET_NAME')
-
-# === CORS ===
-# CORS_ALLOWED_ORIGINS = env.list('CORS_ALLOWED_ORIGINS', default=[])
 
 # === DJSTRIPE ===
 DJSTRIPE_WEBHOOK_SECRET = config('STRIPE_WEBHOOK_SECRET')
@@ -327,9 +323,18 @@ AXES_LOCK_OUT_AT_FAILURE = True
 AXES_ENABLE_ADMIN = True
 AXES_VERBOSE = True
 AXES_LOCKOUT_TEMPLATE = '403.html'  # Utilise un template custom si bloqué
-SECURE_HSTS_SECONDS = 31536000
-SECURE_HSTS_INCLUDE_SUBDOMAINS = True
-SECURE_HSTS_PRELOAD = True
+
+# ENABLE_SSL_HARDENING = os.getenv("ENABLE_SSL_HARDENING", "true").lower() in ("1","true","yes")
+#
+# if ENABLE_SSL_HARDENING:
+#     SECURE_HSTS_SECONDS = 31536000
+#     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+#     SECURE_HSTS_PRELOAD = True
+#     SESSION_COOKIE_SECURE = True
+#     CSRF_COOKIE_SECURE = True
+# else:
+#     SECURE_HSTS_SECONDS = 0
+
 # === OTHER ===
 ACCOUNT_FORMS = {
     'signup': 'handy.forms.CustomSignupForm',
