@@ -98,16 +98,16 @@ services:
 
       # Router provisoire en clair sur 1934
 #      - traefik.http.routers.tratraweb-1934.rule=Host(`${tratraweb_HOST}`)
-      - traefik.http.routers.tratraweb-1934.entrypoints=debug1934
-      - traefik.http.routers.tratraweb-1934.tls=true
-      - traefik.http.routers.tratraweb-1934.tls.certresolver=lets
-      - traefik.http.routers.tratraweb-1934.service=tratraweb-svc
+#      - traefik.http.routers.tratraweb-1934.entrypoints=debug1934
+#      - traefik.http.routers.tratraweb-1934.tls=true
+#      - traefik.http.routers.tratraweb-1934.tls.certresolver=lets
+#      - traefik.http.routers.tratraweb-1934.service=tratraweb-svc
       # Router unique pour l’app
-#      - traefik.http.routers.tratraweb-app.rule=Host(`${tratraweb_HOST}`)
-#      - traefik.http.routers.tratraweb-app.entrypoints=websecure
-#      - traefik.http.routers.tratraweb-app.tls.certresolver=lets
-      # Chaîne de middlewares (renommée pour éviter toute collision de noms globaux)
-#      - traefik.http.routers.tratraweb-app.middlewares=tratraweb-sec-headers@docker,tratraweb-compress@docker,tratraweb-rl@docker
+      - traefik.http.routers.tratraweb-app.rule=Host(`${tratraweb_HOST}`)
+      - traefik.http.routers.tratraweb-app.entrypoints=websecure
+      - traefik.http.routers.tratraweb-app.tls.certresolver=lets
+#       Chaîne de middlewares (renommée pour éviter toute collision de noms globaux)
+      - traefik.http.routers.tratraweb-app.middlewares=tratraweb-sec-headers@docker,tratraweb-compress@docker,tratraweb-rl@docker
 
       # Service séparé (nom explicite)
       - traefik.http.services.tratraweb-svc.loadbalancer.server.port=8000
