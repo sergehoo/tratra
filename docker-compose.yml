@@ -91,28 +91,17 @@ services:
     # Labels Traefik: route HTTPS -> service tratraweb:8000
     labels:
       - traefik.enable=true
-      # Traefik doit utiliser le réseau "proxy"
       - traefik.docker.network=proxy
-      - traefik.http.routers.tratraweb.rule=Host(`tratra.net`)
 
+      # Router unique (HTTPS) – utilise une variable d'env claire
+      # Dans .env : TRATRA_HOST=tratra.net
+      - traefik.http.routers.tratraweb.rule=Host(`${TRATRA_HOST}`)
+      - traefik.http.routers.tratraweb.entrypoints=websecure
+      - traefik.http.routers.tratraweb.tls.certresolver=lets
 
-      # Router provisoire en clair sur 1934
-#      - traefik.http.routers.tratraweb-1934.rule=Host(`${tratraweb_HOST}`)
-#      - traefik.http.routers.tratraweb-1934.entrypoints=debug1934
-#      - traefik.http.routers.tratraweb-1934.tls=true
-#      - traefik.http.routers.tratraweb-1934.tls.certresolver=lets
-#      - traefik.http.routers.tratraweb-1934.service=tratraweb-svc
-      # Router unique pour l’app
-      - traefik.http.routers.tratraweb-app.rule=Host(`${tratraweb_HOST}`)
-      - traefik.http.routers.tratraweb-app.entrypoints=websecure
-      - traefik.http.routers.tratraweb-app.tls.certresolver=lets
-#       Chaîne de middlewares (renommée pour éviter toute collision de noms globaux)
-      - traefik.http.routers.tratraweb-app.middlewares=tratraweb-sec-headers@docker,tratraweb-compress@docker,tratraweb-rl@docker
+      # Middlewares
+      - traefik.http.routers.tratraweb.middlewares=tratraweb-sec-headers@docker,tratraweb-compress@docker,tratraweb-rl@docker
 
-      # Service séparé (nom explicite)
-      - traefik.http.services.tratraweb-svc.loadbalancer.server.port=8000
-
-      # Middlewares (noms préfixés "tratraweb-")
       - traefik.http.middlewares.tratraweb-sec-headers.headers.stsSeconds=31536000
       - traefik.http.middlewares.tratraweb-sec-headers.headers.stsIncludeSubdomains=true
       - traefik.http.middlewares.tratraweb-sec-headers.headers.stsPreload=true
@@ -122,6 +111,10 @@ services:
       - traefik.http.middlewares.tratraweb-compress.compress=true
       - traefik.http.middlewares.tratraweb-rl.ratelimit.average=150
       - traefik.http.middlewares.tratraweb-rl.ratelimit.burst=250
+
+      # Service explicite (port d'écoute interne)
+      - traefik.http.services.tratraweb-svc.loadbalancer.server.port=8000
+      - traefik.http.routers.tratraweb.service=tratraweb-svc
 
     volumes:
       - static_volume:/app/staticfiles
