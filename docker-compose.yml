@@ -53,12 +53,12 @@ services:
 
       # ⚠️ Évite de réutiliser le même host que l’app.
       # Donne un host dédié à l’API S3 et à la console
-      - traefik.http.routers.minio-api.rule=Host(`afriqconsulting.site`)
+      - traefik.http.routers.minio-api.rule=Host(`minio.tratra.net`)
       - traefik.http.routers.minio-api.entrypoints=websecure
       - traefik.http.routers.minio-api.tls.certresolver=lets
       - traefik.http.services.minio-api.loadbalancer.server.port=9000
 
-      - traefik.http.routers.minio-console.rule=Host(`console.afriqconsulting.site`)
+      - traefik.http.routers.minio-console.rule=Host(`console.tratra.net`)
       - traefik.http.routers.minio-console.entrypoints=websecure
       - traefik.http.routers.minio-console.tls.certresolver=lets
       - traefik.http.services.minio-console.loadbalancer.server.port=9001
@@ -93,7 +93,7 @@ services:
       - traefik.enable=true
       # Traefik doit utiliser le réseau "proxy"
       - traefik.docker.network=proxy
-      - traefik.http.routers.tratraweb-1934.rule=Host(`afriqconsulting.site`)
+      - traefik.http.routers.tratraweb.rule=Host(`tratra.net`)
 
 
       # Router provisoire en clair sur 1934
