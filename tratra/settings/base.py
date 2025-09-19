@@ -95,8 +95,6 @@ INSTALLED_APPS = [
     'rest_framework',
     'tailwind',
     'theme',
-    'django_browser_reload',
-
     'grappelli',
     'import_export',
     'health_check',
@@ -121,7 +119,6 @@ MIDDLEWARE = [
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'allauth.account.middleware.AccountMiddleware',
-    "django_browser_reload.middleware.BrowserReloadMiddleware",
 
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
