@@ -17,6 +17,7 @@ Including another URLconf
 from django.conf import settings
 from django.conf.urls.static import static
 from django.contrib import admin
+from django.http import HttpResponse
 from django.urls import path, include
 
 from handy.api.urls import router
@@ -28,7 +29,8 @@ from handy.views import Landing, HomePageView, HandymanDashboardView, BookingCre
     DepositTopUpView
 
 urlpatterns = [
-    path("__reload__/", include("django_browser_reload.urls")),
+    # path("__reload__/", include("django_browser_reload.urls")),
+    path("healthz", lambda r: HttpResponse("ok")),
     path('admin/', admin.site.urls),
     path('r^/accounts/', include('allauth.urls')),
     path('handy/', include(router.urls)),

@@ -88,6 +88,11 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    healthcheck:
+      test: [ "CMD-SHELL", "wget -qO- http://127.0.0.1:8000/healthz || exit 1" ]
+      interval: 10s
+      timeout: 5s
+      retries: 20
     # Labels Traefik: route HTTPS -> service tratraweb:8000
     labels:
       - traefik.enable=true
