@@ -35,8 +35,10 @@ SECRET_KEY = config('SECRET_KEY')
 # SECURITY WARNING: don't run with debug turned on in production!
 
 ALLOWED_HOSTS = [
-    "afriqconsulting.site",
-    "www.afriqconsulting.site",
+    "tratra.net",
+    "www.tratra.net",
+    "tratra.ci",
+    "www.tratra.ci",
     "127.0.0.1",
     "localhost",
     "tratraweb",      # nom de service docker (utile pour tests internes)
