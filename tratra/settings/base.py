@@ -16,6 +16,7 @@ from pathlib import Path
 import channels
 import environ
 from decouple import config
+from sentry_sdk.integrations import CeleryIntegration, RedisIntegration
 
 from tratra.settings import env
 
@@ -293,12 +294,17 @@ from sentry_sdk.integrations.django import DjangoIntegration
 
 
 
-sentry_sdk.init(
-    dsn=config('SENTRY_DSN', default=''),
-    integrations=[DjangoIntegration()],
-    traces_sample_rate=1.0,
-    send_default_pii=True
-)
+try:
+    sentry_sdk.init(
+        dsn=config('SENTRY_DSN', default=''),
+        integrations=[DjangoIntegration(), CeleryIntegration(), RedisIntegration()],
+        traces_sample_rate=1.0,
+        send_default_pii=True,
+        auto_enabling_integrations=False,
+    )
+except Exception as e:
+    import logging
+    logging.getLogger(__name__).warning("Sentry disabled: %s", e)
 
 # === EMAIL ===
 # EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
