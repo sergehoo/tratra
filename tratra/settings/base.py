@@ -291,7 +291,7 @@ DJSTRIPE_FOREIGN_KEY_TO_FIELD = 'id'
 import sentry_sdk
 from sentry_sdk.integrations.django import DjangoIntegration
 
-channels.__version__ = "4.0.0"
+
 
 sentry_sdk.init(
     dsn=config('SENTRY_DSN', default=''),
