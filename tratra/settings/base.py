@@ -16,7 +16,10 @@ from pathlib import Path
 import channels
 import environ
 from decouple import config
-from sentry_sdk.integrations import CeleryIntegration, RedisIntegration
+import sentry_sdk
+from sentry_sdk.integrations.django import DjangoIntegration
+from sentry_sdk.integrations.celery import CeleryIntegration
+from sentry_sdk.integrations.redis import RedisIntegration
 
 from tratra.settings import env
 
