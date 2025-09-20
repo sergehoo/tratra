@@ -112,7 +112,7 @@ services:
       - traefik.http.middlewares.tratraweb-sec-headers.headers.stsPreload=true
       - traefik.http.middlewares.tratraweb-sec-headers.headers.contentTypeNosniff=true
       - traefik.http.middlewares.tratraweb-sec-headers.headers.frameDeny=true
-      - traefik.http.middlewares.tratraweb-sec-headers.headers.referrerPolicy=no-referrer
+      - traefik.http.middlewares.tratraweb-sec-headers.headers.referrerPolicy=strict-origin-when-cross-origin
       - traefik.http.middlewares.tratraweb-compress.compress=true
       - traefik.http.middlewares.tratraweb-rl.ratelimit.average=150
       - traefik.http.middlewares.tratraweb-rl.ratelimit.burst=250
