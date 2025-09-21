@@ -3,12 +3,13 @@ from __future__ import annotations
 
 import math
 import random
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from typing import List, Tuple
 
 from django.contrib.gis.geos import Point
 from django.core.management.base import BaseCommand
 from django.db import IntegrityError, transaction
+from django.db.models.signals import post_save
 from django.utils import timezone
 from django.utils.crypto import get_random_string
 
@@ -28,10 +29,15 @@ from handy.models import (
     User,
 )
 
+# Import “best-effort” du signal pour le débrancher pendant le seed
+try:
+    from handy.signal import on_booking_status_change
+except Exception:
+    on_booking_status_change = None
+
 fake = Faker("fr_FR")
 
-# Centre approximatif d'Abidjan
-ABJ_LAT, ABJ_LNG = 5.3600, -4.0083
+ABJ_LAT, ABJ_LNG = 5.3600, -4.0083  # centre Abidjan
 
 
 def seed_all(seed: int | None):
@@ -47,35 +53,33 @@ def seed_all(seed: int | None):
 
 
 def random_point_around(lat0: float, lng0: float, max_km: float = 12.0) -> Tuple[float, float]:
-    """
-    Retourne (lat, lng) à <= max_km du centre (lat0,lng0).
-    Approx simple: 1° lat ~ 111km ; 1° lon ~ 111km * cos(lat).
-    """
+    """Retourne (lat, lng) à <= max_km du centre (lat0,lng0)."""
     r_km = random.random() * max_km
     theta_deg = random.random() * 360.0
     dlat = r_km / 111.0
-    dlng = r_km / (111.0 * max(0.1, abs(math.cos(math.radians(lat0)))))  # évite /0
+    dlng = r_km / (111.0 * max(0.1, abs(math.cos(math.radians(lat0)))))
     lat = lat0 + (dlat * math.sin(math.radians(theta_deg)))
     lng = lng0 + (dlng * math.cos(math.radians(theta_deg)))
     return lat, lng
 
 
 class Command(BaseCommand):
-    help = "Génère des données de test Handy (artisans, services, réservations) avec coordonnées GPS (Abidjan)."
+    help = "Génère des données de test Handy (artisans, services, réservations) autour d’Abidjan."
 
     def add_arguments(self, parser):
-        parser.add_argument("--users", type=int, default=40,
-                            help="Nombre total d'utilisateurs à créer (≈40% artisans). Default 40")
-        parser.add_argument("--categories", type=int, default=30,
-                            help="Nombre de catégories à créer. Default 30")
-        parser.add_argument("--services", type=int, default=120,
-                            help="Nombre de services à créer. Default 120")
-        parser.add_argument("--bookings", type=int, default=160,
-                            help="Nombre de réservations à créer. Default 160")
-        parser.add_argument("--seed", type=int, default=None,
-                            help="Graine aléatoire (reproductible). Ex: --seed 42")
-        parser.add_argument("--drop", action="store_true",
-                            help="Supprime (hard delete) les données existantes non critiques avant insertion")
+        parser.add_argument("--users", type=int, default=40)
+        parser.add_argument("--categories", type=int, default=30)
+        parser.add_argument("--services", type=int, default=120)
+        parser.add_argument("--bookings", type=int, default=160)
+        parser.add_argument("--seed", type=int, default=None)
+        parser.add_argument("--drop", action="store_true")
+
+    # --- util commission ---
+    @staticmethod
+    def _fee(amount: Decimal, rate: Decimal = Decimal("0.11")) -> Decimal:
+        if amount is None:
+            return Decimal("0.00")
+        return (Decimal(amount) * rate).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
     @transaction.atomic
     def handle(self, *args, **opt):
@@ -84,14 +88,32 @@ class Command(BaseCommand):
 
         self.stdout.write(self.style.WARNING("=== Création de FAKE DATA Handy (transactionnelle) ==="))
 
-        if opt["drop"]:
-            self._drop_soft()
+        # déconnecte le signal Booking -> tâche celery
+        reconnected = False
+        if on_booking_status_change:
+            try:
+                post_save.disconnect(on_booking_status_change, sender=Booking)
+                reconnected = True
+                self.stdout.write(self.style.WARNING("Signal on_booking_status_change déconnecté pendant le seed."))
+            except Exception:
+                pass
 
-        cats = self._create_categories(opt["categories"])
-        users, handymen = self._create_users_and_handymen(opt["users"])
-        services = self._create_services(opt["services"], handymen, cats)
-        bookings = self._create_bookings(opt["bookings"], users, handymen, services)
-        self._create_reviews(bookings)
+        try:
+            if opt["drop"]:
+                self._drop_soft()
+
+            cats = self._create_categories(opt["categories"])
+            users, handymen = self._create_users_and_handymen(opt["users"])
+            services = self._create_services(opt["services"], handymen, cats)
+            bookings = self._create_bookings(opt["bookings"], users, handymen, services)
+            self._create_reviews(bookings)
+        finally:
+            if on_booking_status_change and reconnected:
+                try:
+                    post_save.connect(on_booking_status_change, sender=Booking)
+                    self.stdout.write(self.style.WARNING("Signal on_booking_status_change reconnecté."))
+                except Exception:
+                    pass
 
         self.stdout.write(self.style.SUCCESS("✔ Données de test générées avec succès."))
 
@@ -108,7 +130,7 @@ class Command(BaseCommand):
         HandymanDocument.objects.all().delete()
         HandymanProfile.objects.all().delete()
         ServiceCategory.objects.all().delete()
-        # NB: on ne supprime pas les Users pour garder les comptes tests
+        # On garde les Users
 
     # ---------------- CATEGORIES ----------------
     def _create_categories(self, count: int) -> List[ServiceCategory]:
@@ -172,7 +194,9 @@ class Command(BaseCommand):
             user.save(update_fields=["password"])
         dirty = False
         for f, v in defaults.items():
-            if getattr(user, f, None) != v and f not in {"password"}:
+            if f == "password":
+                continue
+            if getattr(user, f, None) != v:
                 setattr(user, f, v)
                 dirty = True
         if dirty:
@@ -188,7 +212,7 @@ class Command(BaseCommand):
         lng = -4.0083 + fake.pyfloat(min_value=-0.1, max_value=0.1)
 
         try:
-            profile, created = HandymanProfile.objects.get_or_create(
+            profile, _ = HandymanProfile.objects.get_or_create(
                 user=user,
                 defaults={
                     "bio": fake.text(max_nb_chars=200),
@@ -205,14 +229,10 @@ class Command(BaseCommand):
             )
         except IntegrityError:
             profile = HandymanProfile.objects.get(user=user)
-            created = False
 
         ServiceArea.objects.get_or_create(
             handyman=profile,
-            defaults={
-                "center": profile.location,
-                "radius_km": fake.random_int(min=5, max=20),
-            },
+            defaults={"center": profile.location, "radius_km": fake.random_int(min=5, max=20)},
         )
 
         if not AvailabilitySlot.objects.filter(handyman=profile).exists():
@@ -233,7 +253,6 @@ class Command(BaseCommand):
         users: List[User] = []
         handymen_profiles: List[HandymanProfile] = []
 
-        # Admin
         admin = self._get_or_create_user(
             "admin@handy.com",
             first_name="Admin",
@@ -246,7 +265,6 @@ class Command(BaseCommand):
         )
         users.append(admin)
 
-        # Client démo
         demo_client = self._get_or_create_user(
             "demo.client@handy.com",
             first_name="Demo",
@@ -258,7 +276,7 @@ class Command(BaseCommand):
         users.append(demo_client)
 
         for _ in range(count):
-            is_handyman = random.random() > 0.6  # ~40% artisans
+            is_handyman = random.random() > 0.6
             email = fake.unique.email()
 
             user = self._get_or_create_user(
@@ -297,7 +315,7 @@ class Command(BaseCommand):
             elif price_type == "fixed":
                 price = Decimal(random.randrange(5000, 120000, 1000))
                 duration = None
-            else:  # quote
+            else:
                 price = None
                 duration = None
 
@@ -311,8 +329,6 @@ class Command(BaseCommand):
                 duration=duration,
                 is_active=random.random() > 0.08,
             )
-
-            # Laisse ServiceImage vide par défaut (champ fichier)
             services.append(svc)
 
         return services
@@ -326,10 +342,7 @@ class Command(BaseCommand):
         bookings: List[Booking] = []
         statuses = ["pending", "confirmed", "in_progress", "completed", "cancelled"]
 
-        clients = [u for u in users if getattr(u, "user_type", "client") == "client"]
-        if not clients:
-            clients = [users[0]]
-
+        clients = [u for u in users if getattr(u, "user_type", "client") == "client"] or [users[0]]
         now = timezone.now()
 
         for _ in range(count):
@@ -343,11 +356,10 @@ class Command(BaseCommand):
             if status == "pending":
                 booking_date = now + timezone.timedelta(days=random.randint(1, 30))
             elif status in ["confirmed", "in_progress"]:
-                booking_date = now - timezone.timedelta(days=random.randint(0, 5))
+                booking_date = now - timezone.timedelta(days	random.randint(0, 5))
             else:
                 booking_date = now - timezone.timedelta(days=random.randint(5, 40))
 
-            # Crée la réservation (⚠️ ne PAS passer total_price — ce champ n'existe pas dans ton modèle)
             bk = Booking.objects.create(
                 client=client,
                 handyman=hm.user,
@@ -361,18 +373,17 @@ class Command(BaseCommand):
                 description=fake.text(max_nb_chars=220),
             )
 
-            # Montant pour le paiement (basé sur le service si dispo, sinon aléatoire)
+            # Paiement lié (avec platform_fee obligatoire)
             amount = service.price if service.price is not None else Decimal(random.randrange(10000, 120000, 500))
-
             if status in ["confirmed", "in_progress", "completed"]:
-                method = random.choice(["cash", "om", "mtn", "card"])
-                p_status = random.choice(["pending", "completed", "failed"])
                 Payment.objects.create(
                     booking=bk,
                     amount=amount,
-                    method=method,
-                    status=p_status,
+                    platform_fee=self._fee(amount),   # <<< OBLIGATOIRE
+                    method=random.choice(["cash", "om", "mtn", "card"]),
+                    status=random.choice(["pending", "completed", "failed"]),
                     transaction_id=fake.uuid4()[:20],
+                    currency="XOF",  # explicite si ton modèle n'a pas de default
                 )
 
             bookings.append(bk)
