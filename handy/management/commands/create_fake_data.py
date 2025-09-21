@@ -152,7 +152,7 @@ class Command(BaseCommand):
 
         return cats
 
-    def _unique_username_from_email(email: str) -> str:
+    def _unique_username_from_email(self , email: str) -> str:
         base = (email.split("@")[0] if email else f"user_{get_random_string(6)}").lower()[:30]
         candidate = base
         i = 1
