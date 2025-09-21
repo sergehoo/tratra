@@ -205,7 +205,7 @@ class Command(BaseCommand):
             email = fake.unique.email()
             user = User.objects.create(
                 email=email,
-                username=_unique_username_from_email(email),  # <— IMPORTANT
+                username=self._unique_username_from_email(email),  # <— IMPORTANT
                 first_name=fake.first_name(),
                 last_name=fake.last_name(),
                 user_type="handyman" if is_handyman else "client",
