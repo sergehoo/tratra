@@ -45,13 +45,12 @@ ALLOWED_HOSTS = [
     "www.tratra.ci",
     "127.0.0.1",
     "localhost",
-    "tratraweb",      # nom de service docker (utile pour tests internes)
+    "tratraweb",  # nom de service docker (utile pour tests internes)
 ]
 
 # Pendant l’accès provisoire en HTTP sur :1934, ne force pas HTTPS
 
 # CSRF (pas strictement nécessaire pour /admin en même origine, mais utile si tu postes depuis un front)
-
 
 
 # Application definition
@@ -159,14 +158,15 @@ LOGIN_REDIRECT_URL = 'handydash'
 ACCOUNT_LOGOUT_REDIRECT_URL = '/'
 # ACCOUNT_USERNAME_REQUIRED = False  # Ne pas exiger le champ username
 # ACCOUNT_AUTHENTICATION_METHOD = 'email'  # Auth via email uniquement
-ACCOUNT_LOGIN_METHODS = {"email"}  # ou {"email","username"} selon ton besoin
+# ACCOUNT_LOGIN_METHODS = {"email"}  # ou {"email","username"} selon ton besoin
+ACCOUNT_AUTHENTICATION_METHOD = "username_email"
 ACCOUNT_SIGNUP_FIELDS = ["email*", "password1*", "password2*"]
 ACCOUNT_UNIQUE_EMAIL = True  # Empêche les doublons
 
 REST_FRAMEWORK = {
     # Use Django's standard `django.contrib.auth` permissions,
     # or allow read-only access for unauthenticated users.
-'DEFAULT_AUTHENTICATION_CLASSES': (
+    'DEFAULT_AUTHENTICATION_CLASSES': (
         'rest_framework_simplejwt.authentication.JWTAuthentication',  # ✅ plus de SessionAuthentication
     ),
     'DEFAULT_PERMISSION_CLASSES': [
@@ -242,15 +242,15 @@ if MINIO_ENABLED:
     # path-style URLs (best for MinIO)
 
     AWS_STORAGE_BUCKET_NAME = config('AWS_STORAGE_BUCKET_NAME', default='tratra-media')
-    AWS_S3_ENDPOINT_URL= config('AWS_S3_ENDPOINT_URL', default='http://minio:9000')  # service docker
-    AWS_S3_REGION_NAME= config('AWS_S3_REGION_NAME', default='us-east-1')
+    AWS_S3_ENDPOINT_URL = config('AWS_S3_ENDPOINT_URL', default='http://minio:9000')  # service docker
+    AWS_S3_REGION_NAME = config('AWS_S3_REGION_NAME', default='us-east-1')
 
-    AWS_S3_ADDRESSING_STYLE= 'path'   # indispensable pour MinIO derrière Traefik/DNS
-    AWS_S3_SIGNATURE_VERSION= 's3v4'
-    AWS_S3_VERIFY= config('AWS_S3_VERIFY', default='0').lower() in ('1','true','yes')  # ← par défaut False si HTTP
+    AWS_S3_ADDRESSING_STYLE = 'path'  # indispensable pour MinIO derrière Traefik/DNS
+    AWS_S3_SIGNATURE_VERSION = 's3v4'
+    AWS_S3_VERIFY = config('AWS_S3_VERIFY', default='0').lower() in ('1', 'true', 'yes')  # ← par défaut False si HTTP
 
     # URLs publiques non signées ? (utile si tu sers les médias directement via Nginx/Traefik)
-    AWS_QUERYSTRING_AUTH = config('AWS_QUERYSTRING_AUTH', default='0').lower() in ('1','true','yes')
+    AWS_QUERYSTRING_AUTH = config('AWS_QUERYSTRING_AUTH', default='0').lower() in ('1', 'true', 'yes')
 
     # Optionnel si tu exposes MinIO publiquement sous un domaine :
     # AWS_S3_CUSTOM_DOMAIN = config('AWS_S3_CUSTOM_DOMAIN', default=None) or None
@@ -259,7 +259,6 @@ else:
         "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},  # MEDIA → disque local
         "staticfiles": {"BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"},
     }
-
 
 WHITENOISE_AUTOREFRESH = DEBUG
 WHITENOISE_MAX_AGE = 60 * 60 * 24 * 365
@@ -296,8 +295,6 @@ DJSTRIPE_FOREIGN_KEY_TO_FIELD = 'id'
 import sentry_sdk
 from sentry_sdk.integrations.django import DjangoIntegration
 
-
-
 try:
     sentry_sdk.init(
         dsn=config('SENTRY_DSN', default=''),
@@ -308,6 +305,7 @@ try:
     )
 except Exception as e:
     import logging
+
     logging.getLogger(__name__).warning("Sentry disabled: %s", e)
 
 # === EMAIL ===
@@ -363,4 +361,3 @@ LOGGING = {
         'level': 'DEBUG',
     },
 }
-

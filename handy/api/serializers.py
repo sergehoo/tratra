@@ -2,9 +2,11 @@
 from decimal import Decimal
 from typing import Optional
 
+from django.contrib.auth import authenticate
 from django.contrib.gis.geos import Point
 from django.utils import timezone
 from rest_framework import serializers
+from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 from handy.models import (
     User, HandymanProfile, ServiceCategory, ServiceImage, Service, Booking,
@@ -42,7 +44,38 @@ class UserSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ["date_joined", "last_login", "is_verified"]
 
+class EmailOrUsernameTokenObtainPairSerializer(TokenObtainPairSerializer):
+    def validate(self, attrs):
+        # champs attendus: username et password (mais on accepte email)
+        username = attrs.get("username") or attrs.get("email")
+        password = attrs.get("password")
 
+        if not username or not password:
+            raise self.fail("no_active_account")
+
+        user = authenticate(
+            request=self.context.get("request"),
+            username=username,   # ton backend doit supporter username OU email
+            password=password,
+        )
+        if not user:
+            raise self.fail("no_active_account")
+
+        data = super().validate({"username": user.get_username(), "password": password})
+        # Optionnel: renvoyer un bloc user pour l’app
+        data["user"] = {
+            "id": user.pk,
+            "email": user.email,
+            "username": user.get_username(),
+            "first_name": user.first_name,
+            "last_name": user.last_name,
+            "is_active": user.is_active,
+            "date_joined": user.date_joined.isoformat() if user.date_joined else None,
+            "user_type": getattr(user, "user_type", "client"),
+            "profile_image": getattr(user, "profile_image", None),
+            "phone_number": getattr(user, "phone_number", None),
+        }
+        return data
 # ========= HANDYMAN PROFILE =========
 
 class HandymanProfileSerializer(serializers.ModelSerializer):

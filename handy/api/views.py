@@ -18,6 +18,7 @@ from rest_framework.pagination import PageNumberPagination
 
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
+from rest_framework_simplejwt.views import TokenObtainPairView
 
 from handy.models import (
     User, HandymanProfile, ServiceCategory, Service, ServiceImage, Booking,
@@ -112,10 +113,12 @@ from .serializers import (
     PaymentSerializer, PaymentLogSerializer, ReviewSerializer,
     ConversationSerializer, MessageSerializer, NotificationSerializer,
     HandymanDocumentSerializer, ReportSerializer, DeviceSerializer,
-    MatchRequestSerializer, MatchResponseSerializer, PriceEstimateSerializer, PaymentInitSerializer
+    MatchRequestSerializer, MatchResponseSerializer, PriceEstimateSerializer, PaymentInitSerializer,
+    EmailOrUsernameTokenObtainPairSerializer
 )
 
-
+class EmailOrUsernameTokenObtainPairView(TokenObtainPairView):
+    serializer_class = EmailOrUsernameTokenObtainPairSerializer
 # ---- Users ----
 class UserViewSet(viewsets.ModelViewSet):
     queryset = User.objects.all().only("id", "email", "first_name", "last_name", "user_type", "is_verified")
@@ -192,7 +195,9 @@ class ServiceViewSet(viewsets.ModelViewSet):
     ordering = ["-created_at"]
     pagination_class = DefaultPageNumberPagination
 
-    @action(detail=False, methods=["get"], permission_classes=[permissions.AllowAny])
+    @action(detail=False, methods=["get"],
+            permission_classes=[permissions.AllowAny],
+            authentication_classes=[])
     def nearby(self, request):
         """
         GET /services/nearby/?lat=..&lng=..&radius_km=15&category_id=...

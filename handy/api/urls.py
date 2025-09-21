@@ -7,7 +7,7 @@ from .views import (
     UserViewSet, HandymanProfileViewSet, ServiceCategoryViewSet, ServiceViewSet, ServiceImageViewSet,
     BookingViewSet, PaymentViewSet, PaymentLogViewSet, ReviewViewSet, ConversationViewSet, MessageViewSet,
     NotificationViewSet, HandymanDocumentViewSet, ReportViewSet, DeviceViewSet,
-    price_estimate, payment_initiate, match, PaymentWebhook
+    price_estimate, payment_initiate, match, PaymentWebhook, EmailOrUsernameTokenObtainPairView
 )
 
 router = DefaultRouter()
@@ -29,7 +29,8 @@ router.register(r'devices', DeviceViewSet, basename='devices')
 
 urlpatterns = [
     path('', include(router.urls)),
-    path('auth/login/', TokenObtainPairView.as_view(), name='jwt-login'),
+    # path('auth/login/', TokenObtainPairView.as_view(), name='jwt-login'),
+    path('auth/login/', EmailOrUsernameTokenObtainPairView.as_view(), name='jwt-login'),
     path('auth/refresh/', TokenRefreshView.as_view(), name='jwt-refresh'),
     path('auth/logout/', TokenBlacklistView.as_view(), name='jwt-logout'),
     path('price/estimate/', price_estimate, name='price-estimate'),
