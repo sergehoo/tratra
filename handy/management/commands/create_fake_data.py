@@ -6,7 +6,6 @@ import random
 from decimal import Decimal, ROUND_HALF_UP
 from typing import List, Tuple
 
-from babel.core.Locale import days
 from django.contrib.gis.geos import Point
 from django.core.management.base import BaseCommand
 from django.db import IntegrityError, transaction
