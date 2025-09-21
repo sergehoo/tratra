@@ -126,6 +126,13 @@ class UserViewSet(viewsets.ModelViewSet):
     ordering = ["-id"]
     pagination_class = DefaultPageNumberPagination
 
+    @action(detail=False, methods=['get'], url_path='me',
+            permission_classes=[permissions.IsAuthenticated])
+    def me(self, request):
+        """Retourne le profil de l'utilisateur authentifié."""
+        serializer = self.get_serializer(request.user)
+        return Response(serializer.data)
+
     @action(detail=True, methods=["post"])
     def update_location(self, request, pk=None):
         """
