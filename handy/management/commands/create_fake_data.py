@@ -152,111 +152,117 @@ class Command(BaseCommand):
 
         return cats
 
-    def _unique_username_from_email(self , email: str) -> str:
+    @staticmethod
+    def _unique_username_from_email(email: str) -> str:
         base = (email.split("@")[0] if email else f"user_{get_random_string(6)}").lower()[:30]
         candidate = base
         i = 1
-        from handy.models import User
         while User.objects.filter(username=candidate).exists():
             candidate = f"{base}{i}"
             i += 1
         return candidate
-    # ---------------- USERS + HANDYMEN ----------------
-    def _create_users_and_handymen(self, total_users: int) -> Tuple[List[User], List[HandymanProfile]]:
-        self.stdout.write(f"• Création de {total_users} utilisateurs (≈40% artisans)…")
 
-        users: List[User] = []
-        handymen: List[HandymanProfile] = []
+    def _get_or_create_user(self, email: str, **defaults) -> User:
+        # Toujours fournir un username unique
+        defaults.setdefault("username", self._unique_username_from_email(email))
+        user, created = User.objects.get_or_create(email=email, defaults=defaults)
+        if created or not user.has_usable_password():
+            user.set_password(defaults.get("password", "password123"))
+            user.save(update_fields=["password"])
+        return user
 
-        # Compte admin stable
-        admin, _ = User.objects.get_or_create(
-            email="admin@handy.com",
-            defaults={
-                "username": self._unique_username_from_email("admin@handy.com"),
-                "first_name": "Admin",
-                "last_name": "Handy",
-                "is_staff": True,
-                "is_superuser": True,
-                "is_verified": True,
-                "user_type": "admin",
-            },
+    def _create_users_and_handymen(self, count: int):
+        self.stdout.write(f"• Création de {count} utilisateurs (≈40% artisans)…")
+
+        users = []
+        handymen_profiles = []
+
+        # Admin (idempotent)
+        admin = self._get_or_create_user(
+            "admin@handy.com",
+            first_name="Admin",
+            last_name="Handy",
+            user_type="admin",
+            is_staff=True,
+            is_superuser=True,
+            is_verified=True,
+            password="password123",
         )
-        if not admin.has_usable_password():
-            admin.set_password("password123")
-            admin.save()
+        users.append(admin)
 
-        demo_client, _ = User.objects.get_or_create(
-            email="demo.client@handy.com",
-            defaults={
-                "username": self._unique_username_from_email("demo.client@handy.com"),
-                "first_name": "Demo",
-                "last_name": "Client",
-                "user_type": "client",
-                "is_verified": True,
-            },
+        # Un client démo (idempotent)
+        demo_client = self._get_or_create_user(
+            "demo.client@handy.com",
+            first_name="Demo",
+            last_name="Client",
+            user_type="client",
+            is_verified=True,
+            password="password123",
         )
-        demo_client.set_password("password123")
-        demo_client.save()
         users.append(demo_client)
 
-        for _ in range(max(0, total_users - 2)):
-            is_handyman = random.random() < 0.4  # ~40% artisans
-
+        for i in range(count):
+            is_handyman = fake.pyfloat() > 0.6  # ~40% artisans
             email = fake.unique.email()
-            user = User.objects.create(
-                email=email,
-                username=self._unique_username_from_email(email),  # <— IMPORTANT
+
+            user = self._get_or_create_user(
+                email,
                 first_name=fake.first_name(),
                 last_name=fake.last_name(),
                 user_type="handyman" if is_handyman else "client",
-                is_verified=random.random() > 0.15,
-                phone=fake.msisdn()[:15],
-                city="Abidjan",
-                country="Côte d'Ivoire",
+                is_verified=fake.pybool(truth_probability=80),
+                password="password123",
             )
-            user.set_password("password123")
-            user.save()
             users.append(user)
 
             if is_handyman:
-                # position GPS
-                lat, lng = random_point_around(ABJ_LAT, ABJ_LNG, max_km=14)
-                profile = HandymanProfile.objects.create(
+                # Si le profil existe déjà (rerun), ne pas le recréer
+                if hasattr(user, "handyman_profile"):
+                    handymen_profiles.append(user.handyman_profile)
+                    continue
+
+                # Pos autour d’Abidjan
+                lat = 5.3600 + fake.pyfloat(min_value=-0.1, max_value=0.1)
+                lng = -4.0083 + fake.pyfloat(min_value=-0.1, max_value=0.1)
+
+                profile, created = HandymanProfile.objects.get_or_create(
                     user=user,
-                    bio=fake.text(max_nb_chars=200),
-                    commune=random.choice(["Cocody", "Abobo", "Adjamé", "Plateau", "Yopougon", "Treichville", "Marcory", "Koumassi"]),
-                    quartier=fake.word(),
-                    location=Point(lng, lat, srid=4326),
-                    rating=round(random.uniform(3.2, 5.0), 1),
-                    completed_jobs=random.randint(0, 180),
-                    is_approved=random.random() > 0.2,
-                    online=random.random() > 0.5,
-                    hourly_rate=Decimal(random.randrange(2000, 12000, 500)),
-                    daily_rate=Decimal(random.randrange(10000, 70000, 1000)),
-                    travel_fee=Decimal(random.randrange(0, 3000, 100)),
+                    defaults={
+                        "bio": fake.text(max_nb_chars=200),
+                        "commune": fake.random_element(
+                            elements=["Cocody", "Abobo", "Adjamé", "Plateau", "Yopougon", "Treichville"]),
+                        "quartier": fake.word(),
+                        "location": Point(lng, lat, srid=4326),
+                        "rating": round(fake.pyfloat(min_value=3.0, max_value=5.0), 1),
+                        "completed_jobs": fake.random_int(min=0, max=100),
+                        "is_approved": fake.pybool(truth_probability=80),
+                        "online": fake.pybool(truth_probability=50),
+                        "hourly_rate": fake.random_int(min=2000, max=10000),
+                    },
                 )
-                # Zone de service simple (cercle)
-                ServiceArea.objects.create(
+                handymen_profiles.append(profile)
+
+                # Zone de service (idempotent: get_or_create)
+                ServiceArea.objects.get_or_create(
                     handyman=profile,
-                    center=profile.location,
-                    radius_km=random.randint(6, 20),
+                    defaults={
+                        "center": Point(lng, lat, srid=4326),
+                        "radius_km": fake.random_int(min=5, max=20),
+                    },
                 )
-                # Disponibilités hebdo
-                for weekday in range(7):
-                    if random.random() > 0.35:
-                        # 1 ou 2 créneaux
-                        for _slot in range(random.choice([1, 1, 2])):
-                            start_h = random.choice([8, 9, 10, 13, 14])
-                            end_h = start_h + random.choice([2, 3, 4])
+
+                # Créneaux : pour éviter les doublons à chaque rerun, on crée UNIQUEMENT si le profil vient d’être créé
+                if created:
+                    for day in range(7):
+                        if fake.pybool(truth_probability=70):
                             AvailabilitySlot.objects.create(
                                 handyman=profile,
-                                weekday=weekday,
-                                start_time=f"{start_h:02d}:00:00",
-                                end_time=f"{end_h:02d}:00:00",
+                                weekday=day,
+                                start_time=fake.time(pattern="%H:%M:%S"),
+                                end_time=fake.time(pattern="%H:%M:%S"),
                             )
-                handymen.append(profile)
 
-        return users, handymen
+        return users, handymen_profiles
 
     # ---------------- SERVICES ----------------
     def _create_services(self, count: int, handymen: List[HandymanProfile], categories: List[ServiceCategory]) -> List[Service]:
