@@ -1,51 +1,39 @@
+# handy/management/commands/create_fake_data.py
 from __future__ import annotations
 
+import math
 import random
 from decimal import Decimal
 from typing import List, Tuple
 
-from django.core.management.base import BaseCommand
 from django.contrib.gis.geos import Point
-from django.db import transaction
+from django.core.management.base import BaseCommand
+from django.db import IntegrityError, transaction
 from django.utils import timezone
 from django.utils.crypto import get_random_string
 
 from faker import Faker
 
 from handy.models import (
-    User, HandymanProfile, ServiceCategory, Service, ServiceImage,
-    Booking, Payment, Review, HandymanDocument, AvailabilitySlot,
-    ServiceArea
+    AvailabilitySlot,
+    Booking,
+    HandymanDocument,
+    HandymanProfile,
+    Payment,
+    Review,
+    Service,
+    ServiceArea,
+    ServiceCategory,
+    ServiceImage,
+    User,
 )
 
 fake = Faker("fr_FR")
 
-
-# --------- GÉO: point aléatoire autour d'Abidjan ----------
 # Centre approximatif d'Abidjan
 ABJ_LAT, ABJ_LNG = 5.3600, -4.0083
 
-def random_point_around(lat0: float, lng0: float, max_km: float = 12.0) -> Tuple[float, float]:
-    """
-    Retourne (lat, lng) à <= max_km du centre (lat0,lng0).
-    Approx simple: 1° lat ~ 111km ; 1° lon ~ 111km * cos(lat).
-    """
-    # distance radiale aléatoire (0..max_km) et angle (0..360)
-    r_km = random.random() * max_km
-    theta = random.random() * 360.0
 
-    # converti en décalage degrés
-    dlat = r_km / 111.0
-    dlng = r_km / (111.0 * max(0.1, abs(math.cos(math.radians(lat0)))))  # évite /0 aux pôles
-
-    # applique un angle grossier: répartir sur lat/lng
-    lat = lat0 + (dlat * math.sin(math.radians(theta)))
-    lng = lng0 + (dlng * math.cos(math.radians(theta)))
-    return (lat, lng)
-
-
-# --------- Graine reproductible optionnelle ----------
-import math
 def seed_all(seed: int | None):
     if seed is None:
         return
@@ -58,8 +46,22 @@ def seed_all(seed: int | None):
     Faker.seed(seed)
 
 
+def random_point_around(lat0: float, lng0: float, max_km: float = 12.0) -> Tuple[float, float]:
+    """
+    Retourne (lat, lng) à <= max_km du centre (lat0,lng0).
+    Approx simple: 1° lat ~ 111km ; 1° lon ~ 111km * cos(lat).
+    """
+    r_km = random.random() * max_km
+    theta_deg = random.random() * 360.0
+    dlat = r_km / 111.0
+    dlng = r_km / (111.0 * max(0.1, abs(math.cos(math.radians(lat0)))))  # évite /0
+    lat = lat0 + (dlat * math.sin(math.radians(theta_deg)))
+    lng = lng0 + (dlng * math.cos(math.radians(theta_deg)))
+    return lat, lng
+
+
 class Command(BaseCommand):
-    help = "Génère des données de test pour Handy (artisans, services, réservations) avec coordonnées GPS (Abidjan)."
+    help = "Génère des données de test Handy (artisans, services, réservations) avec coordonnées GPS (Abidjan)."
 
     def add_arguments(self, parser):
         parser.add_argument("--users", type=int, default=40,
@@ -78,6 +80,7 @@ class Command(BaseCommand):
     @transaction.atomic
     def handle(self, *args, **opt):
         seed_all(opt.get("seed"))
+        fake.unique.clear()
 
         self.stdout.write(self.style.WARNING("=== Création de FAKE DATA Handy (transactionnelle) ==="))
 
@@ -105,18 +108,17 @@ class Command(BaseCommand):
         HandymanDocument.objects.all().delete()
         HandymanProfile.objects.all().delete()
         ServiceCategory.objects.all().delete()
-        # NB: on ne supprime pas les Users pour garder tes comptes tests
+        # NB: on ne supprime pas les Users pour garder les comptes tests
 
     # ---------------- CATEGORIES ----------------
     def _create_categories(self, count: int) -> List[ServiceCategory]:
         self.stdout.write(f"• Création de {count} catégories…")
 
-        # Quelques catégories “classiques” si tu veux une base stable :
         base = [
             ("Plomberie", "plomberie", "Réparations et installations plomberie", "fa-solid fa-faucet"),
             ("Électricité", "electricite", "Interventions et dépannages électriques", "fa-solid fa-bolt"),
             ("Peinture", "peinture", "Peinture intérieure et extérieure", "fa-solid fa-paint-roller"),
-            ("Menuiserie", "menuiserie", "Fabrication et réparation de meubles/boiseries", "fa-solid fa-hammer"),
+            ("Menuiserie", "menuiserie", "Fabrication et réparation de boiseries", "fa-solid fa-hammer"),
             ("Nettoyage", "nettoyage", "Ménage et entretien", "fa-solid fa-broom"),
             ("Déménagement", "demenagement", "Transport et manutention", "fa-solid fa-truck"),
             ("Jardinage", "jardinage", "Entretien des espaces verts", "fa-solid fa-tree"),
@@ -124,7 +126,6 @@ class Command(BaseCommand):
         ]
 
         cats: List[ServiceCategory] = []
-        # D’abord les “bases”
         for name, slug, desc, icon in base[: min(len(base), max(0, count))]:
             c, _ = ServiceCategory.objects.get_or_create(
                 slug=slug,
@@ -132,14 +133,14 @@ class Command(BaseCommand):
             )
             cats.append(c)
 
-        # Puis compléments aléatoires jusqu’au quota
+        icons = [
+            "fas fa-road", "fas fa-music", "fas fa-laptop-code", "fas fa-tools", "fas fa-border-style",
+            "fas fa-house", "fas fa-bolt", "fas fa-brush", "fas fa-screwdriver-wrench", "fas fa-tree"
+        ]
         while len(cats) < count:
             name = fake.unique.bs().capitalize()
             slug = fake.unique.slug()
-            icon = random.choice([
-                "fas fa-road", "fas fa-music", "fas fa-laptop-code", "fas fa-tools", "fas fa-border-style",
-                "fas fa-house", "fas fa-bolt", "fas fa-brush", "fas fa-screwdriver-wrench", "fas fa-tree"
-            ])
+            icon = random.choice(icons)
             c = ServiceCategory.objects.create(
                 name=name,
                 slug=slug,
@@ -152,6 +153,7 @@ class Command(BaseCommand):
 
         return cats
 
+    # ---------------- USERS ----------------
     @staticmethod
     def _unique_username_from_email(email: str) -> str:
         base = (email.split("@")[0] if email else f"user_{get_random_string(6)}").lower()[:30]
@@ -163,19 +165,81 @@ class Command(BaseCommand):
         return candidate
 
     def _get_or_create_user(self, email: str, **defaults) -> User:
-        # Toujours fournir un username unique
         defaults.setdefault("username", self._unique_username_from_email(email))
         user, created = User.objects.get_or_create(email=email, defaults=defaults)
         if created or not user.has_usable_password():
             user.set_password(defaults.get("password", "password123"))
             user.save(update_fields=["password"])
+        # Met à jour des champs si absents (idempotent mais rafraîchissant)
+        dirty = False
+        for f, v in defaults.items():
+            if getattr(user, f, None) != v and f not in {"password"}:
+                setattr(user, f, v)
+                dirty = True
+        if dirty:
+            user.save()
         return user
+
+    def _get_or_create_handyman_profile(self, user: User) -> HandymanProfile:
+        """
+        Idempotent + résilient aux courses : évite IntegrityError OneToOne.
+        """
+        existing = HandymanProfile.objects.filter(user=user).first()
+        if existing:
+            return existing
+
+        # Pos autour d’Abidjan
+        lat = 5.3600 + fake.pyfloat(min_value=-0.1, max_value=0.1)
+        lng = -4.0083 + fake.pyfloat(min_value=-0.1, max_value=0.1)
+
+        try:
+            profile, created = HandymanProfile.objects.get_or_create(
+                user=user,
+                defaults={
+                    "bio": fake.text(max_nb_chars=200),
+                    "commune": fake.random_element(
+                        elements=["Cocody", "Abobo", "Adjamé", "Plateau", "Yopougon", "Treichville"]),
+                    "quartier": fake.word(),
+                    "location": Point(lng, lat, srid=4326),
+                    "rating": round(fake.pyfloat(min_value=3.0, max_value=5.0), 1),
+                    "completed_jobs": fake.random_int(min=0, max=100),
+                    "is_approved": fake.pybool(truth_probability=80),
+                    "online": fake.pybool(truth_probability=50),
+                    "hourly_rate": fake.random_int(min=2000, max=10000),
+                },
+            )
+        except IntegrityError:
+            # OneToOne déjà pris (course ou rerun) -> on récupère proprement
+            profile = HandymanProfile.objects.get(user=user)
+            created = False
+
+        # Zone de service (idempotent)
+        ServiceArea.objects.get_or_create(
+            handyman=profile,
+            defaults={
+                "center": profile.location,
+                "radius_km": fake.random_int(min=5, max=20),
+            },
+        )
+
+        # Créneaux : uniquement lors de la première création évaluée “réelle”
+        if not AvailabilitySlot.objects.filter(handyman=profile).exists():
+            for day in range(7):
+                if fake.pybool(truth_probability=70):
+                    AvailabilitySlot.objects.create(
+                        handyman=profile,
+                        weekday=day,
+                        start_time=fake.time(pattern="%H:%M:%S"),
+                        end_time=fake.time(pattern="%H:%M:%S"),
+                    )
+
+        return profile
 
     def _create_users_and_handymen(self, count: int):
         self.stdout.write(f"• Création de {count} utilisateurs (≈40% artisans)…")
 
-        users = []
-        handymen_profiles = []
+        users: List[User] = []
+        handymen_profiles: List[HandymanProfile] = []
 
         # Admin (idempotent)
         admin = self._get_or_create_user(
@@ -190,7 +254,7 @@ class Command(BaseCommand):
         )
         users.append(admin)
 
-        # Un client démo (idempotent)
+        # Client démo (idempotent)
         demo_client = self._get_or_create_user(
             "demo.client@handy.com",
             first_name="Demo",
@@ -201,8 +265,8 @@ class Command(BaseCommand):
         )
         users.append(demo_client)
 
-        for i in range(count):
-            is_handyman = fake.pyfloat() > 0.6  # ~40% artisans
+        for _ in range(count):
+            is_handyman = random.random() > 0.6  # ~40% artisans
             email = fake.unique.email()
 
             user = self._get_or_create_user(
@@ -216,51 +280,8 @@ class Command(BaseCommand):
             users.append(user)
 
             if is_handyman:
-                # Si le profil existe déjà (rerun), ne pas le recréer
-                if hasattr(user, "handyman_profile"):
-                    handymen_profiles.append(user.handyman_profile)
-                    continue
-
-                # Pos autour d’Abidjan
-                lat = 5.3600 + fake.pyfloat(min_value=-0.1, max_value=0.1)
-                lng = -4.0083 + fake.pyfloat(min_value=-0.1, max_value=0.1)
-
-                profile, created = HandymanProfile.objects.get_or_create(
-                    user=user,
-                    defaults={
-                        "bio": fake.text(max_nb_chars=200),
-                        "commune": fake.random_element(
-                            elements=["Cocody", "Abobo", "Adjamé", "Plateau", "Yopougon", "Treichville"]),
-                        "quartier": fake.word(),
-                        "location": Point(lng, lat, srid=4326),
-                        "rating": round(fake.pyfloat(min_value=3.0, max_value=5.0), 1),
-                        "completed_jobs": fake.random_int(min=0, max=100),
-                        "is_approved": fake.pybool(truth_probability=80),
-                        "online": fake.pybool(truth_probability=50),
-                        "hourly_rate": fake.random_int(min=2000, max=10000),
-                    },
-                )
+                profile = self._get_or_create_handyman_profile(user)
                 handymen_profiles.append(profile)
-
-                # Zone de service (idempotent: get_or_create)
-                ServiceArea.objects.get_or_create(
-                    handyman=profile,
-                    defaults={
-                        "center": Point(lng, lat, srid=4326),
-                        "radius_km": fake.random_int(min=5, max=20),
-                    },
-                )
-
-                # Créneaux : pour éviter les doublons à chaque rerun, on crée UNIQUEMENT si le profil vient d’être créé
-                if created:
-                    for day in range(7):
-                        if fake.pybool(truth_probability=70):
-                            AvailabilitySlot.objects.create(
-                                handyman=profile,
-                                weekday=day,
-                                start_time=fake.time(pattern="%H:%M:%S"),
-                                end_time=fake.time(pattern="%H:%M:%S"),
-                            )
 
         return users, handymen_profiles
 
@@ -299,9 +320,8 @@ class Command(BaseCommand):
                 is_active=random.random() > 0.08,
             )
 
-            # NB: ServiceImage.image est obligatoire dans ton modèle.
-            # Pour éviter de gérer des fichiers ici, on n'en crée pas par défaut.
-            # (Tu peux brancher un générateur d'images si Pillow est installé.)
+            # (Option) Ajouter des images si ton modèle accepte un upload simplifié
+            # Laisse vide par défaut pour éviter la gestion de fichiers.
 
             services.append(svc)
 
@@ -316,8 +336,7 @@ class Command(BaseCommand):
         bookings: List[Booking] = []
         statuses = ["pending", "confirmed", "in_progress", "completed", "cancelled"]
 
-        # pool de clients
-        clients = [u for u in users if u.user_type == "client"]
+        clients = [u for u in users if getattr(u, "user_type", "client") == "client"]
         if not clients:
             clients = [users[0]]
 
@@ -329,21 +348,16 @@ class Command(BaseCommand):
             service = random.choice(services)
 
             status = random.choice(statuses)
-
-            # coordonnées du job (autour d'Abidjan)
             lat, lng = random_point_around(ABJ_LAT, ABJ_LNG, max_km=16)
 
-            # date de réservation
             if status == "pending":
                 booking_date = now + timezone.timedelta(days=random.randint(1, 30))
             elif status in ["confirmed", "in_progress"]:
                 booking_date = now - timezone.timedelta(days=random.randint(0, 5))
-            else:  # completed/cancelled
+            else:
                 booking_date = now - timezone.timedelta(days=random.randint(5, 40))
 
-            total_price = (
-                service.price if service.price is not None else Decimal(random.randrange(10000, 120000, 500))
-            )
+            total_price = service.price if service.price is not None else Decimal(random.randrange(10000, 120000, 500))
 
             bk = Booking.objects.create(
                 client=client,
