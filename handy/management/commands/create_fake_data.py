@@ -372,16 +372,19 @@ class Command(BaseCommand):
                 description=fake.text(max_nb_chars=220),
                 total_price=total_price,
             )
+            amount = service.price if service.price is not None else Decimal(random.randrange(10000, 120000, 500))
 
             if status in ["confirmed", "in_progress", "completed"]:
                 method = random.choice(["cash", "om", "mtn", "card"])
                 p_status = random.choice(["pending", "completed", "failed"])
                 Payment.objects.create(
                     booking=bk,
-                    amount=total_price,
-                    method=method,
-                    status=p_status,
+                    amount=amount,
+                    platform_fee=self._fee(amount),  # <<< OBLIGATOIRE
+                    method=random.choice(["cash", "om", "mtn", "card"]),
+                    status=random.choice(["pending", "completed", "failed"]),
                     transaction_id=fake.uuid4()[:20],
+                    currency="XOF",  # explicite si ton modèle n'a pas de default
                 )
 
             bookings.append(bk)
