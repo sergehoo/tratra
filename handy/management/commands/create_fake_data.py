@@ -8,6 +8,7 @@ from django.core.management.base import BaseCommand
 from django.contrib.gis.geos import Point
 from django.db import transaction
 from django.utils import timezone
+from django.utils.crypto import get_random_string
 
 from faker import Faker
 
@@ -151,6 +152,15 @@ class Command(BaseCommand):
 
         return cats
 
+    def _unique_username_from_email(email: str) -> str:
+        base = (email.split("@")[0] if email else f"user_{get_random_string(6)}").lower()[:30]
+        candidate = base
+        i = 1
+        from handy.models import User
+        while User.objects.filter(username=candidate).exists():
+            candidate = f"{base}{i}"
+            i += 1
+        return candidate
     # ---------------- USERS + HANDYMEN ----------------
     def _create_users_and_handymen(self, total_users: int) -> Tuple[List[User], List[HandymanProfile]]:
         self.stdout.write(f"• Création de {total_users} utilisateurs (≈40% artisans)…")
@@ -162,6 +172,7 @@ class Command(BaseCommand):
         admin, _ = User.objects.get_or_create(
             email="admin@handy.com",
             defaults={
+                "username": self._unique_username_from_email("admin@handy.com"),
                 "first_name": "Admin",
                 "last_name": "Handy",
                 "is_staff": True,
@@ -173,12 +184,11 @@ class Command(BaseCommand):
         if not admin.has_usable_password():
             admin.set_password("password123")
             admin.save()
-        users.append(admin)
 
-        # Un client test stable (utile pour un login rapide)
         demo_client, _ = User.objects.get_or_create(
             email="demo.client@handy.com",
             defaults={
+                "username": self._unique_username_from_email("demo.client@handy.com"),
                 "first_name": "Demo",
                 "last_name": "Client",
                 "user_type": "client",
@@ -195,6 +205,7 @@ class Command(BaseCommand):
             email = fake.unique.email()
             user = User.objects.create(
                 email=email,
+                username=_unique_username_from_email(email),  # <— IMPORTANT
                 first_name=fake.first_name(),
                 last_name=fake.last_name(),
                 user_type="handyman" if is_handyman else "client",
