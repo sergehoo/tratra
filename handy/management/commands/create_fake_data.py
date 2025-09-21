@@ -6,6 +6,7 @@ import random
 from decimal import Decimal, ROUND_HALF_UP
 from typing import List, Tuple
 
+from babel.core.Locale import days
 from django.contrib.gis.geos import Point
 from django.core.management.base import BaseCommand
 from django.db import IntegrityError, transaction
@@ -356,7 +357,7 @@ class Command(BaseCommand):
             if status == "pending":
                 booking_date = now + timezone.timedelta(days=random.randint(1, 30))
             elif status in ["confirmed", "in_progress"]:
-                booking_date = now - timezone.timedelta(days	random.randint(0, 5))
+                booking_date = now - timezone.timedelta(days=random.randint(0, 5))
             else:
                 booking_date = now - timezone.timedelta(days=random.randint(5, 40))
 
