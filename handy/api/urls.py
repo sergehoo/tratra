@@ -1,7 +1,7 @@
 # handy/api/urls.py
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
+from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView, TokenBlacklistView
 
 from .views import (
     UserViewSet, HandymanProfileViewSet, ServiceCategoryViewSet, ServiceViewSet, ServiceImageViewSet,
@@ -12,8 +12,6 @@ from .views import (
 
 router = DefaultRouter()
 router.register(r'users', UserViewSet, basename='users')
-path('api/auth/jwt/create/', TokenObtainPairView.as_view(), name='jwt-create'),
-path('api/auth/jwt/refresh/', TokenRefreshView.as_view(), name='jwt-refresh'),
 router.register(r'handymen', HandymanProfileViewSet, basename='handymen')
 router.register(r'categories', ServiceCategoryViewSet, basename='categories')
 router.register(r'services', ServiceViewSet, basename='services')
@@ -31,6 +29,9 @@ router.register(r'devices', DeviceViewSet, basename='devices')
 
 urlpatterns = [
     path('', include(router.urls)),
+    path('auth/login/', TokenObtainPairView.as_view(), name='jwt-login'),
+    path('auth/refresh/', TokenRefreshView.as_view(), name='jwt-refresh'),
+    path('auth/logout/', TokenBlacklistView.as_view(), name='jwt-logout'),
     path('price/estimate/', price_estimate, name='price-estimate'),
     path('payments/initiate/', payment_initiate, name='payment-initiate'),
     path('payments/webhook/<str:provider>/', PaymentWebhook.as_view(), name='payment-webhook'),
