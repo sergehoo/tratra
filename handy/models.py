@@ -349,7 +349,7 @@ class Booking(models.Model):
     job_location = gis_models.PointField(srid=4326, null=True, blank=True)
     requested_start = models.DateTimeField(null=True, blank=True, db_index=True)
     requested_end = models.DateTimeField(null=True, blank=True, db_index=True)
-
+    total_price = models.DecimalField(max_digits=10, decimal_places=2, blank=True, null=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending', db_index=True)
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
     updated_at = models.DateTimeField(auto_now=True)
