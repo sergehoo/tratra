@@ -399,7 +399,7 @@ class Command(BaseCommand):
                     booking=b,
                     rating=random.randint(3, 5),
                     comment=fake.text(max_nb_chars=180),
-                    is_approved=random.random() > 0.2,
+                    # is_approved=random.random() > 0.2,
                 )
 
 # # handy/management/commands/create_fake_data.py
