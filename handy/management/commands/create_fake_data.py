@@ -6,7 +6,7 @@ import random
 from decimal import Decimal, ROUND_HALF_UP
 from typing import List, Tuple
 
-from django.contrib.gis.geos import Point
+from django.contrib.gis.geos import Point, GEOSGeometry
 from django.core.management.base import BaseCommand
 from django.db import IntegrityError, transaction
 from django.db.models.signals import post_save
@@ -50,6 +50,15 @@ def seed_all(seed: int | None):
     except Exception:
         pass
     Faker.seed(seed)
+
+
+def _pt(lng: float, lat: float) -> GEOSGeometry:
+    """
+    Construit un point GEOS **avec SRID=4326** de manière explicite.
+    (Évite les surprises côté PostGIS.)
+    """
+    g = GEOSGeometry(f"POINT({lng} {lat})", srid=4326)
+    return g
 
 
 def random_point_around(lat0: float, lng0: float, max_km: float = 12.0) -> Tuple[float, float]:
@@ -106,7 +115,14 @@ class Command(BaseCommand):
             users, handymen = self._create_users_and_handymen(opt["users"])
             services = self._create_services(opt["services"], handymen, cats)
             bookings = self._create_bookings(opt["bookings"], users, handymen, services)
+
+            # Backfill spatial pour tout ce qui serait resté NULL
+            self._ensure_spatial_fields()
+
             self._create_reviews(bookings)
+
+            # Petit diagnostic final
+            self._spatial_diagnostics()
         finally:
             if on_booking_status_change and reconnected:
                 try:
@@ -206,6 +222,12 @@ class Command(BaseCommand):
     def _get_or_create_handyman_profile(self, user: User) -> HandymanProfile:
         existing = HandymanProfile.objects.filter(user=user).first()
         if existing:
+            # Backfill location si manquante
+            if not existing.location:
+                lat = 5.3600 + fake.pyfloat(min_value=-0.1, max_value=0.1)
+                lng = -4.0083 + fake.pyfloat(min_value=-0.1, max_value=0.1)
+                existing.location = _pt(lng, lat)
+                existing.save(update_fields=["location"])
             return existing
 
         lat = 5.3600 + fake.pyfloat(min_value=-0.1, max_value=0.1)
@@ -219,7 +241,7 @@ class Command(BaseCommand):
                     "commune": fake.random_element(
                         elements=["Cocody", "Abobo", "Adjamé", "Plateau", "Yopougon", "Treichville"]),
                     "quartier": fake.word(),
-                    "location": Point(lng, lat, srid=4326),
+                    "location": _pt(lng, lat),
                     "rating": round(fake.pyfloat(min_value=3.0, max_value=5.0), 1),
                     "completed_jobs": fake.random_int(min=0, max=100),
                     "is_approved": fake.pybool(truth_probability=80),
@@ -229,12 +251,17 @@ class Command(BaseCommand):
             )
         except IntegrityError:
             profile = HandymanProfile.objects.get(user=user)
+            if not profile.location:
+                profile.location = _pt(lng, lat)
+                profile.save(update_fields=["location"])
 
+        # Zone de service
         ServiceArea.objects.get_or_create(
             handyman=profile,
-            defaults={"center": profile.location, "radius_km": fake.random_int(min=5, max=20)},
+            defaults={"center": profile.location or _pt(lng, lat), "radius_km": fake.random_int(min=5, max=20)},
         )
 
+        # Créneaux (une seule fois)
         if not AvailabilitySlot.objects.filter(handyman=profile).exists():
             for day in range(7):
                 if fake.pybool(truth_probability=70):
@@ -288,6 +315,14 @@ class Command(BaseCommand):
                 password="password123",
             )
             users.append(user)
+
+            # Backfill aussi les coordonnées côté User (utile pour suggestions “près de moi”)
+            if not getattr(user, "last_location", None):
+                lat = 5.3600 + fake.pyfloat(min_value=-0.1, max_value=0.1)
+                lng = -4.0083 + fake.pyfloat(min_value=-0.1, max_value=0.1)
+                user.last_location = _pt(lng, lat)
+                user.last_location_ts = timezone.now()
+                user.save(update_fields=["last_location", "last_location_ts"])
 
             if is_handyman:
                 profile = self._get_or_create_handyman_profile(user)
@@ -369,7 +404,7 @@ class Command(BaseCommand):
                 address=fake.street_address(),
                 city="Abidjan",
                 postal_code=fake.postcode(),
-                job_location=Point(lng, lat, srid=4326),
+                job_location=_pt(lng, lat),
                 description=fake.text(max_nb_chars=220),
             )
 
@@ -383,7 +418,7 @@ class Command(BaseCommand):
                     method=random.choice(["cash", "om", "mtn", "card"]),
                     status=random.choice(["pending", "completed", "failed"]),
                     transaction_id=fake.uuid4()[:20],
-                    currency="XOF",  # explicite si ton modèle n'a pas de default
+                    currency="XOF",
                 )
 
             bookings.append(bk)
@@ -399,20 +434,72 @@ class Command(BaseCommand):
                     booking=b,
                     rating=random.randint(3, 5),
                     comment=fake.text(max_nb_chars=180),
-                    # is_approved=random.random() > 0.2,
                 )
 
+    # ---------------- BACKFILL SPATIAL ----------------
+    def _ensure_spatial_fields(self):
+        """
+        Après seed, forcer des coordonnées si certaines sont restées NULL
+        (cas d’objets préexistants récupérés par get_or_create).
+        """
+        # HandymanProfile.location
+        for hp in HandymanProfile.objects.filter(location__isnull=True):
+            lat = 5.3600 + fake.pyfloat(min_value=-0.1, max_value=0.1)
+            lng = -4.0083 + fake.pyfloat(min_value=-0.1, max_value=0.1)
+            hp.location = _pt(lng, lat)
+            hp.save(update_fields=["location"])
+
+        # ServiceArea.center
+        for sa in ServiceArea.objects.filter(center__isnull=True).select_related("handyman"):
+            base = sa.handyman.location
+            if base is None:
+                lat = 5.3600 + fake.pyfloat(min_value=-0.1, max_value=0.1)
+                lng = -4.0083 + fake.pyfloat(min_value=-0.1, max_value=0.1)
+                base = _pt(lng, lat)
+            sa.center = base
+            sa.save(update_fields=["center"])
+
+        # Booking.job_location
+        for bk in Booking.objects.filter(job_location__isnull=True):
+            lat, lng = random_point_around(ABJ_LAT, ABJ_LNG, max_km=16)
+            bk.job_location = _pt(lng, lat)
+            bk.save(update_fields=["job_location"])
+
+        # User.last_location
+        for u in User.objects.filter(last_location__isnull=True):
+            lat = 5.3600 + fake.pyfloat(min_value=-0.1, max_value=0.1)
+            lng = -4.0083 + fake.pyfloat(min_value=-0.1, max_value=0.1)
+            u.last_location = _pt(lng, lat)
+            u.last_location_ts = timezone.now()
+            u.save(update_fields=["last_location", "last_location_ts"])
+
+    # ---------------- DIAGNOSTIC ----------------
+    def _spatial_diagnostics(self):
+        hp_null = HandymanProfile.objects.filter(location__isnull=True).count()
+        sa_null = ServiceArea.objects.filter(center__isnull=True).count()
+        bk_null = Booking.objects.filter(job_location__isnull=True).count()
+        u_null  = User.objects.filter(last_location__isnull=True).count()
+
+        if hp_null or sa_null or bk_null or u_null:
+            self.stdout.write(self.style.WARNING(
+                f"Diagnostics: HandymanProfile.location NULL={hp_null} | "
+                f"ServiceArea.center NULL={sa_null} | Booking.job_location NULL={bk_null} | "
+                f"User.last_location NULL={u_null}"
+            ))
+        else:
+            self.stdout.write(self.style.SUCCESS("Diagnostics: toutes les positions GPS sont renseignées."))
 # # handy/management/commands/create_fake_data.py
 # from __future__ import annotations
 #
 # import math
 # import random
-# from decimal import Decimal
+# from decimal import Decimal, ROUND_HALF_UP
 # from typing import List, Tuple
 #
 # from django.contrib.gis.geos import Point
 # from django.core.management.base import BaseCommand
 # from django.db import IntegrityError, transaction
+# from django.db.models.signals import post_save
 # from django.utils import timezone
 # from django.utils.crypto import get_random_string
 #
@@ -432,10 +519,15 @@ class Command(BaseCommand):
 #     User,
 # )
 #
+# # Import “best-effort” du signal pour le débrancher pendant le seed
+# try:
+#     from handy.signal import on_booking_status_change
+# except Exception:
+#     on_booking_status_change = None
+#
 # fake = Faker("fr_FR")
 #
-# # Centre approximatif d'Abidjan
-# ABJ_LAT, ABJ_LNG = 5.3600, -4.0083
+# ABJ_LAT, ABJ_LNG = 5.3600, -4.0083  # centre Abidjan
 #
 #
 # def seed_all(seed: int | None):
@@ -451,35 +543,33 @@ class Command(BaseCommand):
 #
 #
 # def random_point_around(lat0: float, lng0: float, max_km: float = 12.0) -> Tuple[float, float]:
-#     """
-#     Retourne (lat, lng) à <= max_km du centre (lat0,lng0).
-#     Approx simple: 1° lat ~ 111km ; 1° lon ~ 111km * cos(lat).
-#     """
+#     """Retourne (lat, lng) à <= max_km du centre (lat0,lng0)."""
 #     r_km = random.random() * max_km
 #     theta_deg = random.random() * 360.0
 #     dlat = r_km / 111.0
-#     dlng = r_km / (111.0 * max(0.1, abs(math.cos(math.radians(lat0)))))  # évite /0
+#     dlng = r_km / (111.0 * max(0.1, abs(math.cos(math.radians(lat0)))))
 #     lat = lat0 + (dlat * math.sin(math.radians(theta_deg)))
 #     lng = lng0 + (dlng * math.cos(math.radians(theta_deg)))
 #     return lat, lng
 #
 #
 # class Command(BaseCommand):
-#     help = "Génère des données de test Handy (artisans, services, réservations) avec coordonnées GPS (Abidjan)."
+#     help = "Génère des données de test Handy (artisans, services, réservations) autour d’Abidjan."
 #
 #     def add_arguments(self, parser):
-#         parser.add_argument("--users", type=int, default=40,
-#                             help="Nombre total d'utilisateurs à créer (≈40% artisans). Default 40")
-#         parser.add_argument("--categories", type=int, default=30,
-#                             help="Nombre de catégories à créer. Default 30")
-#         parser.add_argument("--services", type=int, default=120,
-#                             help="Nombre de services à créer. Default 120")
-#         parser.add_argument("--bookings", type=int, default=160,
-#                             help="Nombre de réservations à créer. Default 160")
-#         parser.add_argument("--seed", type=int, default=None,
-#                             help="Graine aléatoire (reproductible). Ex: --seed 42")
-#         parser.add_argument("--drop", action="store_true",
-#                             help="Supprime (hard delete) les données existantes non critiques avant insertion")
+#         parser.add_argument("--users", type=int, default=40)
+#         parser.add_argument("--categories", type=int, default=30)
+#         parser.add_argument("--services", type=int, default=120)
+#         parser.add_argument("--bookings", type=int, default=160)
+#         parser.add_argument("--seed", type=int, default=None)
+#         parser.add_argument("--drop", action="store_true")
+#
+#     # --- util commission ---
+#     @staticmethod
+#     def _fee(amount: Decimal, rate: Decimal = Decimal("0.11")) -> Decimal:
+#         if amount is None:
+#             return Decimal("0.00")
+#         return (Decimal(amount) * rate).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 #
 #     @transaction.atomic
 #     def handle(self, *args, **opt):
@@ -488,14 +578,32 @@ class Command(BaseCommand):
 #
 #         self.stdout.write(self.style.WARNING("=== Création de FAKE DATA Handy (transactionnelle) ==="))
 #
-#         if opt["drop"]:
-#             self._drop_soft()
+#         # déconnecte le signal Booking -> tâche celery
+#         reconnected = False
+#         if on_booking_status_change:
+#             try:
+#                 post_save.disconnect(on_booking_status_change, sender=Booking)
+#                 reconnected = True
+#                 self.stdout.write(self.style.WARNING("Signal on_booking_status_change déconnecté pendant le seed."))
+#             except Exception:
+#                 pass
 #
-#         cats = self._create_categories(opt["categories"])
-#         users, handymen = self._create_users_and_handymen(opt["users"])
-#         services = self._create_services(opt["services"], handymen, cats)
-#         bookings = self._create_bookings(opt["bookings"], users, handymen, services)
-#         self._create_reviews(bookings)
+#         try:
+#             if opt["drop"]:
+#                 self._drop_soft()
+#
+#             cats = self._create_categories(opt["categories"])
+#             users, handymen = self._create_users_and_handymen(opt["users"])
+#             services = self._create_services(opt["services"], handymen, cats)
+#             bookings = self._create_bookings(opt["bookings"], users, handymen, services)
+#             self._create_reviews(bookings)
+#         finally:
+#             if on_booking_status_change and reconnected:
+#                 try:
+#                     post_save.connect(on_booking_status_change, sender=Booking)
+#                     self.stdout.write(self.style.WARNING("Signal on_booking_status_change reconnecté."))
+#                 except Exception:
+#                     pass
 #
 #         self.stdout.write(self.style.SUCCESS("✔ Données de test générées avec succès."))
 #
@@ -512,7 +620,7 @@ class Command(BaseCommand):
 #         HandymanDocument.objects.all().delete()
 #         HandymanProfile.objects.all().delete()
 #         ServiceCategory.objects.all().delete()
-#         # NB: on ne supprime pas les Users pour garder les comptes tests
+#         # On garde les Users
 #
 #     # ---------------- CATEGORIES ----------------
 #     def _create_categories(self, count: int) -> List[ServiceCategory]:
@@ -574,10 +682,11 @@ class Command(BaseCommand):
 #         if created or not user.has_usable_password():
 #             user.set_password(defaults.get("password", "password123"))
 #             user.save(update_fields=["password"])
-#         # Met à jour des champs si absents (idempotent mais rafraîchissant)
 #         dirty = False
 #         for f, v in defaults.items():
-#             if getattr(user, f, None) != v and f not in {"password"}:
+#             if f == "password":
+#                 continue
+#             if getattr(user, f, None) != v:
 #                 setattr(user, f, v)
 #                 dirty = True
 #         if dirty:
@@ -585,19 +694,15 @@ class Command(BaseCommand):
 #         return user
 #
 #     def _get_or_create_handyman_profile(self, user: User) -> HandymanProfile:
-#         """
-#         Idempotent + résilient aux courses : évite IntegrityError OneToOne.
-#         """
 #         existing = HandymanProfile.objects.filter(user=user).first()
 #         if existing:
 #             return existing
 #
-#         # Pos autour d’Abidjan
 #         lat = 5.3600 + fake.pyfloat(min_value=-0.1, max_value=0.1)
 #         lng = -4.0083 + fake.pyfloat(min_value=-0.1, max_value=0.1)
 #
 #         try:
-#             profile, created = HandymanProfile.objects.get_or_create(
+#             profile, _ = HandymanProfile.objects.get_or_create(
 #                 user=user,
 #                 defaults={
 #                     "bio": fake.text(max_nb_chars=200),
@@ -613,20 +718,13 @@ class Command(BaseCommand):
 #                 },
 #             )
 #         except IntegrityError:
-#             # OneToOne déjà pris (course ou rerun) -> on récupère proprement
 #             profile = HandymanProfile.objects.get(user=user)
-#             created = False
 #
-#         # Zone de service (idempotent)
 #         ServiceArea.objects.get_or_create(
 #             handyman=profile,
-#             defaults={
-#                 "center": profile.location,
-#                 "radius_km": fake.random_int(min=5, max=20),
-#             },
+#             defaults={"center": profile.location, "radius_km": fake.random_int(min=5, max=20)},
 #         )
 #
-#         # Créneaux : uniquement lors de la première création évaluée “réelle”
 #         if not AvailabilitySlot.objects.filter(handyman=profile).exists():
 #             for day in range(7):
 #                 if fake.pybool(truth_probability=70):
@@ -645,7 +743,6 @@ class Command(BaseCommand):
 #         users: List[User] = []
 #         handymen_profiles: List[HandymanProfile] = []
 #
-#         # Admin (idempotent)
 #         admin = self._get_or_create_user(
 #             "admin@handy.com",
 #             first_name="Admin",
@@ -658,7 +755,6 @@ class Command(BaseCommand):
 #         )
 #         users.append(admin)
 #
-#         # Client démo (idempotent)
 #         demo_client = self._get_or_create_user(
 #             "demo.client@handy.com",
 #             first_name="Demo",
@@ -670,7 +766,7 @@ class Command(BaseCommand):
 #         users.append(demo_client)
 #
 #         for _ in range(count):
-#             is_handyman = random.random() > 0.6  # ~40% artisans
+#             is_handyman = random.random() > 0.6
 #             email = fake.unique.email()
 #
 #             user = self._get_or_create_user(
@@ -709,7 +805,7 @@ class Command(BaseCommand):
 #             elif price_type == "fixed":
 #                 price = Decimal(random.randrange(5000, 120000, 1000))
 #                 duration = None
-#             else:  # quote
+#             else:
 #                 price = None
 #                 duration = None
 #
@@ -723,10 +819,6 @@ class Command(BaseCommand):
 #                 duration=duration,
 #                 is_active=random.random() > 0.08,
 #             )
-#
-#             # (Option) Ajouter des images si ton modèle accepte un upload simplifié
-#             # Laisse vide par défaut pour éviter la gestion de fichiers.
-#
 #             services.append(svc)
 #
 #         return services
@@ -740,10 +832,7 @@ class Command(BaseCommand):
 #         bookings: List[Booking] = []
 #         statuses = ["pending", "confirmed", "in_progress", "completed", "cancelled"]
 #
-#         clients = [u for u in users if getattr(u, "user_type", "client") == "client"]
-#         if not clients:
-#             clients = [users[0]]
-#
+#         clients = [u for u in users if getattr(u, "user_type", "client") == "client"] or [users[0]]
 #         now = timezone.now()
 #
 #         for _ in range(count):
@@ -761,8 +850,6 @@ class Command(BaseCommand):
 #             else:
 #                 booking_date = now - timezone.timedelta(days=random.randint(5, 40))
 #
-#             total_price = service.price if service.price is not None else Decimal(random.randrange(10000, 120000, 500))
-#
 #             bk = Booking.objects.create(
 #                 client=client,
 #                 handyman=hm.user,
@@ -774,17 +861,15 @@ class Command(BaseCommand):
 #                 postal_code=fake.postcode(),
 #                 job_location=Point(lng, lat, srid=4326),
 #                 description=fake.text(max_nb_chars=220),
-#                 total_price=total_price,
 #             )
-#             amount = service.price if service.price is not None else Decimal(random.randrange(10000, 120000, 500))
 #
+#             # Paiement lié (avec platform_fee obligatoire)
+#             amount = service.price if service.price is not None else Decimal(random.randrange(10000, 120000, 500))
 #             if status in ["confirmed", "in_progress", "completed"]:
-#                 method = random.choice(["cash", "om", "mtn", "card"])
-#                 p_status = random.choice(["pending", "completed", "failed"])
 #                 Payment.objects.create(
 #                     booking=bk,
 #                     amount=amount,
-#                     platform_fee=self._fee(amount),  # <<< OBLIGATOIRE
+#                     platform_fee=self._fee(amount),   # <<< OBLIGATOIRE
 #                     method=random.choice(["cash", "om", "mtn", "card"]),
 #                     status=random.choice(["pending", "completed", "failed"]),
 #                     transaction_id=fake.uuid4()[:20],
@@ -804,5 +889,6 @@ class Command(BaseCommand):
 #                     booking=b,
 #                     rating=random.randint(3, 5),
 #                     comment=fake.text(max_nb_chars=180),
-#                     is_approved=random.random() > 0.2,
+#                     # is_approved=random.random() > 0.2,
 #                 )
+#
