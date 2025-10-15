@@ -40,9 +40,11 @@ services:
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
     volumes:
       - minio_data:/data
-    ports:
-      - "9000:9000"   # API S3
-      - "9001:9001"   # Console web
+    # Les ports suivants sont facultatifs si Traefik route correctement.
+    # Tu peux les enlever en prod pour n’exposer que via Traefik.
+    # ports:
+    #   - "9000:9000"
+    #   - "9001:9001"
     networks:
       - web
       - proxy
@@ -51,17 +53,23 @@ services:
       - traefik.enable=true
       - traefik.docker.network=proxy
 
-      # ⚠️ Évite de réutiliser le même host que l’app.
-      # Donne un host dédié à l’API S3 et à la console
-      - traefik.http.routers.minio-api.rule=Host(`minio.tratra.net`)
+      # API S3 (HTTP)
+      - traefik.http.routers.minio-api.rule=Host(`${MINIO_API_HOST}`)
       - traefik.http.routers.minio-api.entrypoints=websecure
       - traefik.http.routers.minio-api.tls.certresolver=lets
       - traefik.http.services.minio-api.loadbalancer.server.port=9000
+      - traefik.http.routers.minio-api.middlewares=minio-compress@docker
 
-      - traefik.http.routers.minio-console.rule=Host(`console.tratra.net`)
+      # Console d'admin
+      - traefik.http.routers.minio-console.rule=Host(`${MINIO_CONSOLE_HOST}`)
       - traefik.http.routers.minio-console.entrypoints=websecure
       - traefik.http.routers.minio-console.tls.certresolver=lets
       - traefik.http.services.minio-console.loadbalancer.server.port=9001
+      - traefik.http.routers.minio-console.middlewares=minio-compress@docker
+
+      # Middlewares partagés
+      - traefik.http.middlewares.minio-compress.compress=true
+
 
   # --- Redis (broker Celery + cache + Channels) ---
   redis:
@@ -158,3 +166,33 @@ services:
         condition: service_healthy
     networks: [web]
     restart: unless-stopped
+
+  adminer:
+    image: adminer:4
+    environment:
+      # Connexion par défaut à tratradb (service DB dans le même réseau 'web')
+      ADMINER_DEFAULT_SERVER: tratradb
+      # Thème optionnel :
+      # ADMINER_DESIGN: pepa-linha
+    # ports:
+    #   - "8080:8080"   # facultatif si exposé par Traefik
+    networks:
+      - web
+      - proxy
+    restart: unless-stopped
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=proxy
+
+      - traefik.http.routers.adminer.rule=Host(`${ADMINER_HOST}`)
+      - traefik.http.routers.adminer.entrypoints=websecure
+      - traefik.http.routers.adminer.tls.certresolver=lets
+      - traefik.http.services.adminer-svc.loadbalancer.server.port=8080
+
+      # Compression + (optionnel) BasicAuth
+      - traefik.http.routers.adminer.middlewares=adminer-compress@docker${ADMINER_AUTH_SUFFIX}
+      - traefik.http.middlewares.adminer-compress.compress=true
+
+      # Active la basic auth si tu définis BASIC_AUTH_USERS (format htpasswd)
+      # ADMINER_AUTH_SUFFIX peut valoir ",adminer-auth@docker" (cf .env)
+      - traefik.http.middlewares.adminer-auth.basicauth.users=${BASIC_AUTH_USERS}
