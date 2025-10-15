@@ -65,10 +65,10 @@ services:
       - traefik.http.routers.minio-console.entrypoints=websecure
       - traefik.http.routers.minio-console.tls.certresolver=lets
       - traefik.http.services.minio-console.loadbalancer.server.port=9001
-      - traefik.http.routers.minio-console.middlewares=minio-compress@docker
+#      - traefik.http.routers.minio-console.middlewares=minio-compress@docker
 
       # Middlewares partagés
-      - traefik.http.middlewares.minio-compress.compress=true
+#      - traefik.http.middlewares.minio-compress.compress=true
 
 
   # --- Redis (broker Celery + cache + Channels) ---
