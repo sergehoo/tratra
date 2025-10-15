@@ -40,11 +40,6 @@ services:
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
     volumes:
       - minio_data:/data
-    # Les ports suivants sont facultatifs si Traefik route correctement.
-    # Tu peux les enlever en prod pour n’exposer que via Traefik.
-    # ports:
-    #   - "9000:9000"
-    #   - "9001:9001"
     networks:
       - web
       - proxy
@@ -53,21 +48,19 @@ services:
       - traefik.enable=true
       - traefik.docker.network=proxy
 
-      # API S3 (HTTP)
+      # === API S3 ===
       - traefik.http.routers.minio-api.rule=Host(`${MINIO_API_HOST}`)
       - traefik.http.routers.minio-api.entrypoints=websecure
       - traefik.http.routers.minio-api.tls.certresolver=lets
+      - traefik.http.routers.minio-api.service=minio-api
       - traefik.http.services.minio-api.loadbalancer.server.port=9000
-      - traefik.http.routers.minio-api.middlewares=minio-compress@docker
 
-      # Console d'admin
+      # === Console ===
       - traefik.http.routers.minio-console.rule=Host(`${MINIO_CONSOLE_HOST}`)
       - traefik.http.routers.minio-console.entrypoints=websecure
       - traefik.http.routers.minio-console.tls.certresolver=lets
+      - traefik.http.routers.minio-console.service=minio-console
       - traefik.http.services.minio-console.loadbalancer.server.port=9001
-#      - traefik.http.routers.minio-console.middlewares=minio-compress@docker
-
-      # Middlewares partagés
 #      - traefik.http.middlewares.minio-compress.compress=true
 
 
