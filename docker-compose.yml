@@ -189,4 +189,4 @@ services:
       # Active la basic auth si tu définis BASIC_AUTH_USERS (format htpasswd)
       # ADMINER_AUTH_SUFFIX peut valoir ",adminer-auth@docker" (cf .env)
 #      - traefik.http.middlewares.adminer-auth.basicauth.users=${BASIC_AUTH_USERS}
-      - traefik.http.middlewares.adminer-auth.basicauth.users=ogah:$apr1$bGNu7lXT$CdPO6vScHlC/39ZghSypc0
+      - traefik.http.middlewares.adminer-auth.basicauth.users=ogah:$2y$05$0Ve3AYfZqJIqkgxMz9Wzyeph8ip3I9T3mrjqL.x2fDH0jv4FGlsXu
