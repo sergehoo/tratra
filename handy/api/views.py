@@ -11,6 +11,7 @@ from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import viewsets, permissions, status, mixins
 from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.filters import OrderingFilter, SearchFilter
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -128,6 +129,13 @@ class UserViewSet(viewsets.ModelViewSet):
     search_fields = ["email", "first_name", "last_name"]
     ordering = ["-id"]
     pagination_class = DefaultPageNumberPagination
+
+    def get_permissions(self):
+        if self.action in ['create']:  # inscription
+            return [AllowAny()]
+        if self.action in ['me']:  # profil courant
+            return [IsAuthenticated()]
+        return super().get_permissions()
 
     @action(detail=False, methods=['get'], url_path='me',
             permission_classes=[permissions.IsAuthenticated])

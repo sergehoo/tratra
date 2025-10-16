@@ -34,15 +34,24 @@ class ServiceCategorySerializer(serializers.ModelSerializer):
 # ========= USER =========
 
 class UserSerializer(serializers.ModelSerializer):
+    password = serializers.CharField(write_only=True, required=True)
+
     class Meta:
         model = User
         # clair et safe (pas de password hash)
         fields = [
             "id", "username", "email", "first_name", "last_name", "user_type",
             "phone", "profile_picture", "address", "city", "postal_code", "country",
-            "latitude", "longitude", "is_verified", "date_joined", "last_login",
+            "latitude", "longitude", "is_verified", "date_joined", "last_login",'password',
         ]
-        read_only_fields = ["date_joined", "last_login", "is_verified"]
+        read_only_fields = ['id',"date_joined", "last_login", "is_verified"]
+
+    def create(self, validated_data):
+        password = validated_data.pop('password')
+        user = User(**validated_data)
+        user.set_password(password)
+        user.save()
+        return user
 
 class EmailOrUsernameTokenObtainPairSerializer(TokenObtainPairSerializer):
     def validate(self, attrs):
