@@ -7,7 +7,7 @@ from .views import (
     UserViewSet, HandymanProfileViewSet, ServiceCategoryViewSet, ServiceViewSet, ServiceImageViewSet,
     BookingViewSet, PaymentViewSet, PaymentLogViewSet, ReviewViewSet, ConversationViewSet, MessageViewSet,
     NotificationViewSet, HandymanDocumentViewSet, ReportViewSet, DeviceViewSet,
-    price_estimate, payment_initiate, match, PaymentWebhook, EmailOrUsernameTokenObtainPairView
+    price_estimate, payment_initiate, match, PaymentWebhook, EmailOrUsernameTokenObtainPairView, HeroSlideViewSet
 )
 
 router = DefaultRouter()
@@ -26,7 +26,7 @@ router.register(r'notifications', NotificationViewSet, basename='notifications')
 router.register(r'handyman-docs', HandymanDocumentViewSet, basename='handyman-docs')
 router.register(r'reports', ReportViewSet, basename='reports')
 router.register(r'devices', DeviceViewSet, basename='devices')
-
+router.register(r'slides', HeroSlideViewSet, basename='slides')
 urlpatterns = [
     path('', include(router.urls)),
     # path('auth/login/', TokenObtainPairView.as_view(), name='jwt-login'),

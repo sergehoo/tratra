@@ -1,6 +1,6 @@
 from .models import (
     HandymanDocument, ServiceImage, Report, PaymentLog, Device, IPBlacklist, ServiceCategory, Service, Booking,
-    Notification, Message, DepositTransaction
+    Notification, Message, DepositTransaction, HeroSlide
 )
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
@@ -311,3 +311,28 @@ class DepositTransactionAdmin(admin.ModelAdmin):
     list_display = ('id', 'handyman', 'type', 'amount', 'status', 'reference', 'date')
     list_filter = ('status', 'type')
     search_fields = ('handyman__email', 'reference')
+
+@admin.register(HeroSlide)
+class HeroSlideAdmin(admin.ModelAdmin):
+    list_display = ('title', 'cta_action', 'is_active', 'ordering', 'starts_at', 'ends_at')
+    list_filter = ('is_active', 'cta_action')
+    search_fields = ('title', 'subtitle')
+    ordering = ('ordering', '-id')
+    readonly_fields = ('created_at', 'updated_at')
+    fieldsets = (
+        ("Contenu", {
+            'fields': ('title', 'subtitle', 'image', 'image_url')
+        }),
+        ("Style", {
+            'fields': ('gradient_start', 'gradient_end')
+        }),
+        ("CTA", {
+            'fields': ('cta_label', 'cta_action', 'category', 'target_url')
+        }),
+        ("Activation", {
+            'fields': ('is_active', 'ordering', 'starts_at', 'ends_at')
+        }),
+        ("Meta", {
+            'fields': ('created_by', 'created_at', 'updated_at')
+        }),
+    )

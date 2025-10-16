@@ -1,10 +1,11 @@
 from decimal import Decimal
 
+from django.contrib.auth import get_user_model
 from django.contrib.auth.models import AbstractUser, Group, Permission
 from django.contrib.contenttypes.fields import GenericForeignKey
 from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError
-from django.core.validators import MinValueValidator
+from django.core.validators import MinValueValidator, RegexValidator
 from django.db import models
 from django.db.models import Sum, UniqueConstraint, Q
 from django.utils import timezone
@@ -629,3 +630,101 @@ class CancellationPolicy(models.Model):
     free_until_minutes = models.PositiveIntegerField(default=60)
     fee_percent = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal('0.00'))
     active = models.BooleanField(default=True)
+
+
+# handy/api/models/hero_slide.py  (ou dans ton models.py si tu préfères)
+
+User = get_user_model()
+
+# HEX validator (#RRGGBB)
+hex_color_re = RegexValidator(
+    regex=r'^#(?:[0-9a-fA-F]{3}){1,2}$',
+    message="Couleur hex valide attendue (#RRGGBB)"
+)
+
+class HeroSlideQuerySet(models.QuerySet):
+    def active_now(self):
+        now = timezone.now()
+        return self.filter(
+            is_active=True
+        ).filter(
+            models.Q(starts_at__isnull=True) | models.Q(starts_at__lte=now),
+            models.Q(ends_at__isnull=True) | models.Q(ends_at__gte=now)
+        ).order_by('ordering', '-id')
+
+class HeroSlide(models.Model):
+    """
+    Slide d'accueil : 100% pilotable par l'admin, avec CTA typé.
+    """
+    CTA_CHOICES = [
+        ('open_services', "Ouvrir la liste des services"),
+        ('open_categories', "Ouvrir la liste des catégories"),
+        ('open_category', "Ouvrir une catégorie précise"),
+        ('open_artisans', "Ouvrir la liste des artisans/populaires"),
+        ('open_url', "Ouvrir une URL externe"),
+    ]
+
+    title = models.CharField(max_length=120)
+    subtitle = models.CharField(max_length=200, blank=True, null=True)
+
+    # image soit uploadée (ImageField) soit URL distante
+    image = models.ImageField(upload_to='hero_slides/', blank=True, null=True)
+    image_url = models.URLField(blank=True, null=True)
+
+    # dégradé (front: [start, end])
+    gradient_start = models.CharField(max_length=7, validators=[hex_color_re], default="#00B14F")
+    gradient_end   = models.CharField(max_length=7, validators=[hex_color_re], default="#00D25F")
+
+    cta_label = models.CharField(max_length=40, default="Découvrir")
+    cta_action = models.CharField(max_length=30, choices=CTA_CHOICES, default='open_services')
+
+    # params CTA — selon le type d'action (ex. open_category)
+    category = models.ForeignKey(ServiceCategory, on_delete=models.SET_NULL, null=True, blank=True)
+    target_url = models.URLField(blank=True, null=True)
+
+    # activation/tri
+    is_active = models.BooleanField(default=True, db_index=True)
+    ordering = models.PositiveIntegerField(default=100, validators=[MinValueValidator(0)], db_index=True)
+    starts_at = models.DateTimeField(blank=True, null=True, db_index=True)
+    ends_at = models.DateTimeField(blank=True, null=True, db_index=True)
+
+    # tracking simple
+    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    objects = HeroSlideQuerySet.as_manager()
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['is_active', 'ordering']),
+            models.Index(fields=['starts_at']),
+            models.Index(fields=['ends_at']),
+        ]
+        ordering = ['ordering', '-id']
+        verbose_name = "Slide d'accueil"
+        verbose_name_plural = "Slides d'accueil"
+
+    def __str__(self):
+        return f"{self.title} [{self.cta_action}]"
+
+    @property
+    def image_src(self) -> str:
+        """
+        Renvoie l'URL de l'image (upload prioritaire, sinon image_url).
+        """
+        if self.image:
+            try:
+                return self.image.url
+            except Exception:
+                pass
+        return self.image_url or ""
+
+    def clean(self):
+        # Validation CTA
+        if self.cta_action == 'open_category' and not self.category:
+            from django.core.exceptions import ValidationError
+            raise ValidationError("Sélectionnez une catégorie pour l'action 'open_category'.")
+        if self.cta_action == 'open_url' and not self.target_url:
+            from django.core.exceptions import ValidationError
+            raise ValidationError("Renseignez target_url pour l'action 'open_url'.")

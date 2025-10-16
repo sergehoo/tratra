@@ -4,7 +4,8 @@ from math import radians, cos, sqrt, sin, asin
 
 from django.contrib.gis.db.models.functions import Distance
 from django.contrib.gis.geos import Point
-from django.db import transaction
+from django.db import transaction, models
+from django.db.models import Count
 from django.utils import timezone
 
 from django_filters.rest_framework import DjangoFilterBackend
@@ -26,7 +27,7 @@ from handy.models import (
     Payment, PaymentLog, Review, Conversation, Message, Notification,
     HandymanDocument, Report, Device,
     # ↓ suivants : assure-toi de les avoir dans tes models (cf. reco précédentes)
-    BookingRoute, JobTracking,  # tracking & ETA
+    BookingRoute, JobTracking, HeroSlide,  # tracking & ETA
     # Optionnel si tu as ajouté ces modèles :
     # ServiceArea, AvailabilitySlot, TimeOff, ReplacementSuggestion, SearchLog
 )
@@ -115,7 +116,7 @@ from .serializers import (
     ConversationSerializer, MessageSerializer, NotificationSerializer,
     HandymanDocumentSerializer, ReportSerializer, DeviceSerializer,
     MatchRequestSerializer, MatchResponseSerializer, PriceEstimateSerializer, PaymentInitSerializer,
-    EmailOrUsernameTokenObtainPairSerializer
+    EmailOrUsernameTokenObtainPairSerializer, HeroSlideSerializer
 )
 
 class EmailOrUsernameTokenObtainPairView(TokenObtainPairView):
@@ -479,3 +480,89 @@ class PaymentWebhook(APIView):
                 )
 
         return Response({"ok": True}, status=status.HTTP_200_OK)
+
+class HeroSlideViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    GET /api/slides/ -> slides actifs "now" si dispo,
+    sinon fallback auto basé sur catégories/services.
+    """
+    serializer_class = HeroSlideSerializer
+    permission_classes = [permissions.AllowAny]
+
+    def get_queryset(self):
+        # Permet de lister tous les slides (ex: /api/slides/?all=true) si staff
+        all_param = self.request.query_params.get('all')
+        if all_param and self.request.user and self.request.user.is_staff:
+            return HeroSlide.objects.all()
+        return HeroSlide.objects.active_now()
+
+    def list(self, request, *args, **kwargs):
+        qs = self.get_queryset()
+        if qs.exists():
+            data = HeroSlideSerializer(qs, many=True, context={'request': request}).data
+            return Response(data)
+
+        # ------- FALLBACK AUTO -------
+        auto = self._auto_generate_slides()
+        return Response(auto)
+
+    def _auto_generate_slides(self):
+        """
+        Construit 2-3 slides dynamiques quand il n'y a aucun slide configuré :
+        - Promo générique
+        - Top catégorie (par volume de services)
+        - Artisans certifiés (générique)
+        """
+        # Top category par nombre de services actifs
+        top_cat = (ServiceCategory.objects
+                   .filter(is_active=True)
+                   .annotate(svc_count=Count('services', filter=models.Q(services__is_active=True)))
+                   .order_by('-svc_count')
+                   .first())
+
+        slides = []
+
+        slides.append({
+            "title": "Jusqu'à -20% aujourd'hui",
+            "subtitle": "Interventions rapides et garanties",
+            "image": "https://images.unsplash.com/photo-1581578731548-c64695cc6952?q=80&w=1200&auto=format&fit=crop",
+            "gradient": ["#0BA360", "#3CBA92"],
+            "cta_label": "Je réserve",
+            "cta_action": "open_services",
+            "ctaParams": {},
+            "ordering": 1
+        })
+
+        if top_cat:
+            slides.append({
+                "title": top_cat.name,
+                "subtitle": "Experts disponibles près de chez vous",
+                "image": "https://images.unsplash.com/photo-1581579188871-cfe9b0b2ce6c?q=80&w=1200&auto=format&fit=crop",
+                "gradient": ["#FFC107", "#FFD54F"],
+                "cta_label": "Voir +",
+                "cta_action": "open_category",
+                "ctaParams": {"category_id": top_cat.id},
+                "ordering": 2
+            })
+
+        slides.append({
+            "title": "Artisans certifiés",
+            "subtitle": "Qualité, ponctualité, garanties",
+            "image": "https://images.unsplash.com/photo-1621905251918-3850a8f4257b?q=80&w=1200&auto=format&fit=crop",
+            "gradient": ["#00B14F", "#00D25F"],
+            "cta_label": "Découvrir",
+            "cta_action": "open_artisans",
+            "ctaParams": {},
+            "ordering": 3
+        })
+
+        return slides
+
+    @action(detail=False, methods=['get'], permission_classes=[permissions.IsAdminUser])
+    def preview_all(self, request):
+        """
+        Admin helper: voir actifs + inactifs (pour debug).
+        """
+        qs = HeroSlide.objects.all().order_by('ordering', '-id')
+        data = HeroSlideSerializer(qs, many=True, context={'request': request}).data
+        return Response(data)

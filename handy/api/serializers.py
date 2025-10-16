@@ -11,7 +11,7 @@ from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from handy.models import (
     User, HandymanProfile, ServiceCategory, ServiceImage, Service, Booking,
     Payment, PaymentLog, Review, Conversation, Message, Notification,
-    HandymanDocument, Report, Device
+    HandymanDocument, Report, Device, HeroSlide
 )
 from handy.services.pricing import estimate_price
 from handy.services.fees import compute_platform_fee
@@ -389,7 +389,7 @@ class PaymentInitSerializer(serializers.Serializer):
         """
         Crée/complète un Payment en 'pending' et retourne les infos provider.
         """
-        from handy.payments.gateway import OrangeMoney, MTNMoney, StripeCard
+        from handy.services.gateway import OrangeMoney, MTNMoney, StripeCard
 
         booking = Booking.objects.select_related("service", "service__category").get(pk=validated["booking_id"])
         svc = booking.service
@@ -422,3 +422,35 @@ class PaymentInitSerializer(serializers.Serializer):
         payment.transaction_id = res.get("provider_ref")
         payment.save(update_fields=["transaction_id"])
         return {"payment_id": payment.id, **res}
+
+class HeroSlideSerializer(serializers.ModelSerializer):
+    image = serializers.SerializerMethodField()
+    gradient = serializers.SerializerMethodField()
+    ctaParams = serializers.SerializerMethodField()
+
+    class Meta:
+        model = HeroSlide
+        fields = [
+            'id',
+            'title',
+            'subtitle',
+            'image',          # URL resolue
+            'gradient',       # ["#start", "#end"]
+            'cta_label',
+            'cta_action',
+            'ctaParams',      # dict: {category_id:..., url:...}
+            'ordering',
+        ]
+
+    def get_image(self, obj: HeroSlide) -> str:
+        return obj.image_src
+
+    def get_gradient(self, obj: HeroSlide):
+        return [obj.gradient_start, obj.gradient_end]
+
+    def get_ctaParams(self, obj: HeroSlide):
+        if obj.cta_action == 'open_category' and obj.category_id:
+            return {'category_id': obj.category_id}
+        if obj.cta_action == 'open_url' and obj.target_url:
+            return {'url': obj.target_url}
+        return {}
