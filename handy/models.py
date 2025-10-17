@@ -255,6 +255,7 @@ class Service(models.Model):
     duration = models.PositiveIntegerField(blank=True, null=True)  # minutes
     is_active = models.BooleanField(default=True, db_index=True)
     banner = models.ImageField(upload_to='service_images/')
+    image_url = models.URLField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
     updated_at = models.DateTimeField(auto_now=True)
 

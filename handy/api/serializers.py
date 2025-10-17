@@ -167,7 +167,7 @@ class ServiceSerializer(serializers.ModelSerializer):
             "id", "handyman", "handyman_detail",
             "category", "category_detail",
             "title", "description",
-            "price_type", "price", "duration",
+            "price_type", "price", "duration",'banner','image_url',
             "is_active", "created_at", "updated_at",
             "images",
         ]
