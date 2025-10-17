@@ -254,7 +254,7 @@ class Service(models.Model):
     price = models.DecimalField(max_digits=10, decimal_places=2, blank=True, null=True)
     duration = models.PositiveIntegerField(blank=True, null=True)  # minutes
     is_active = models.BooleanField(default=True, db_index=True)
-    banner = models.ImageField(upload_to='service_images/')
+    banner = models.ImageField(upload_to='service_images/',null=True)
     image_url = models.URLField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
     updated_at = models.DateTimeField(auto_now=True)
