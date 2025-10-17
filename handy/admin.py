@@ -251,7 +251,7 @@ class ServiceAdmin(admin.ModelAdmin):
     raw_id_fields = ('handyman', 'category')  # Pour les relations avec beaucoup d'instances
     readonly_fields = ('created_at', 'updated_at')
     fieldsets = (
-        (None, {'fields': ('handyman', 'category', 'title', 'description','banner')}),
+        (None, {'fields': ('handyman', 'category', 'title', 'description','banner','image_url')}),
         ('Pricing', {'fields': ('price_type', 'price', 'duration')}),
         ('Status', {'fields': ('is_active',)}),
         ('Timestamps', {'fields': ('created_at', 'updated_at')}),
