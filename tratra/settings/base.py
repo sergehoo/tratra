@@ -225,38 +225,42 @@ if DEBUG:
     urlpatterns = [] + static(STATIC_URL, document_root=STATIC_ROOT)
     urlpatterns += static(MEDIA_URL, document_root=MEDIA_ROOT)
 
+# === MINIO CONFIGURATION ===
 MINIO_ENABLED = config('MINIO_ENABLED', default='1').lower() in ('1', 'true', 'yes')
 
 if MINIO_ENABLED:
     STORAGES = {
-        "default": {"BACKEND": "storages.backends.s3boto3.S3Boto3Storage"},  # MEDIA → MinIO
-        "staticfiles": {"BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"},  # STATIC → WhiteNoise
+        "default": {"BACKEND": "storages.backends.s3boto3.S3Boto3Storage"},
+        "staticfiles": {"BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"},
     }
 
-    # Creds (AWS_* en priorité, sinon MINIO_ROOT_*)
+    # Credentials
     AWS_ACCESS_KEY_ID = config('AWS_ACCESS_KEY_ID', default=config('MINIO_ROOT_USER', default='minioadmin'))
     AWS_SECRET_ACCESS_KEY = config('AWS_SECRET_ACCESS_KEY', default=config('MINIO_ROOT_PASSWORD', default='minioadmin'))
-    # public URL base (what .url will return)
-    AWS_S3_CUSTOM_DOMAIN = "tratra.net"
 
-    # path-style URLs (best for MinIO)
-
+    # MinIO configuration
     AWS_STORAGE_BUCKET_NAME = config('AWS_STORAGE_BUCKET_NAME', default='tratra-media')
-    AWS_S3_ENDPOINT_URL = config('AWS_S3_ENDPOINT_URL', default='http://minio:9000')  # service docker
+    AWS_S3_ENDPOINT_URL = config('AWS_S3_ENDPOINT_URL', default='http://minio:9000')
     AWS_S3_REGION_NAME = config('AWS_S3_REGION_NAME', default='us-east-1')
 
-    AWS_S3_ADDRESSING_STYLE = 'path'  # indispensable pour MinIO derrière Traefik/DNS
+    # Important: Use the public domain for URLs
+    AWS_S3_CUSTOM_DOMAIN = config('AWS_S3_CUSTOM_DOMAIN', default='minio.tratra.net')
+
+    # URL settings
+    AWS_S3_ADDRESSING_STYLE = 'path'
     AWS_S3_SIGNATURE_VERSION = 's3v4'
-    AWS_S3_VERIFY = config('AWS_S3_VERIFY', default='0').lower() in ('1', 'true', 'yes')  # ← par défaut False si HTTP
+    AWS_S3_VERIFY = config('AWS_S3_VERIFY', default='0').lower() in ('1', 'true', 'yes')
 
-    # URLs publiques non signées ? (utile si tu sers les médias directement via Nginx/Traefik)
+    # Make URLs public (no signing required)
     AWS_QUERYSTRING_AUTH = config('AWS_QUERYSTRING_AUTH', default='0').lower() in ('1', 'true', 'yes')
+    AWS_DEFAULT_ACL = 'public-read'  # Important pour que les fichiers soient accessibles publiquement
+    AWS_S3_OBJECT_PARAMETERS = {
+        'CacheControl': 'max-age=86400',
+    }
 
-    # Optionnel si tu exposes MinIO publiquement sous un domaine :
-    # AWS_S3_CUSTOM_DOMAIN = config('AWS_S3_CUSTOM_DOMAIN', default=None) or None
 else:
     STORAGES = {
-        "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},  # MEDIA → disque local
+        "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
         "staticfiles": {"BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"},
     }
 
