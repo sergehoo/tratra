@@ -16,6 +16,8 @@ from django.utils import timezone
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import viewsets, permissions, status, mixins
 from rest_framework.decorators import action, api_view, permission_classes
+from drf_spectacular.utils import extend_schema, OpenApiResponse
+from drf_spectacular.types import OpenApiTypes
 from rest_framework.filters import OrderingFilter, SearchFilter
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
@@ -692,6 +694,8 @@ class DeviceViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
 
 # ---- Endpoints “métier” complémentaires ----
 
+@extend_schema(request=PriceEstimateSerializer, responses=PriceEstimateSerializer,
+               tags=["Tarification"], summary="Estimer le prix d'une prestation")
 @api_view(["POST"])
 @permission_classes([permissions.AllowAny])
 def price_estimate(request):
@@ -703,6 +707,8 @@ def price_estimate(request):
     return Response(ser.data, status=status.HTTP_200_OK)
 
 
+@extend_schema(request=PaymentInitSerializer, responses=OpenApiTypes.OBJECT,
+               tags=["Paiements"], summary="Initier un paiement (escrow)")
 @api_view(["POST"])
 @permission_classes([permissions.IsAuthenticated])
 def payment_initiate(request):
@@ -716,6 +722,8 @@ def payment_initiate(request):
     return Response(payload, status=status.HTTP_201_CREATED)
 
 
+@extend_schema(request=MatchRequestSerializer, responses=MatchResponseSerializer(many=True),
+               tags=["Matching"], summary="Trouver des artisans proches par catégorie")
 @api_view(["POST"])
 @permission_classes([permissions.IsAuthenticated])
 def match(request):
@@ -741,6 +749,8 @@ def match(request):
 
 
 # ---- OTP (vérification de compte) ----
+@extend_schema(request=None, responses=OpenApiTypes.OBJECT,
+               tags=["OTP"], summary="Envoyer un code OTP de vérification")
 @api_view(["POST"])
 @permission_classes([permissions.IsAuthenticated])
 def otp_request(request):
@@ -754,6 +764,8 @@ def otp_request(request):
     return Response(payload, status=status.HTTP_201_CREATED)
 
 
+@extend_schema(request=OpenApiTypes.OBJECT, responses=OpenApiTypes.OBJECT,
+               tags=["OTP"], summary="Vérifier un code OTP")
 @api_view(["POST"])
 @permission_classes([permissions.IsAuthenticated])
 def otp_verify(request):
@@ -771,6 +783,8 @@ def otp_verify(request):
 
 
 # ---- Coupons ----
+@extend_schema(request=OpenApiTypes.OBJECT, responses=OpenApiTypes.OBJECT,
+               tags=["Coupons"], summary="Valider un coupon et calculer la réduction")
 @api_view(["POST"])
 @permission_classes([permissions.IsAuthenticated])
 def coupon_validate(request):
@@ -788,6 +802,9 @@ def coupon_validate(request):
 
 
 # ---- Compte de versement artisan ----
+@extend_schema(request=PayoutAccountSerializer,
+               responses=OpenApiResponse(PayoutAccountSerializer),
+               tags=["Versements"], summary="Compte de versement de l'artisan (GET/upsert)")
 @api_view(["GET", "POST"])
 @permission_classes([permissions.IsAuthenticated])
 def payout_account(request):
@@ -802,6 +819,9 @@ def payout_account(request):
 
 
 # ---- Profil Entreprise (B2B) ----
+@extend_schema(request=CompanyProfileSerializer,
+               responses=OpenApiResponse(CompanyProfileSerializer),
+               tags=["Entreprise (B2B)"], summary="Profil entreprise courant (GET/upsert)")
 @api_view(["GET", "POST"])
 @permission_classes([permissions.IsAuthenticated])
 def company_profile(request):
@@ -881,6 +901,8 @@ class PaymentWebhook(APIView):
         ).hexdigest()
         return hmac.compare_digest(expected, provided)
 
+    @extend_schema(request=OpenApiTypes.OBJECT, responses=OpenApiTypes.OBJECT,
+                   tags=["Paiements"], summary="Webhook de paiement (signé HMAC)")
     def post(self, request, provider):
         """
         Provider path: 'om' | 'mtn' | 'card' | 'moov'...

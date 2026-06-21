@@ -6,6 +6,8 @@ from django.contrib.auth import authenticate
 from django.contrib.gis.geos import Point
 from django.utils import timezone
 from rest_framework import serializers
+from drf_spectacular.utils import extend_schema_field
+from drf_spectacular.types import OpenApiTypes
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 from handy.models import (
@@ -132,6 +134,7 @@ class HandymanProfileSerializer(serializers.ModelSerializer):
             "latitude", "longitude", "location",
         ]
 
+    @extend_schema_field(OpenApiTypes.OBJECT)
     def get_location(self, obj):
         if getattr(obj, "location", None):
             return {"lat": obj.location.y, "lng": obj.location.x}
@@ -466,6 +469,7 @@ class MatchResponseSerializer(serializers.ModelSerializer):
         model = HandymanProfile
         fields = ["id", "full_name", "rating", "completed_jobs", "distance_m"]
 
+    @extend_schema_field(OpenApiTypes.FLOAT)
     def get_distance_m(self, obj):
         # L'annotation Distance() renvoie un objet mesure GeoDjango, pas un float.
         d = getattr(obj, "distance_m", None)
@@ -565,9 +569,11 @@ class HeroSlideSerializer(serializers.ModelSerializer):
     def get_image(self, obj: HeroSlide) -> str:
         return obj.image_src
 
+    @extend_schema_field(serializers.ListField(child=serializers.CharField()))
     def get_gradient(self, obj: HeroSlide):
         return [obj.gradient_start, obj.gradient_end]
 
+    @extend_schema_field(OpenApiTypes.OBJECT)
     def get_ctaParams(self, obj: HeroSlide):
         if obj.cta_action == 'open_category' and obj.category_id:
             return {'category_id': obj.category_id}
