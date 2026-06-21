@@ -5,8 +5,8 @@ from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
 from .views import (
     UserViewSet, HandymanProfileViewSet, ServiceCategoryViewSet, ServiceViewSet, ServiceImageViewSet,
-    BookingViewSet, PaymentViewSet, PaymentLogViewSet, ReviewViewSet, ConversationViewSet, MessageViewSet,
-    NotificationViewSet, HandymanDocumentViewSet, ReportViewSet, DeviceViewSet,
+    BookingViewSet, PaymentViewSet, PaymentLogViewSet, PayoutViewSet, ReviewViewSet, ConversationViewSet,
+    MessageViewSet, NotificationViewSet, HandymanDocumentViewSet, ReportViewSet, DeviceViewSet,
     price_estimate, payment_initiate, match, PaymentWebhook, EmailOrUsernameTokenObtainPairView, HeroSlideViewSet
 )
 
@@ -19,6 +19,7 @@ router.register(r'service-images', ServiceImageViewSet, basename='service-images
 router.register(r'bookings', BookingViewSet, basename='bookings')
 router.register(r'payments', PaymentViewSet, basename='payments')
 router.register(r'payment-logs', PaymentLogViewSet, basename='payment-logs')
+router.register(r'payouts', PayoutViewSet, basename='payouts')
 router.register(r'reviews', ReviewViewSet, basename='reviews')
 router.register(r'conversations', ConversationViewSet, basename='conversations')
 router.register(r'messages', MessageViewSet, basename='messages')

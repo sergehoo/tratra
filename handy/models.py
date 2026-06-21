@@ -429,6 +429,16 @@ class Booking(models.Model):
             HandymanProfile.objects.filter(user=self.handyman).update(
                 completed_jobs=models.F('completed_jobs') + 1
             )
+
+        # Escrow : libère (mission terminée) ou rembourse (annulation) le séquestre.
+        # getattr fonctionne car le reverse O2O 'payment' lève une DoesNotExist
+        # qui hérite d'AttributeError quand aucun paiement n'existe.
+        payment = getattr(self, 'payment', None)
+        if payment is not None:
+            if new_status == 'completed' and payment.status in ('held', 'completed'):
+                payment.release(note=f"booking #{self.pk} completed")
+            elif new_status == 'cancelled' and payment.status in ('pending', 'held'):
+                payment.refund(note=f"booking #{self.pk} cancelled")
         return self
 
 
@@ -457,8 +467,25 @@ class Payment(models.Model):
         ('card', 'Carte'), ('transfer', 'Virement'), ('cash', 'Espèces'), ('check', 'Chèque'),
         ('om', 'Orange Money'), ('mtn', 'MTN MoMo'), ('moov', 'Moov Money'), ('wave', 'Wave'),
     ]
-    PAYMENT_STATUS = [('pending', 'En attente'), ('completed', 'Complété'), ('failed', 'Échoué'),
-                      ('refunded', 'Remboursé')]
+    PAYMENT_STATUS = [
+        ('pending', 'En attente'),
+        ('held', 'Sous séquestre (escrow)'),
+        ('released', "Versé à l'artisan"),
+        ('completed', 'Complété'),  # legacy / compat
+        ('failed', 'Échoué'),
+        ('refunded', 'Remboursé'),
+    ]
+    # États où l'argent du client a effectivement été reçu par la plateforme.
+    PAID_STATUSES = ('held', 'released', 'completed')
+    # Machine à états de l'escrow : source -> {destinations}
+    ESCROW_TRANSITIONS = {
+        'pending': {'held', 'failed', 'refunded'},
+        'held': {'released', 'refunded'},
+        'completed': {'released', 'refunded'},  # tolère l'ancien flux 'completed'
+        'released': set(),
+        'refunded': set(),
+        'failed': set(),
+    }
 
     booking = models.OneToOneField('Booking', on_delete=models.CASCADE, related_name='payment')
     amount = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(0)])
@@ -481,12 +508,59 @@ class Payment(models.Model):
         ]
 
     def save(self, *args, **kwargs):
-        # garder is_paid en phase avec status
-        self.is_paid = (self.status == 'completed')
+        # garder is_paid en phase avec status (escrow : held/released/completed = payé)
+        self.is_paid = (self.status in self.PAID_STATUSES)
         super().save(*args, **kwargs)
 
     def __str__(self):
         return f"Paiement #{self.id} - {self.amount} {self.currency}"
+
+    # ----- Escrow / séquestre -----
+    def _set_status(self, new_status: str, note: str = ""):
+        old = self.status
+        self.status = new_status
+        if new_status in self.PAID_STATUSES and not self.payment_date:
+            self.payment_date = timezone.now()
+        self.save(update_fields=["status", "is_paid", "payment_date", "updated_at"])
+        PaymentLog.objects.create(
+            payment=self, previous_status=old, new_status=new_status, notes=note
+        )
+
+    def _check(self, new_status: str):
+        if new_status not in self.ESCROW_TRANSITIONS.get(self.status, set()):
+            raise ValidationError(
+                f"Transition paiement invalide: {self.status} -> {new_status}."
+            )
+
+    @transaction.atomic
+    def mark_held(self, note: str = "provider confirmed"):
+        """Encaissement confirmé par le fournisseur -> fonds placés en séquestre."""
+        self._check('held')
+        self._set_status('held', note)
+        return self
+
+    @transaction.atomic
+    def release(self, note: str = "job completed"):
+        """Libère les fonds vers l'artisan (mission terminée) + génère la facture."""
+        self._check('released')
+        self._set_status('released', note)
+        Invoice.objects.get_or_create(
+            booking=self.booking,
+            defaults=dict(
+                number=f"INV-{self.booking_id}-{int(timezone.now().timestamp())}",
+                amount=self.amount,
+                fee=self.platform_fee,
+                total=self.amount,
+            ),
+        )
+        return self
+
+    @transaction.atomic
+    def refund(self, note: str = "refund"):
+        """Rembourse le client (annulation / litige)."""
+        self._check('refunded')
+        self._set_status('refunded', note)
+        return self
 
 
 class PaymentLog(models.Model):
@@ -506,6 +580,20 @@ class Payout(models.Model):
     requested_at = models.DateTimeField(auto_now_add=True, db_index=True)
     processed_at = models.DateTimeField(blank=True, null=True)
     notes = models.TextField(blank=True, null=True)
+
+
+def artisan_available_earnings(handyman) -> Decimal:
+    """Gains disponibles d'un artisan = somme des paiements LIBÉRÉS (net de commission)
+    moins les retraits déjà demandés/envoyés (pending|sent)."""
+    earned = Payment.objects.filter(
+        booking__handyman=handyman, status='released'
+    ).aggregate(
+        net=Sum(models.F('amount') - models.F('platform_fee'))
+    )['net'] or Decimal('0.00')
+    withdrawn = Payout.objects.filter(
+        handyman=handyman, status__in=['pending', 'sent']
+    ).aggregate(t=Sum('amount'))['t'] or Decimal('0.00')
+    return earned - withdrawn
 
 
 class Dispute(models.Model):

@@ -197,6 +197,7 @@ def test_payment_initiate_and_webhook(api_client, auth_client, user_handyman, se
     bad = api_client.post(webhook_url, webhook_payload, format="json")
     assert bad.status_code == 401
 
-    # 5) recharger depuis DB et valider
+    # 5) recharger depuis DB et valider : la confirmation fournisseur place en séquestre
     p.refresh_from_db()
-    assert p.status == "completed"
+    assert p.status == "held"
+    assert p.is_paid is True

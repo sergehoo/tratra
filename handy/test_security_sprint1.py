@@ -97,7 +97,8 @@ def test_webhook_signe_accepte(api_client):
     res = api_client.post(url, body, content_type="application/json", HTTP_X_WEBHOOK_SIGNATURE=sig)
     assert res.status_code == 200, res.content
     p.refresh_from_db()
-    assert p.status == "completed" and p.is_paid is True
+    # confirmation fournisseur -> séquestre (escrow), is_paid vrai
+    assert p.status == "held" and p.is_paid is True
 
 
 @pytest.mark.django_db

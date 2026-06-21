@@ -32,7 +32,7 @@ from rest_framework_simplejwt.views import TokenObtainPairView
 from handy.models import (
     User, HandymanProfile, ServiceCategory, Service, ServiceImage, Booking,
     Payment, PaymentLog, Review, Conversation, Message, Notification,
-    HandymanDocument, Report, Device,
+    HandymanDocument, Report, Device, Payout, artisan_available_earnings,
     # ↓ suivants : assure-toi de les avoir dans tes models (cf. reco précédentes)
     BookingRoute, JobTracking, HeroSlide,  # tracking & ETA
     # Optionnel si tu as ajouté ces modèles :
@@ -173,7 +173,7 @@ from .serializers import (
     ConversationSerializer, MessageSerializer, NotificationSerializer,
     HandymanDocumentSerializer, ReportSerializer, DeviceSerializer,
     MatchRequestSerializer, MatchResponseSerializer, PriceEstimateSerializer, PaymentInitSerializer,
-    EmailOrUsernameTokenObtainPairSerializer, HeroSlideSerializer
+    EmailOrUsernameTokenObtainPairSerializer, HeroSlideSerializer, PayoutSerializer
 )
 
 class EmailOrUsernameTokenObtainPairView(TokenObtainPairView):
@@ -450,6 +450,40 @@ class PaymentLogViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
     pagination_class = DefaultPageNumberPagination
 
 
+# ---- Retraits artisan (payout) ----
+class PayoutViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
+    """L'artisan consulte ses retraits et en demande de nouveaux.
+    Le montant est contrôlé contre les gains disponibles, SOUS VERROU."""
+    queryset = Payout.objects.select_related("handyman").order_by("-requested_at")
+    serializer_class = PayoutSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    owner_lookups = ("handyman",)
+    http_method_names = ["get", "post", "head", "options"]
+    ordering = ["-requested_at"]
+    pagination_class = DefaultPageNumberPagination
+
+    def create(self, request, *args, **kwargs):
+        amount = Decimal(str(request.data.get("amount") or "0"))
+        if amount <= 0:
+            return Response({"detail": "Montant invalide."}, status=status.HTTP_400_BAD_REQUEST)
+        with transaction.atomic():
+            # verrou sur le compte artisan -> sérialise les demandes concurrentes
+            User.objects.select_for_update().get(pk=request.user.pk)
+            available = artisan_available_earnings(request.user)
+            if amount > available:
+                return Response(
+                    {"detail": f"Gains insuffisants. Disponible: {available}."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            payout = Payout.objects.create(handyman=request.user, amount=amount, status="pending")
+        return Response(PayoutSerializer(payout).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=["get"])
+    def available(self, request):
+        """GET /payouts/available/ -> gains disponibles au retrait."""
+        return Response({"available": str(artisan_available_earnings(request.user))})
+
+
 # ---- Avis / Chat / Notifications / Docs / Reports / Devices ----
 class ReviewViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
     queryset = Review.objects.select_related("booking", "booking__client", "booking__handyman").all()
@@ -641,15 +675,23 @@ class PaymentWebhook(APIView):
             p = get_object_or_404(
                 Payment.objects.select_for_update(), transaction_id=provider_ref
             )
-            old = p.status
-            if old != new_status:
-                p.status = new_status
-                p.save(update_fields=["status", "is_paid", "updated_at"])
-                PaymentLog.objects.create(
-                    payment=p, previous_status=old, new_status=new_status, notes=f"prov={provider}"
-                )
+            try:
+                # Le fournisseur ne fait que confirmer l'encaissement ou un remboursement.
+                # La LIBÉRATION (held -> released) est interne (à la complétion de la mission).
+                if new_status in ('completed', 'held'):
+                    if p.status == 'pending':
+                        p.mark_held(note=f"prov={provider}")
+                elif new_status == 'refunded':
+                    if p.status in ('pending', 'held', 'completed'):
+                        p.refund(note=f"prov={provider}")
+                elif new_status == 'failed':
+                    if p.status == 'pending':
+                        p._set_status('failed', note=f"prov={provider}")
+            except DjangoValidationError as e:
+                msg = e.messages[0] if getattr(e, "messages", None) else str(e)
+                return Response({"detail": msg}, status=status.HTTP_400_BAD_REQUEST)
 
-        return Response({"ok": True}, status=status.HTTP_200_OK)
+        return Response({"ok": True, "status": p.status}, status=status.HTTP_200_OK)
 
 class HeroSlideViewSet(viewsets.ReadOnlyModelViewSet):
     """
