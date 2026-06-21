@@ -32,7 +32,7 @@ from rest_framework_simplejwt.views import TokenObtainPairView
 from handy.models import (
     User, HandymanProfile, ServiceCategory, Service, ServiceImage, Booking,
     Payment, PaymentLog, Review, Conversation, Message, Notification,
-    HandymanDocument, Report, Device, Payout, artisan_available_earnings,
+    HandymanDocument, Report, Device, Payout, Dispute, artisan_available_earnings,
     # ↓ suivants : assure-toi de les avoir dans tes models (cf. reco précédentes)
     BookingRoute, JobTracking, HeroSlide,  # tracking & ETA
     # Optionnel si tu as ajouté ces modèles :
@@ -173,7 +173,7 @@ from .serializers import (
     ConversationSerializer, MessageSerializer, NotificationSerializer,
     HandymanDocumentSerializer, ReportSerializer, DeviceSerializer,
     MatchRequestSerializer, MatchResponseSerializer, PriceEstimateSerializer, PaymentInitSerializer,
-    EmailOrUsernameTokenObtainPairSerializer, HeroSlideSerializer, PayoutSerializer
+    EmailOrUsernameTokenObtainPairSerializer, HeroSlideSerializer, PayoutSerializer, DisputeSerializer
 )
 
 class EmailOrUsernameTokenObtainPairView(TokenObtainPairView):
@@ -482,6 +482,44 @@ class PayoutViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
     def available(self, request):
         """GET /payouts/available/ -> gains disponibles au retrait."""
         return Response({"available": str(artisan_available_earnings(request.user))})
+
+
+# ---- Litiges ----
+class DisputeViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
+    """Ouverture/consultation de litiges par les parties d'une réservation ;
+    résolution réservée au staff (déclenche refund/release de l'escrow)."""
+    queryset = Dispute.objects.select_related(
+        "booking", "booking__client", "booking__handyman", "reporter"
+    ).all()
+    serializer_class = DisputeSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    owner_lookups = ("reporter", "booking__client", "booking__handyman")
+    http_method_names = ["get", "post", "head", "options"]
+    ordering = ["-created_at"]
+    pagination_class = DefaultPageNumberPagination
+
+    def perform_create(self, serializer):
+        booking = serializer.validated_data.get("booking")
+        user = self.request.user
+        if not user.is_staff and booking.client_id != user.id and booking.handyman_id != user.id:
+            raise PermissionDenied("Vous n'êtes pas partie à cette réservation.")
+        serializer.save(reporter=user, status="open")
+
+    @action(detail=True, methods=["post"], permission_classes=[permissions.IsAdminUser])
+    def resolve(self, request, pk=None):
+        """POST { "action": "refund_client|release_artisan|none|reject", "resolution": "..." }"""
+        dispute = self.get_object()
+        action_type = request.data.get("action")
+        resolution = request.data.get("resolution", "")
+        try:
+            if action_type == "reject":
+                dispute.reject(by=request.user, resolution=resolution)
+            else:
+                dispute.resolve(action_type, by=request.user, resolution=resolution)
+        except DjangoValidationError as e:
+            msg = e.messages[0] if getattr(e, "messages", None) else str(e)
+            return Response({"detail": msg}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(DisputeSerializer(dispute).data)
 
 
 # ---- Avis / Chat / Notifications / Docs / Reports / Devices ----

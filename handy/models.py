@@ -1,3 +1,4 @@
+from datetime import timedelta
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
@@ -363,6 +364,7 @@ class Booking(models.Model):
     requested_start = models.DateTimeField(null=True, blank=True, db_index=True)
     requested_end = models.DateTimeField(null=True, blank=True, db_index=True)
     total_price = models.DecimalField(max_digits=10, decimal_places=2, blank=True, null=True)
+    cancellation_fee = models.DecimalField(max_digits=10, decimal_places=2, default=0)  # pénalité d'annulation appliquée
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending', db_index=True)
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -395,6 +397,21 @@ class Booking(models.Model):
     def can_transition_to(self, new_status: str) -> bool:
         return new_status in self.TRANSITIONS.get(self.status, set())
 
+    def compute_cancellation_fee(self) -> Decimal:
+        """Pénalité d'annulation selon la CancellationPolicy active et le délai
+        avant la mission. Gratuit si l'on annule plus de `free_until_minutes`
+        avant le début prévu ; sinon `fee_percent` % du montant."""
+        policy = CancellationPolicy.objects.filter(active=True).order_by('id').first()
+        if not policy:
+            return Decimal('0.00')
+        payment = getattr(self, 'payment', None)
+        base = (payment.amount if payment is not None else None) or self.total_price or Decimal('0')
+        if base <= 0:
+            return Decimal('0.00')
+        if self.booking_date and timezone.now() <= self.booking_date - timedelta(minutes=policy.free_until_minutes):
+            return Decimal('0.00')  # dans la fenêtre d'annulation gratuite
+        return (Decimal(base) * policy.fee_percent / Decimal('100')).quantize(Decimal('1.'))
+
     @transaction.atomic
     def transition_to(self, new_status: str, *, actor=None, save: bool = True):
         """Change le statut en validant la transition, horodate dans
@@ -416,6 +433,9 @@ class Booking(models.Model):
         if new_status == 'completed' and not self.end_date:
             self.end_date = timezone.now()
             update_fields.append('end_date')
+        if new_status == 'cancelled':
+            self.cancellation_fee = self.compute_cancellation_fee()
+            update_fields.append('cancellation_fee')
 
         if save:
             # PK existant -> update ciblé; sinon save complet
@@ -438,7 +458,10 @@ class Booking(models.Model):
             if new_status == 'completed' and payment.status in ('held', 'completed'):
                 payment.release(note=f"booking #{self.pk} completed")
             elif new_status == 'cancelled' and payment.status in ('pending', 'held'):
-                payment.refund(note=f"booking #{self.pk} cancelled")
+                # remboursement NET de la pénalité d'annulation (le reste est retenu)
+                refund_amount = max(payment.amount - (self.cancellation_fee or Decimal('0')), Decimal('0'))
+                payment.refund(amount=refund_amount,
+                               note=f"booking #{self.pk} cancelled (pénalité={self.cancellation_fee})")
         return self
 
 
@@ -497,6 +520,7 @@ class Payment(models.Model):
     transaction_id = models.CharField(max_length=100, blank=True, null=True, unique=True, db_index=True)
     is_paid = models.BooleanField(default=False, db_index=True)  # garde pour compat; synchro dans save()
     currency = models.CharField(max_length=8, default='XOF')
+    refunded_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)  # montant remboursé (partiel possible)
 
     payment_date = models.DateTimeField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
@@ -556,10 +580,17 @@ class Payment(models.Model):
         return self
 
     @transaction.atomic
-    def refund(self, note: str = "refund"):
-        """Rembourse le client (annulation / litige)."""
+    def refund(self, amount=None, note: str = "refund"):
+        """Rembourse le client (annulation / litige). `amount` partiel possible :
+        le solde non remboursé correspond à la pénalité retenue."""
         self._check('refunded')
-        self._set_status('refunded', note)
+        self.refunded_amount = self.amount if amount is None else min(Decimal(str(amount)), self.amount)
+        old = self.status
+        self.status = 'refunded'
+        self.save(update_fields=["status", "is_paid", "refunded_amount", "updated_at"])
+        PaymentLog.objects.create(
+            payment=self, previous_status=old, new_status='refunded', notes=note
+        )
         return self
 
 
@@ -597,12 +628,65 @@ def artisan_available_earnings(handyman) -> Decimal:
 
 
 class Dispute(models.Model):
+    STATUS_CHOICES = [
+        ('open', 'Ouvert'),
+        ('under_review', 'En examen'),
+        ('resolved', 'Résolu'),
+        ('rejected', 'Rejeté'),
+    ]
+    RESOLUTION_ACTIONS = [
+        ('refund_client', 'Remboursement client'),
+        ('release_artisan', "Versement à l'artisan"),
+        ('none', 'Aucune action'),
+    ]
     booking = models.ForeignKey(Booking, on_delete=models.CASCADE, related_name='disputes')
     reporter = models.ForeignKey(User, on_delete=models.CASCADE, related_name='disputes_made')
     reason = models.TextField()
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open', db_index=True)
     resolution = models.TextField(blank=True, null=True)
+    resolution_action = models.CharField(max_length=20, choices=RESOLUTION_ACTIONS, blank=True, default='')
+    resolved_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True,
+                                    related_name='disputes_resolved')
+    resolved_at = models.DateTimeField(null=True, blank=True)
     is_resolved = models.BooleanField(default=False)
-    created_at = models.DateTimeField(auto_now_add=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Litige #{self.id} - réservation #{self.booking_id} ({self.status})"
+
+    @transaction.atomic
+    def resolve(self, action: str, *, by, resolution: str = ''):
+        """Résout le litige et applique l'effet sur l'escrow :
+        refund_client -> remboursement du séquestre ; release_artisan -> versement."""
+        if action not in dict(self.RESOLUTION_ACTIONS):
+            raise ValidationError("Action de résolution invalide.")
+        self.status = 'resolved'
+        self.resolution_action = action
+        self.resolution = resolution
+        self.resolved_by = by
+        self.resolved_at = timezone.now()
+        self.is_resolved = True
+        self.save(update_fields=['status', 'resolution_action', 'resolution',
+                                 'resolved_by', 'resolved_at', 'is_resolved', 'updated_at'])
+        payment = getattr(self.booking, 'payment', None)
+        if payment is not None:
+            if action == 'refund_client' and payment.status in ('pending', 'held'):
+                payment.refund(note=f"dispute #{self.pk}: remboursement client")
+            elif action == 'release_artisan' and payment.status in ('held', 'completed'):
+                payment.release(note=f"dispute #{self.pk}: versement artisan")
+        return self
+
+    @transaction.atomic
+    def reject(self, *, by, resolution: str = ''):
+        self.status = 'rejected'
+        self.resolution = resolution
+        self.resolved_by = by
+        self.resolved_at = timezone.now()
+        self.is_resolved = True
+        self.save(update_fields=['status', 'resolution', 'resolved_by',
+                                 'resolved_at', 'is_resolved', 'updated_at'])
+        return self
 
 
 class FavoriteHandyman(models.Model):

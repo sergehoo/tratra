@@ -11,7 +11,7 @@ from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from handy.models import (
     User, HandymanProfile, ServiceCategory, ServiceImage, Service, Booking,
     Payment, PaymentLog, Review, Conversation, Message, Notification,
-    HandymanDocument, Report, Device, HeroSlide, Payout
+    HandymanDocument, Report, Device, HeroSlide, Payout, Dispute
 )
 from handy.services.pricing import estimate_price
 from handy.services.fees import compute_platform_fee
@@ -269,6 +269,18 @@ class PaymentSerializer(serializers.ModelSerializer):
             "payment_date", "created_at", "updated_at",
         ]
         read_only_fields = ["is_paid", "created_at", "updated_at"]
+
+
+class DisputeSerializer(serializers.ModelSerializer):
+    reporter_detail = UserMiniSerializer(source="reporter", read_only=True)
+
+    class Meta:
+        model = Dispute
+        fields = ["id", "booking", "reporter", "reporter_detail", "reason", "status",
+                  "resolution", "resolution_action", "resolved_at", "created_at"]
+        # le client/artisan ne fournit que booking + reason ; le reste est serveur/admin.
+        read_only_fields = ["reporter", "status", "resolution", "resolution_action",
+                            "resolved_at", "created_at"]
 
 
 class PayoutSerializer(serializers.ModelSerializer):
