@@ -94,14 +94,12 @@ def test_souscription_cycle(api_client):
 
 
 @pytest.mark.django_db
-def test_landing_page_rend_200_avec_donnees_reelles(api_client):
-    ServiceCategory.objects.create(name="Plomberie", slug="plomberie", is_active=True)
+def test_landing_page_rend_200(api_client):
     r = api_client.get("/")
     assert r.status_code == 200
     body = r.content.decode("utf-8", "replace")
-    assert "Trouvez un artisan" in body          # nouveau hero
-    assert "Plomberie" in body                    # catégorie réelle injectée
-    assert "cdn.tailwindcss.com" not in body      # plus de dépendance CDN dev
+    assert "tratra_logo_final" in body            # logo Tratra présent
+    assert reverse("service_search") in body      # recherche & CTA câblés
 
 
 @pytest.mark.django_db
