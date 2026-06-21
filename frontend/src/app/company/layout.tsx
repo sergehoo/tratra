@@ -9,6 +9,7 @@ export default function CompanyLayout({ children }: { children: React.ReactNode 
         title="Espace entreprise"
         nav={[
           { href: "/company", label: "Profil & abonnement" },
+          { href: "/company/plans", label: "Offres B2B" },
           { href: "/client/services", label: "Trouver un service" },
         ]}
       >

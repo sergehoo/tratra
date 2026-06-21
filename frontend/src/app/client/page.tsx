@@ -40,15 +40,17 @@ export default function ClientHome() {
           {items.map((b) => {
             const s = STATUS[b.status] ?? { label: b.status, tone: "gray" as const };
             return (
-              <Card key={b.id} className="flex items-center justify-between !p-5">
-                <div>
-                  <p className="font-semibold">{b.service_detail?.title ?? `Réservation #${b.id}`}</p>
-                  <p className="text-sm text-ash">
-                    {b.city ?? ""} {b.booking_date ? "· " + new Date(b.booking_date).toLocaleDateString("fr-FR") : ""}
-                  </p>
-                </div>
-                <Badge tone={s.tone}>{s.label}</Badge>
-              </Card>
+              <Link key={b.id} href={`/client/bookings/${b.id}`}>
+                <Card className="flex items-center justify-between !p-5 transition hover:shadow-strong">
+                  <div>
+                    <p className="font-semibold">{b.service_detail?.title ?? `Réservation #${b.id}`}</p>
+                    <p className="text-sm text-ash">
+                      {b.city ?? ""} {b.booking_date ? "· " + new Date(b.booking_date).toLocaleDateString("fr-FR") : ""}
+                    </p>
+                  </div>
+                  <Badge tone={s.tone}>{s.label}</Badge>
+                </Card>
+              </Link>
             );
           })}
         </div>

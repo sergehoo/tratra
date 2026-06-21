@@ -4,7 +4,7 @@ import { DashboardShell } from "@/components/DashboardShell";
 
 export default function ClientLayout({ children }: { children: React.ReactNode }) {
   return (
-    <RoleGuard roles={["client", "employeur"]}>
+    <RoleGuard roles={["client", "employeur", "entreprise"]}>
       <DashboardShell
         title="Espace client"
         nav={[

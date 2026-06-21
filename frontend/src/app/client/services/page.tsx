@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { get } from "@/lib/api";
 import { Card, Badge, Input } from "@/components/ui";
 import type { Service, Paginated } from "@/lib/types";
@@ -36,19 +37,21 @@ export default function ServicesPage() {
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {items.map((s) => (
-            <Card key={s.id}>
-              {s.category_detail && <Badge>{s.category_detail.name}</Badge>}
-              <h3 className="mt-2 font-semibold">{s.title}</h3>
-              <p className="mt-1 line-clamp-2 text-sm text-ash">{s.description}</p>
-              <div className="mt-4 flex items-center justify-between">
-                <span className="font-bold text-primary">
-                  {s.price ? `${Number(s.price).toLocaleString("fr-FR")} FCFA` : "Sur devis"}
-                </span>
-                <span className="text-sm text-ash">
-                  {s.handyman_detail?.first_name ?? s.handyman_detail?.username ?? ""}
-                </span>
-              </div>
-            </Card>
+            <Link key={s.id} href={`/client/services/${s.id}`}>
+              <Card className="h-full transition hover:shadow-strong">
+                {s.category_detail && <Badge>{s.category_detail.name}</Badge>}
+                <h3 className="mt-2 font-semibold">{s.title}</h3>
+                <p className="mt-1 line-clamp-2 text-sm text-ash">{s.description}</p>
+                <div className="mt-4 flex items-center justify-between">
+                  <span className="font-bold text-primary">
+                    {s.price ? `${Number(s.price).toLocaleString("fr-FR")} FCFA` : "Sur devis"}
+                  </span>
+                  <span className="text-sm text-ash">
+                    {s.handyman_detail?.first_name ?? s.handyman_detail?.username ?? ""}
+                  </span>
+                </div>
+              </Card>
+            </Link>
           ))}
         </div>
       )}

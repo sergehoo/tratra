@@ -9,7 +9,7 @@ export default function WorkerLayout({ children }: { children: React.ReactNode }
         title="Espace ouvrier"
         nav={[
           { href: "/worker", label: "Tableau de bord" },
-          { href: "/worker", label: "Mes missions" },
+          { href: "/worker/kyc", label: "Vérification (KYC)" },
         ]}
       >
         {children}

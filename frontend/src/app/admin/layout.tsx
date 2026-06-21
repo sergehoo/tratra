@@ -7,7 +7,11 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     <RoleGuard roles={["admin"]}>
       <DashboardShell
         title="Back-office"
-        nav={[{ href: "/admin", label: "Vue d'ensemble" }]}
+        nav={[
+          { href: "/admin", label: "Vue d'ensemble" },
+          { href: "/admin/kyc", label: "Vérif. KYC" },
+          { href: "/admin/disputes", label: "Litiges" },
+        ]}
       >
         {children}
       </DashboardShell>

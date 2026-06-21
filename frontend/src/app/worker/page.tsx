@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { get, post } from "@/lib/api";
 import { Card, Badge, Button, Stat } from "@/components/ui";
 import type { Booking, Paginated } from "@/lib/types";
@@ -54,15 +55,17 @@ export default function WorkerHome() {
         ) : (
           <div className="grid gap-3">
             {bookings.map((b) => (
-              <Card key={b.id} className="flex items-center justify-between !p-5">
-                <div>
-                  <p className="font-semibold">{b.service_detail?.title ?? `Mission #${b.id}`}</p>
-                  <p className="text-sm text-ash">
-                    {b.client_detail?.first_name ?? b.client_detail?.username ?? "Client"} · {b.city ?? ""}
-                  </p>
-                </div>
-                <Badge tone={b.status === "completed" ? "gray" : "primary"}>{b.status}</Badge>
-              </Card>
+              <Link key={b.id} href={`/worker/missions/${b.id}`}>
+                <Card className="flex items-center justify-between !p-5 transition hover:shadow-strong">
+                  <div>
+                    <p className="font-semibold">{b.service_detail?.title ?? `Mission #${b.id}`}</p>
+                    <p className="text-sm text-ash">
+                      {b.client_detail?.first_name ?? b.client_detail?.username ?? "Client"} · {b.city ?? ""}
+                    </p>
+                  </div>
+                  <Badge tone={b.status === "completed" ? "gray" : "primary"}>{b.status}</Badge>
+                </Card>
+              </Link>
             ))}
           </div>
         )}
