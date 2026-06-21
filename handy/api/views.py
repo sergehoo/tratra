@@ -33,7 +33,8 @@ from handy.models import (
     User, HandymanProfile, ServiceCategory, Service, ServiceImage, Booking,
     Payment, PaymentLog, Review, Conversation, Message, Notification,
     HandymanDocument, Report, Device, Payout, Dispute, TimeOff, ReplacementSuggestion,
-    Coupon, OTPCode, PayoutAccount, SubscriptionPlan, Subscription, artisan_available_earnings,
+    Coupon, OTPCode, PayoutAccount, SubscriptionPlan, Subscription, CompanyProfile,
+    artisan_available_earnings,
     # ↓ suivants : assure-toi de les avoir dans tes models (cf. reco précédentes)
     BookingRoute, JobTracking, HeroSlide,  # tracking & ETA
     # Optionnel si tu as ajouté ces modèles :
@@ -176,7 +177,7 @@ from .serializers import (
     MatchRequestSerializer, MatchResponseSerializer, PriceEstimateSerializer, PaymentInitSerializer,
     EmailOrUsernameTokenObtainPairSerializer, HeroSlideSerializer, PayoutSerializer, DisputeSerializer,
     TimeOffSerializer, ReplacementSuggestionSerializer,
-    PayoutAccountSerializer, SubscriptionPlanSerializer, SubscriptionSerializer
+    PayoutAccountSerializer, SubscriptionPlanSerializer, SubscriptionSerializer, CompanyProfileSerializer
 )
 
 class EmailOrUsernameTokenObtainPairView(TokenObtainPairView):
@@ -797,6 +798,20 @@ def payout_account(request):
     ser = PayoutAccountSerializer(acc, data=request.data, partial=bool(acc))
     ser.is_valid(raise_exception=True)
     ser.save(handyman=request.user, verified=False)
+    return Response(ser.data, status=status.HTTP_200_OK if acc else status.HTTP_201_CREATED)
+
+
+# ---- Profil Entreprise (B2B) ----
+@api_view(["GET", "POST"])
+@permission_classes([permissions.IsAuthenticated])
+def company_profile(request):
+    """GET: profil entreprise courant. POST: créer/mettre à jour (verified posé par l'admin)."""
+    acc = CompanyProfile.objects.filter(user=request.user).first()
+    if request.method == "GET":
+        return Response(CompanyProfileSerializer(acc).data if acc else {})
+    ser = CompanyProfileSerializer(acc, data=request.data, partial=bool(acc))
+    ser.is_valid(raise_exception=True)
+    ser.save(user=request.user)
     return Response(ser.data, status=status.HTTP_200_OK if acc else status.HTTP_201_CREATED)
 
 

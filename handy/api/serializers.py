@@ -12,7 +12,7 @@ from handy.models import (
     User, HandymanProfile, ServiceCategory, ServiceImage, Service, Booking,
     Payment, PaymentLog, Review, Conversation, Message, Notification,
     HandymanDocument, Report, Device, HeroSlide, Payout, Dispute, TimeOff, ReplacementSuggestion,
-    PayoutAccount, SubscriptionPlan, Subscription
+    PayoutAccount, SubscriptionPlan, Subscription, CompanyProfile
 )
 from handy.services.pricing import estimate_price
 from handy.services.fees import compute_platform_fee
@@ -48,7 +48,7 @@ class UserSerializer(serializers.ModelSerializer):
         read_only_fields = ['id',"date_joined", "last_login", "is_verified"]
 
     # Rôles que l'on autorise à l'auto-inscription publique (jamais 'admin').
-    SELF_SIGNUP_ROLES = {"client", "employeur", "handyman"}
+    SELF_SIGNUP_ROLES = {"client", "employeur", "handyman", "entreprise"}
 
     def validate_user_type(self, value):
         """Empêche l'escalade de privilège : un compte créé via l'API publique
@@ -318,6 +318,14 @@ class PayoutSerializer(serializers.ModelSerializer):
         fields = ["id", "handyman", "amount", "status", "requested_at", "processed_at", "notes"]
         # handyman & statut posés côté serveur (l'artisan ne fait que demander un montant)
         read_only_fields = ["handyman", "status", "requested_at", "processed_at", "notes"]
+
+
+class CompanyProfileSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CompanyProfile
+        fields = ["id", "user", "company_name", "registration_number", "industry",
+                  "address", "city", "contact_person", "phone", "website", "verified", "created_at"]
+        read_only_fields = ["user", "verified", "created_at"]  # user serveur ; verified par admin
 
 
 class PayoutAccountSerializer(serializers.ModelSerializer):

@@ -24,6 +24,7 @@ class User(AbstractUser):
         ('client', 'Client'),
         ('employeur', 'Employeur'),
         ('handyman', 'Artisan'),
+        ('entreprise', 'Entreprise'),
         ('admin', 'Administrateur'),
     )
     user_type = models.CharField(max_length=20, choices=USER_TYPES, blank=True, null=True, default='client')
@@ -1049,6 +1050,25 @@ class Subscription(models.Model):
         self.cancelled_at = timezone.now()
         self.save(update_fields=['status', 'cancelled_at'])
         return self
+
+
+class CompanyProfile(models.Model):
+    """Profil ENTREPRISE (B2B) — un compte qui mandate des missions au nom d'une société."""
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='company_profile')
+    company_name = models.CharField(max_length=150)
+    registration_number = models.CharField(max_length=50, blank=True, null=True)  # RCCM / SIRET
+    industry = models.CharField(max_length=100, blank=True, null=True)
+    address = models.TextField(blank=True, null=True)
+    city = models.CharField(max_length=100, blank=True, null=True)
+    contact_person = models.CharField(max_length=120, blank=True, null=True)
+    phone = models.CharField(max_length=20, blank=True, null=True)
+    website = models.URLField(blank=True, null=True)
+    verified = models.BooleanField(default=False, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return self.company_name or f"Entreprise #{self.user_id}"
 
 class Invoice(models.Model):
     booking = models.OneToOneField(Booking, on_delete=models.CASCADE, related_name='invoice')

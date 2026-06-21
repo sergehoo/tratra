@@ -4,7 +4,7 @@ from django.db import models
 from django.db.models.signals import post_delete, post_save
 from django.dispatch import receiver
 
-from handy.models import ServiceImage, User, HandymanProfile, Review, Booking
+from handy.models import ServiceImage, User, HandymanProfile, Review, Booking, CompanyProfile
 from handy.tasks import notify_booking_status
 logger = logging.getLogger(__name__)
 
@@ -13,6 +13,15 @@ def create_handyman_profile(sender, instance, created, **kwargs):
     if created and instance.user_type == 'handyman':
         # Vérifie qu'il n'existe pas déjà un profil
         HandymanProfile.objects.get_or_create(user=instance)
+
+
+@receiver(post_save, sender=User)
+def create_company_profile(sender, instance, created, **kwargs):
+    if created and instance.user_type == 'entreprise':
+        CompanyProfile.objects.get_or_create(
+            user=instance,
+            defaults={'company_name': instance.get_full_name() or instance.username},
+        )
 
 
 @receiver(post_delete, sender=ServiceImage)

@@ -88,6 +88,7 @@ INSTALLED_APPS = [
     'rest_framework',
     'rest_framework_simplejwt',
     'rest_framework_simplejwt.token_blacklist',
+    'drf_spectacular',
     'tailwind',
     'theme',
     'grappelli',
@@ -106,7 +107,8 @@ CORS_ALLOW_ALL_ORIGINS = config("CORS_ALLOW_ALL_ORIGINS", default="False").lower
 CORS_ALLOWED_ORIGINS = [
     o.strip() for o in config(
         "CORS_ALLOWED_ORIGINS",
-        default="https://tratra.net,https://www.tratra.net,https://tratra.ci,https://www.tratra.ci",
+        default="https://tratra.net,https://www.tratra.net,https://tratra.ci,https://www.tratra.ci,"
+                "http://localhost:3000,http://127.0.0.1:3000",
     ).split(",") if o.strip()
 ]
 CORS_ALLOW_CREDENTIALS = True
@@ -178,6 +180,7 @@ REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.IsAuthenticated',
     ],
+    'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
     'DEFAULT_THROTTLE_CLASSES': [
         'rest_framework.throttling.AnonRateThrottle',
         'rest_framework.throttling.UserRateThrottle',
@@ -189,6 +192,17 @@ REST_FRAMEWORK = {
         'login': config('THROTTLE_LOGIN', default='10/min'),
         'webhook': config('THROTTLE_WEBHOOK', default='120/min'),
     },
+}
+
+# === OpenAPI / Swagger (drf-spectacular) — découplage SPA ===
+SPECTACULAR_SETTINGS = {
+    'TITLE': 'Tratra API',
+    'DESCRIPTION': "API de la marketplace de services à domicile Tratra (clients, artisans, entreprises).",
+    'VERSION': '1.0.0',
+    'SERVE_INCLUDE_SCHEMA': False,
+    # Doc consultable pour le dev frontend ; restreindre en prod si besoin.
+    'SERVE_PERMISSIONS': ['rest_framework.permissions.AllowAny'],
+    'SCHEMA_PATH_PREFIX': r'/handy',
 }
 
 # === JWT (durci) ===

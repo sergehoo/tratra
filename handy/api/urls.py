@@ -9,7 +9,7 @@ from .views import (
     MessageViewSet, NotificationViewSet, HandymanDocumentViewSet, ReportViewSet, DeviceViewSet, DisputeViewSet,
     TimeOffViewSet, SubscriptionPlanViewSet, SubscriptionViewSet,
     price_estimate, payment_initiate, match, PaymentWebhook, EmailOrUsernameTokenObtainPairView, HeroSlideViewSet,
-    otp_request, otp_verify, coupon_validate, payout_account
+    otp_request, otp_verify, coupon_validate, payout_account, company_profile
 )
 
 router = DefaultRouter()
@@ -49,6 +49,7 @@ urlpatterns = [
     path('auth/otp/verify/', otp_verify, name='otp-verify'),
     path('coupons/validate/', coupon_validate, name='coupon-validate'),
     path('payout-account/', payout_account, name='payout-account'),
+    path('companies/me/', company_profile, name='company-profile'),
 
     path('', include(router.urls)),
 ]

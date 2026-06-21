@@ -6,6 +6,7 @@ from django.http import HttpResponse
 from django.urls import path, include
 
 from handy.api.urls import router
+from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView, SpectacularRedocView
 from handy.views import Landing, HomePageView, HandymanDashboardView, BookingCreateView, EmployerSignupView, \
     HandymanSignupView, CustomLoginView, EmployeurDashboardView, HandymanProfileUpdateView, HandymanProfileDetailView, \
     ServiceCreateView, ServiceUpdateView, ServiceStatsView, HandymanCalendarView, ServiceSearchView, ServiceDetailView, \
@@ -19,6 +20,10 @@ urlpatterns = [
                   path('admin/', admin.site.urls),
                   path('accounts/', include('allauth.urls')),
                   path('handy/', include('handy.api.urls')),
+                  # OpenAPI / documentation interactive (frontend découplé React/Flutter)
+                  path('api/schema/', SpectacularAPIView.as_view(), name='schema'),
+                  path('api/docs/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
+                  path('api/redoc/', SpectacularRedocView.as_view(url_name='schema'), name='redoc'),
                   path('', Landing.as_view(), name='landing'),
                   path('home', HomePageView.as_view(), name='home'),
 
