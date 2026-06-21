@@ -33,16 +33,18 @@ RUN pip install --no-cache-dir --upgrade pip \
 # Copie code
 COPY . /app
 
-# Crée un user non root
-RUN #useradd -m appuser && chown -R appuser:appuser /app
-#USER appuser
-
 # Pré-compilation pyc (petit plus perf)
-RUN python -m compileall -q .
+RUN python -m compileall -q . || true
 
 # Entrypoint: migrations + collectstatic puis lance daphne
 COPY entrypoint.sh /app/docker/entrypoint.sh
 RUN chmod +x /app/docker/entrypoint.sh
+
+# Utilisateur non-root + dossiers inscriptibles (staticfiles/media montés en volumes)
+RUN useradd -m -u 10001 appuser \
+ && mkdir -p /app/staticfiles /app/media \
+ && chown -R appuser:appuser /app
+USER appuser
 
 EXPOSE 8000
 CMD ["/app/docker/entrypoint.sh", "daphne", "-b", "0.0.0.0", "-p", "8000", "tratra.asgi:application"]

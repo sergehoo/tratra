@@ -2,11 +2,26 @@
 import os
 from .base import *
 
-DEBUG = True
-SECURE_SSL_REDIRECT = False
-# pour le retour en HTTPS strict
+# SECURITY: jamais de debug en production.
+DEBUG = False
+
+# Derrière Traefik (terminaison TLS) : on force HTTPS et on fait confiance à
+# l'en-tête de proto transmis par le reverse proxy.
+SECURE_SSL_REDIRECT = True
 USE_X_FORWARDED_HOST = True
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
+# Durcissement cookies / transport
+SESSION_COOKIE_SECURE = True
+CSRF_COOKIE_SECURE = True
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = "Lax"
+CSRF_COOKIE_SAMESITE = "Lax"
+SECURE_HSTS_SECONDS = 31536000
+SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+SECURE_HSTS_PRELOAD = True
+SECURE_CONTENT_TYPE_NOSNIFF = True
+SECURE_REFERRER_POLICY = "strict-origin-when-cross-origin"
 
 CSRF_TRUSTED_ORIGINS = [
     "http://www.tratra.net",

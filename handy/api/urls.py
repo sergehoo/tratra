@@ -28,8 +28,9 @@ router.register(r'reports', ReportViewSet, basename='reports')
 router.register(r'devices', DeviceViewSet, basename='devices')
 router.register(r'slides', HeroSlideViewSet, basename='slides')
 urlpatterns = [
-    path('', include(router.urls)),
-    # path('auth/login/', TokenObtainPairView.as_view(), name='jwt-login'),
+    # ⚠️ Les routes explicites DOIVENT précéder le router : sinon
+    # `payments/{pk}/` (route détail générée) masque `payments/initiate/`
+    # et `payments/webhook/...` (résolus en pk="initiate"/"webhook" -> 405).
     path('auth/login/', EmailOrUsernameTokenObtainPairView.as_view(), name='jwt-login'),
     path('auth/refresh/', TokenRefreshView.as_view(), name='jwt-refresh'),
     path('auth/logout/', TokenBlacklistView.as_view(), name='jwt-logout'),
@@ -37,4 +38,6 @@ urlpatterns = [
     path('payments/initiate/', payment_initiate, name='payment-initiate'),
     path('payments/webhook/<str:provider>/', PaymentWebhook.as_view(), name='payment-webhook'),
     path('match/', match, name='match'),
+
+    path('', include(router.urls)),
 ]

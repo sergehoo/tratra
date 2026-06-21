@@ -1,11 +1,16 @@
 # handy/api/views.py
+import hashlib
+import hmac
 from decimal import Decimal
 from math import radians, cos, sqrt, sin, asin
 
+from django.conf import settings
+
 from django.contrib.gis.db.models.functions import Distance
 from django.contrib.gis.geos import Point
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction, models
-from django.db.models import Count
+from django.db.models import Count, Q
 from django.utils import timezone
 
 from django_filters.rest_framework import DjangoFilterBackend
@@ -15,6 +20,8 @@ from rest_framework.filters import OrderingFilter, SearchFilter
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework.exceptions import PermissionDenied
+from django.shortcuts import get_object_or_404
 
 from rest_framework.pagination import PageNumberPagination
 
@@ -36,6 +43,56 @@ from handy.models import (
 # ---- Permissions simples ----
 class IsAuthenticatedOrReadOnly(permissions.IsAuthenticatedOrReadOnly):
     pass
+
+
+class IsOwnerOrAdmin(permissions.BasePermission):
+    """Object-level : lecture pour tout utilisateur authentifié, écriture
+    (PUT/PATCH/DELETE) réservée au propriétaire de l'objet ou au staff.
+
+    La vue indique le chemin vers le propriétaire via `owner_lookup`
+    (ex: "user", "handyman", "booking__client"). Plusieurs chemins possibles
+    avec `owner_lookups` (tuple) : OR logique.
+    """
+
+    def has_object_permission(self, request, view, obj):
+        if request.method in permissions.SAFE_METHODS:
+            return True
+        user = request.user
+        if not (user and user.is_authenticated):
+            return False
+        if user.is_staff:
+            return True
+        lookups = getattr(view, "owner_lookups", None) or (getattr(view, "owner_lookup", "user"),)
+        for lookup in lookups:
+            owner = obj
+            for part in lookup.split("__"):
+                owner = getattr(owner, part, None)
+            if owner == user:
+                return True
+        return False
+
+
+class OwnerScopedQuerysetMixin:
+    """Restreint le queryset aux objets appartenant à `request.user`.
+
+    `owner_lookups` liste les filtres ORM rattachant un objet à l'utilisateur
+    (OR logique). Le staff voit tout. Empêche l'IDOR en lecture ET en écriture
+    (get_object part de ce queryset filtré → 404 pour les objets d'autrui).
+    """
+
+    owner_lookups = ("user",)
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        user = self.request.user
+        if not (user and user.is_authenticated):
+            return qs.none()
+        if user.is_staff:
+            return qs
+        q = Q()
+        for lookup in self.owner_lookups:
+            q |= Q(**{lookup: user})
+        return qs.filter(q).distinct()
 
 
 # ---- Helpers géo / suggestions ----
@@ -121,6 +178,7 @@ from .serializers import (
 
 class EmailOrUsernameTokenObtainPairView(TokenObtainPairView):
     serializer_class = EmailOrUsernameTokenObtainPairSerializer
+    throttle_scope = "login"  # limite anti-bruteforce (cf. DEFAULT_THROTTLE_RATES)
 # ---- Users ----
 class UserViewSet(viewsets.ModelViewSet):
     queryset = User.objects.all().only("id", "email", "first_name", "last_name", "user_type", "is_verified")
@@ -130,6 +188,14 @@ class UserViewSet(viewsets.ModelViewSet):
     search_fields = ["email", "first_name", "last_name"]
     ordering = ["-id"]
     pagination_class = DefaultPageNumberPagination
+
+    def get_queryset(self):
+        # Un utilisateur non-staff ne voit/modifie que son propre compte (anti-IDOR).
+        qs = super().get_queryset()
+        user = self.request.user
+        if user and user.is_authenticated and not user.is_staff:
+            return qs.filter(pk=user.pk)
+        return qs
 
     def get_permissions(self):
         if self.action in ['create']:  # inscription
@@ -170,12 +236,31 @@ class HandymanProfileViewSet(viewsets.ModelViewSet):
         .all()
     )
     serializer_class = HandymanProfileSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsOwnerOrAdmin]
+    owner_lookup = "user"
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ["is_approved", "online", "commune"]
     search_fields = ["user__first_name", "user__last_name", "commune", "quartier"]
     ordering = ["-rating", "-completed_jobs"]
     pagination_class = DefaultPageNumberPagination
+
+    @action(detail=False, methods=["post"], url_path="presence")
+    def presence(self, request):
+        """
+        POST { "online": true|false } — bascule la présence (dispo temps réel)
+        de l'artisan courant. Sans ce flag, /match/ ne renvoie aucun artisan.
+        """
+        profile = HandymanProfile.objects.filter(user=request.user).first()
+        if not profile:
+            return Response({"detail": "Profil artisan introuvable."},
+                            status=status.HTTP_404_NOT_FOUND)
+        online = request.data.get("online")
+        if online is None:
+            return Response({"detail": "online (booléen) requis."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        profile.online = bool(online)
+        profile.save(update_fields=["online"])
+        return Response({"online": profile.online})
 
 
 # ---- Catégories ----
@@ -197,7 +282,8 @@ class ServiceViewSet(viewsets.ModelViewSet):
         .all()
     )
     serializer_class = ServiceSerializer
-    permission_classes = [IsAuthenticatedOrReadOnly]
+    permission_classes = [IsAuthenticatedOrReadOnly, IsOwnerOrAdmin]
+    owner_lookup = "handyman"
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ["category", "is_active", "price_type"]
     search_fields = ["title", "description", "handyman__first_name", "handyman__last_name"]
@@ -242,12 +328,13 @@ class ServiceImageViewSet(viewsets.ModelViewSet):
 
 
 # ---- Booking ----
-class BookingViewSet(viewsets.ModelViewSet):
+class BookingViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
     queryset = (
         Booking.objects.select_related("client", "handyman", "service", "service__category")
         .all()
     )
     permission_classes = [permissions.IsAuthenticated]
+    owner_lookups = ("client", "handyman")
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     # ⚠️ "type" n'existe pas dans Booking -> supprimé
     filterset_fields = ["status", "client", "handyman", "service", "booking_date"]
@@ -323,81 +410,135 @@ class BookingViewSet(viewsets.ModelViewSet):
             # "polyline": route.polyline.geojson if route.polyline else None,  # si besoin
         })
 
+    @action(detail=True, methods=["post"])
+    def transition(self, request, pk=None):
+        """
+        POST { "status": "confirmed|in_progress|completed|cancelled" }
+        Change le statut via la machine à états (transition validée + timeline).
+        Le queryset est déjà cloisonné par propriétaire (anti-IDOR).
+        """
+        booking = self.get_object()
+        new_status = request.data.get("status")
+        if not new_status:
+            return Response({"detail": "status requis."}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            booking.transition_to(new_status, actor=request.user)
+        except DjangoValidationError as e:
+            msg = e.messages[0] if getattr(e, "messages", None) else str(e)
+            return Response({"detail": msg}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(BookingSerializer(booking).data, status=status.HTTP_200_OK)
+
 
 # ---- Paiements ----
-class PaymentViewSet(viewsets.ModelViewSet):
+class PaymentViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
     queryset = Payment.objects.select_related("booking", "booking__client", "booking__handyman").all()
     serializer_class = PaymentSerializer
     permission_classes = [permissions.IsAuthenticated]
+    owner_lookups = ("booking__client", "booking__handyman")
     filter_backends = [DjangoFilterBackend, OrderingFilter]
     filterset_fields = ["status", "method"]
     ordering = ["-created_at"]
     pagination_class = DefaultPageNumberPagination
 
 
-class PaymentLogViewSet(viewsets.ModelViewSet):
+class PaymentLogViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
     queryset = PaymentLog.objects.select_related("payment", "payment__booking").all()
     serializer_class = PaymentLogSerializer
     permission_classes = [permissions.IsAuthenticated]
+    owner_lookups = ("payment__booking__client", "payment__booking__handyman")
     ordering = ["-changed_at"]
     pagination_class = DefaultPageNumberPagination
 
 
 # ---- Avis / Chat / Notifications / Docs / Reports / Devices ----
-class ReviewViewSet(viewsets.ModelViewSet):
+class ReviewViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
     queryset = Review.objects.select_related("booking", "booking__client", "booking__handyman").all()
     serializer_class = ReviewSerializer
     permission_classes = [permissions.IsAuthenticated]
+    owner_lookups = ("booking__client", "booking__handyman")
     ordering = ["-created_at"]
     pagination_class = DefaultPageNumberPagination
 
+    def perform_create(self, serializer):
+        booking = serializer.validated_data.get("booking")
+        if booking and booking.client != self.request.user and not self.request.user.is_staff:
+            raise PermissionDenied("Vous ne pouvez noter que vos propres réservations.")
+        serializer.save()
 
-class ConversationViewSet(viewsets.ModelViewSet):
+
+class ConversationViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
     queryset = Conversation.objects.select_related("booking").prefetch_related("participants").all()
     serializer_class = ConversationSerializer
     permission_classes = [permissions.IsAuthenticated]
+    owner_lookups = ("participants",)
     ordering = ["-updated_at"]
     pagination_class = DefaultPageNumberPagination
 
+    def perform_create(self, serializer):
+        obj = serializer.save()
+        # le créateur est toujours participant de sa conversation
+        obj.participants.add(self.request.user)
 
-class MessageViewSet(viewsets.ModelViewSet):
+
+class MessageViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
     queryset = Message.objects.select_related("conversation", "sender").all()
     serializer_class = MessageSerializer
     permission_classes = [permissions.IsAuthenticated]
+    owner_lookups = ("conversation__participants",)
     ordering = ["-created_at"]
     pagination_class = DefaultPageNumberPagination
 
+    def perform_create(self, serializer):
+        conv = serializer.validated_data.get("conversation")
+        if (conv and not self.request.user.is_staff
+                and not conv.participants.filter(pk=self.request.user.pk).exists()):
+            raise PermissionDenied("Vous ne participez pas à cette conversation.")
+        serializer.save(sender=self.request.user)
 
-class NotificationViewSet(viewsets.ModelViewSet):
+
+class NotificationViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
     queryset = Notification.objects.select_related("user").all()
     serializer_class = NotificationSerializer
     permission_classes = [permissions.IsAuthenticated]
+    owner_lookups = ("user",)
     ordering = ["-created_at"]
     pagination_class = DefaultPageNumberPagination
 
+    def perform_create(self, serializer):
+        serializer.save(user=self.request.user)
 
-class HandymanDocumentViewSet(viewsets.ModelViewSet):
+
+class HandymanDocumentViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
     queryset = HandymanDocument.objects.select_related("handyman", "handyman__user").all()
     serializer_class = HandymanDocumentSerializer
     permission_classes = [permissions.IsAuthenticated]
+    owner_lookups = ("handyman__user",)
     ordering = ["-uploaded_at"]
     pagination_class = DefaultPageNumberPagination
 
 
-class ReportViewSet(viewsets.ModelViewSet):
+class ReportViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
     queryset = Report.objects.select_related("reporter", "review", "message").all()
     serializer_class = ReportSerializer
     permission_classes = [permissions.IsAuthenticated]
+    owner_lookups = ("reporter",)
     ordering = ["-created_at"]
     pagination_class = DefaultPageNumberPagination
 
+    def perform_create(self, serializer):
+        serializer.save(reporter=self.request.user)
 
-class DeviceViewSet(viewsets.ModelViewSet):
+
+class DeviceViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
     queryset = Device.objects.select_related("user").all()
     serializer_class = DeviceSerializer
     permission_classes = [permissions.IsAuthenticated]
+    owner_lookups = ("user",)
     ordering = ["-last_active"]
     pagination_class = DefaultPageNumberPagination
+
+    def perform_create(self, serializer):
+        serializer.save(user=self.request.user)
 
 
 # ---- Endpoints “métier” complémentaires ----
@@ -450,16 +591,40 @@ def match(request):
     return Response(data, status=status.HTTP_200_OK)
 
 
-# ---- Webhook Paiement (idempotent) ----
+# ---- Webhook Paiement (idempotent + signé) ----
 class PaymentWebhook(APIView):
-    authentication_classes = []  # à remplacer par une vérif HMAC (headers/signature)
-    permission_classes = []
+    authentication_classes = []
+    permission_classes = []  # pas d'auth utilisateur : on authentifie via signature HMAC
+    throttle_scope = "webhook"
+
+    # En-tête portant la signature HMAC-SHA256 hex du corps brut.
+    SIGNATURE_HEADER = "HTTP_X_WEBHOOK_SIGNATURE"
+
+    VALID_STATUSES = {s for s, _ in Payment.PAYMENT_STATUS}
+
+    def _signature_ok(self, request) -> bool:
+        secret = getattr(settings, "PAYMENT_WEBHOOK_SECRET", "") or ""
+        if not secret:
+            # fail-closed : pas de secret configuré => on refuse tout.
+            return False
+        provided = request.META.get(self.SIGNATURE_HEADER, "")
+        if not provided:
+            return False
+        expected = hmac.new(
+            secret.encode("utf-8"), request.body, hashlib.sha256
+        ).hexdigest()
+        return hmac.compare_digest(expected, provided)
 
     def post(self, request, provider):
         """
         Provider path: 'om' | 'mtn' | 'card' | 'moov'...
+        Header: X-Webhook-Signature: <hex HMAC-SHA256(raw_body, PAYMENT_WEBHOOK_SECRET)>
         Body: { "provider_ref": "...", "status": "completed|failed|refunded" }
         """
+        if not self._signature_ok(request):
+            return Response({"detail": "Signature invalide."},
+                            status=status.HTTP_401_UNAUTHORIZED)
+
         data = request.data
         provider_ref = data.get("provider_ref")
         new_status = data.get("status")
@@ -468,13 +633,18 @@ class PaymentWebhook(APIView):
             return Response({"detail": "provider_ref et status requis."},
                             status=status.HTTP_400_BAD_REQUEST)
 
-        # TODO: vérifier signature HMAC (sécurité)
+        if new_status not in self.VALID_STATUSES:
+            return Response({"detail": "status invalide."},
+                            status=status.HTTP_400_BAD_REQUEST)
+
         with transaction.atomic():
-            p = Payment.objects.select_for_update().get(transaction_id=provider_ref)
+            p = get_object_or_404(
+                Payment.objects.select_for_update(), transaction_id=provider_ref
+            )
             old = p.status
             if old != new_status:
                 p.status = new_status
-                p.save(update_fields=["status", "updated_at"])
+                p.save(update_fields=["status", "is_paid", "updated_at"])
                 PaymentLog.objects.create(
                     payment=p, previous_status=old, new_status=new_status, notes=f"prov={provider}"
                 )

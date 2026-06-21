@@ -10,7 +10,7 @@ BASES = {
   'electricite': Decimal('3500'),
 }
 
-def estimate_price(category_slug: str, minutes: int, artisan_loc, client_lat, client_lng):
+def estimate_price(category_slug: str, minutes: int, artisan_loc=None, client_lat=None, client_lng=None):
     base = BASES.get(category_slug, Decimal('3000'))
     duration = Decimal(max(30, minutes)) / Decimal(60)  # min 30min
     surge = Decimal('1.20') if 18 <= timezone.localtime().hour <= 22 else Decimal('1.00')

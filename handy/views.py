@@ -752,7 +752,7 @@ class SendMessageView(LoginRequiredMixin, CreateView):
             user=recipient,
             notification_type='message_received',
             message=f"Nouveau message concernant la réservation #{booking.id}",
-            related_id=booking.id
+            content_object=booking
         )
 
         messages.success(self.request, "Message envoyé avec succès")
@@ -837,19 +837,22 @@ class AddPaymentView(LoginRequiredMixin, CreateView):
         if self.request.user != booking.client or booking.status != 'completed':
             raise PermissionDenied("Seul l'employeur peut payer une prestation terminée.")
 
+        from handy.services.fees import compute_platform_fee
         artisan_profile = booking.handyman.handyman_profile
-        amount = Decimal(self.request.POST.get('amount'))
-        platform_fee = amount * Decimal('0.11')
+        amount = Decimal(self.request.POST.get('amount') or '0')
+        if amount <= 0:
+            messages.error(self.request, "Montant invalide.")
+            return redirect(self.get_success_url())
 
-        # ✅ Vérifier si la caution est suffisante
-        if artisan_profile.deposit_balance < platform_fee:
+        category_id = booking.service.category_id if booking.service else None
+        platform_fee = compute_platform_fee(amount, category_id=category_id)
+
+        # ✅ Déduire la commission de la caution : transaction négative tracée, sous
+        # verrou (deposit_balance est une property en LECTURE SEULE — on ne l'assigne pas).
+        if not artisan_profile.deduct_platform_fee(amount, category_id=category_id):
             messages.error(self.request,
                            "L'artisan n'a pas suffisamment de caution pour couvrir les frais de plateforme.")
             return redirect(self.get_success_url())
-
-        # ✅ Déduire la commission de la caution
-        artisan_profile.deposit_balance -= platform_fee
-        artisan_profile.save()
 
         # ✅ Créer le paiement
         payment = form.save(commit=False)
@@ -1170,7 +1173,7 @@ class BookingRespondView(LoginRequiredMixin, UserPassesTestMixin, UpdateView):
             user=form.instance.client,
             notification_type='booking_response',
             message=f"Le prestataire a répondu à votre demande: {status_display}",
-            related_id=form.instance.id
+            content_object=form.instance
         )
 
         # Message de succès
@@ -1209,9 +1212,9 @@ class BookingActionView(LoginRequiredMixin, View):
         raise NotImplementedError("La méthode test_func doit être implémentée")
 
     def perform_action(self, booking):
-        """Effectue l'action sur la réservation"""
-        booking.status = self.new_status
-        booking.save()
+        """Effectue l'action sur la réservation via la machine à états
+        (transition validée + horodatage BookingTimeline + completed_jobs)."""
+        booking.transition_to(self.new_status, actor=self.request.user)
 
         # Créer une notification
         recipient = booking.handyman if self.request.user == booking.client else booking.client
@@ -1222,7 +1225,7 @@ class BookingActionView(LoginRequiredMixin, View):
                 booking_id=booking.id,
                 status=booking.get_status_display()
             ),
-            related_id=booking.id
+            content_object=booking
         )
 
         messages.success(self.request, self.success_message)
@@ -1260,11 +1263,7 @@ class BookingCompleteView(BookingActionView):
     def test_func(self, booking):
         # Seul le client ou le prestataire peut terminer le service
         return self.request.user in [booking.client, booking.handyman] and booking.status == 'in_progress'
-
-    def perform_action(self, booking):
-        super().perform_action(booking)
-        booking.end_date = timezone.now()
-        booking.save()
+        # NB: end_date est désormais positionné par Booking.transition_to('completed').
 
 
 class BookingCancelView(BookingActionView):

@@ -6,7 +6,7 @@ from django.contrib.contenttypes.fields import GenericForeignKey
 from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator, RegexValidator
-from django.db import models
+from django.db import models, transaction
 from django.db.models import Sum, UniqueConstraint, Q
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
@@ -115,15 +115,19 @@ class HandymanProfile(models.Model):
         )['total'] or Decimal('0.00')
         return total
 
-    def has_sufficient_deposit(self, service_amount: Decimal) -> bool:
-        required = Decimal(service_amount) * Decimal('0.11')
+    def has_sufficient_deposit(self, service_amount: Decimal, category_id=None) -> bool:
+        # Source unique de vérité : PricingRule via compute_platform_fee (fallback 11%).
+        from handy.services.fees import compute_platform_fee
+        required = compute_platform_fee(Decimal(service_amount), category_id=category_id)
         return self.deposit_balance >= required
 
-    def deduct_platform_fee(self, service_amount: Decimal) -> bool:
+    def deduct_platform_fee(self, service_amount: Decimal, category_id=None) -> bool:
         """
-        Déduit 11% en créant une transaction négative (DB-safe & traçable).
+        Déduit la commission plateforme (PricingRule, fallback 11%) en créant une
+        transaction négative (DB-safe & traçable). Retourne False si caution insuffisante.
         """
-        fee = (Decimal(service_amount) * Decimal('0.11')).quantize(Decimal('0.01'))
+        from handy.services.fees import compute_platform_fee
+        fee = compute_platform_fee(Decimal(service_amount), category_id=category_id)
         if self.deposit_balance >= fee:
             DepositTransaction.objects.create(
                 handyman=self.user, type='deduction', amount=-fee, status='completed',
@@ -218,11 +222,18 @@ class DepositTransaction(models.Model):
             raise ValidationError("Le montant doit être négatif pour un retrait ou une déduction.")
 
     def save(self, *args, **kwargs):
+        # Débits (retrait/déduction) : contrôle de solde SOUS VERROU pour éviter
+        # les race conditions (deux opérations concurrentes lisant le même solde).
         if self.type in ['withdrawal', 'deduction'] and self.status == 'completed':
-            balance = DepositTransaction.get_balance(self.handyman)
-            if abs(self.amount) > balance:
-                raise ValidationError("Solde insuffisant pour effectuer cette opération.")
-        super().save(*args, **kwargs)
+            with transaction.atomic():
+                # verrou pessimiste sur le wallet de l'artisan -> sérialise les débits
+                User.objects.select_for_update().get(pk=self.handyman_id)
+                balance = DepositTransaction.get_balance(self.handyman)
+                if abs(self.amount) > balance:
+                    raise ValidationError("Solde insuffisant pour effectuer cette opération.")
+                super().save(*args, **kwargs)
+        else:
+            super().save(*args, **kwargs)
 
 
 # ---- CATALOGUE ----
@@ -371,6 +382,55 @@ class Booking(models.Model):
     def __str__(self):
         return f"Réservation #{self.id} - {self.client} / {self.handyman}"
 
+    # ----- Machine à états -----
+    # Transitions autorisées : source -> {destinations}
+    TRANSITIONS = {
+        'pending': {'confirmed', 'cancelled'},
+        'confirmed': {'in_progress', 'cancelled'},
+        'in_progress': {'completed', 'cancelled'},
+        'completed': set(),
+        'cancelled': set(),
+    }
+
+    def can_transition_to(self, new_status: str) -> bool:
+        return new_status in self.TRANSITIONS.get(self.status, set())
+
+    @transaction.atomic
+    def transition_to(self, new_status: str, *, actor=None, save: bool = True):
+        """Change le statut en validant la transition, horodate dans
+        BookingTimeline, et incrémente completed_jobs UNE seule fois à la
+        complétion. Lève ValidationError si la transition est interdite.
+
+        `actor` (User) est accepté pour traçabilité/contrôles éventuels.
+        """
+        if new_status == self.status:
+            return self
+        if not self.can_transition_to(new_status):
+            raise ValidationError(
+                f"Transition invalide: {self.status} -> {new_status}."
+            )
+
+        previous = self.status
+        self.status = new_status
+        update_fields = ['status', 'updated_at']
+        if new_status == 'completed' and not self.end_date:
+            self.end_date = timezone.now()
+            update_fields.append('end_date')
+
+        if save:
+            # PK existant -> update ciblé; sinon save complet
+            self.save(update_fields=update_fields if self.pk else None)
+
+        # Horodatage du nouveau statut
+        BookingTimeline.objects.create(booking=self, status=new_status)
+
+        # Incrément idempotent : seulement à l'ENTRÉE dans 'completed'
+        if new_status == 'completed' and previous != 'completed':
+            HandymanProfile.objects.filter(user=self.handyman).update(
+                completed_jobs=models.F('completed_jobs') + 1
+            )
+        return self
+
 
 class Quotation(models.Model):
     STATUS_CHOICES = [('pending', 'En attente'), ('accepted', 'Accepté'), ('rejected', 'Refusé'), ('expired', 'Expiré')]
@@ -395,7 +455,7 @@ class Quotation(models.Model):
 class Payment(models.Model):
     PAYMENT_METHODS = [
         ('card', 'Carte'), ('transfer', 'Virement'), ('cash', 'Espèces'), ('check', 'Chèque'),
-        # étendre plus tard: ('om','OrangeMoney'), ('mtn','MTN'), ('moov','Moov')
+        ('om', 'Orange Money'), ('mtn', 'MTN MoMo'), ('moov', 'Moov Money'), ('wave', 'Wave'),
     ]
     PAYMENT_STATUS = [('pending', 'En attente'), ('completed', 'Complété'), ('failed', 'Échoué'),
                       ('refunded', 'Remboursé')]

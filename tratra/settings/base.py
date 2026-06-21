@@ -11,6 +11,7 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/4.2/ref/settings/
 """
 import os
+from datetime import timedelta
 from pathlib import Path
 
 import channels
@@ -100,10 +101,15 @@ INSTALLED_APPS = [
 ]
 INSTALLED_APPS += ["corsheaders"]
 
-# CORS_ALLOWED_ORIGINS = [
-#     "http://localhost:3000",  # React dev
-# ]
-CORS_ALLOW_ALL_ORIGINS = True
+# CORS : whitelist d'origines, pilotée par env. `*` désactivé par défaut.
+CORS_ALLOW_ALL_ORIGINS = config("CORS_ALLOW_ALL_ORIGINS", default="False").lower() in ("1", "true", "yes")
+CORS_ALLOWED_ORIGINS = [
+    o.strip() for o in config(
+        "CORS_ALLOWED_ORIGINS",
+        default="https://tratra.net,https://www.tratra.net,https://tratra.ci,https://www.tratra.ci",
+    ).split(",") if o.strip()
+]
+CORS_ALLOW_CREDENTIALS = True
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
@@ -164,14 +170,34 @@ ACCOUNT_SIGNUP_FIELDS = ["email*", "password1*", "password2*"]
 ACCOUNT_UNIQUE_EMAIL = True  # Empêche les doublons
 
 REST_FRAMEWORK = {
-    # Use Django's standard `django.contrib.auth` permissions,
-    # or allow read-only access for unauthenticated users.
     'DEFAULT_AUTHENTICATION_CLASSES': (
         'rest_framework_simplejwt.authentication.JWTAuthentication',  # ✅ plus de SessionAuthentication
     ),
+    # Sécurisé par défaut : il faut être authentifié. Les endpoints publics
+    # (inscription, /nearby, /price-estimate, /slides) déclarent AllowAny explicitement.
     'DEFAULT_PERMISSION_CLASSES': [
-        'rest_framework.permissions.DjangoModelPermissionsOrAnonReadOnly'
-    ]
+        'rest_framework.permissions.IsAuthenticated',
+    ],
+    'DEFAULT_THROTTLE_CLASSES': [
+        'rest_framework.throttling.AnonRateThrottle',
+        'rest_framework.throttling.UserRateThrottle',
+        'rest_framework.throttling.ScopedRateThrottle',
+    ],
+    'DEFAULT_THROTTLE_RATES': {
+        'anon': config('THROTTLE_ANON', default='60/min'),
+        'user': config('THROTTLE_USER', default='1000/hour'),
+        'login': config('THROTTLE_LOGIN', default='10/min'),
+        'webhook': config('THROTTLE_WEBHOOK', default='120/min'),
+    },
+}
+
+# === JWT (durci) ===
+SIMPLE_JWT = {
+    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=30),
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
+    'ROTATE_REFRESH_TOKENS': True,
+    'BLACKLIST_AFTER_ROTATION': True,
+    'UPDATE_LAST_LOGIN': True,
 }
 # Password validation
 # https://docs.djangoproject.com/en/4.2/ref/settings/#auth-password-validators
@@ -295,6 +321,10 @@ CELERY_BEAT_SCHEDULE = {}
 DJSTRIPE_WEBHOOK_SECRET = config('STRIPE_WEBHOOK_SECRET')
 DJSTRIPE_FOREIGN_KEY_TO_FIELD = 'id'
 
+# Secret partagé pour signer/vérifier le webhook de paiement générique (OM/MTN/cash...).
+# Vide => le webhook refuse toutes les requêtes (fail-closed).
+PAYMENT_WEBHOOK_SECRET = config('PAYMENT_WEBHOOK_SECRET', default='')
+
 # === SENTRY ===
 import sentry_sdk
 from sentry_sdk.integrations.django import DjangoIntegration
@@ -303,8 +333,8 @@ try:
     sentry_sdk.init(
         dsn=config('SENTRY_DSN', default=''),
         integrations=[DjangoIntegration(), CeleryIntegration(), RedisIntegration()],
-        traces_sample_rate=1.0,
-        send_default_pii=True,
+        traces_sample_rate=float(config('SENTRY_TRACES_SAMPLE_RATE', default='0.1')),
+        send_default_pii=config('SENTRY_SEND_PII', default='False').lower() in ('1', 'true', 'yes'),
         auto_enabling_integrations=False,
     )
 except Exception as e:

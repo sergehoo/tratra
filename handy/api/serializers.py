@@ -46,9 +46,27 @@ class UserSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['id',"date_joined", "last_login", "is_verified"]
 
+    # Rôles que l'on autorise à l'auto-inscription publique (jamais 'admin').
+    SELF_SIGNUP_ROLES = {"client", "employeur", "handyman"}
+
+    def validate_user_type(self, value):
+        """Empêche l'escalade de privilège : un compte créé via l'API publique
+        ne peut pas se déclarer 'admin' (ni un rôle hors liste blanche)."""
+        # En modification par un staff/admin authentifié, on laisse passer.
+        request = self.context.get("request")
+        is_admin = bool(request and request.user and request.user.is_staff)
+        if not is_admin and value not in self.SELF_SIGNUP_ROLES:
+            raise serializers.ValidationError(
+                "Type de compte non autorisé à l'inscription."
+            )
+        return value
+
     def create(self, validated_data):
         password = validated_data.pop('password')
         user = User(**validated_data)
+        # garde-fou : aucune création publique ne peut octroyer de privilèges Django
+        user.is_staff = False
+        user.is_superuser = False
         user.set_password(password)
         user.save()
         return user
@@ -180,10 +198,9 @@ class BookingCreateSerializer(serializers.ModelSerializer):
     # écriture: IDs + infos pratiques
     service = serializers.PrimaryKeyRelatedField(queryset=Service.objects.all(), required=False, allow_null=True)
     handyman = serializers.PrimaryKeyRelatedField(queryset=User.objects.all(), required=False, allow_null=True)
-    type = serializers.ChoiceField(choices=[('instant', 'Instantané'), ('scheduled', 'Planifié')], default='scheduled')
-    is_immediate = serializers.BooleanField(read_only=True)
 
-    # champs annexes côté pricing/matching (non stockés)
+    # champs annexes côté pricing/matching (NON stockés sur Booking, retirés avant create)
+    # TODO(S2): réintroduire 'type' (instant/scheduled) comme vrai champ modèle + migration.
     category_id = serializers.IntegerField(write_only=True, required=False)
     minutes = serializers.IntegerField(write_only=True, required=False, default=60)
 
@@ -195,11 +212,10 @@ class BookingCreateSerializer(serializers.ModelSerializer):
             "address", "city", "postal_code",
             "description", "proposed_price", "handyman_comment",
             "response_date", "status",
-            "type", "is_immediate",
-            # auxiliaires
+            # auxiliaires (write_only)
             "category_id", "minutes",
         ]
-        read_only_fields = ["client", "status", "is_immediate", "response_date"]
+        read_only_fields = ["client", "status", "response_date"]
 
     def validate(self, attrs):
         start = attrs.get("booking_date")
@@ -210,9 +226,11 @@ class BookingCreateSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         request = self.context.get("request")
+        # retirer les champs auxiliaires non persistés sur Booking
+        validated_data.pop("category_id", None)
+        validated_data.pop("minutes", None)
         validated_data["client"] = request.user
-        validated_data["is_immediate"] = validated_data.get("type") == "instant"
-        # on ne touche pas à la tarification ici; c’est géré par /payments/initiate/
+        # tarification non gérée ici : c'est le rôle de /payments/initiate/
         return super().create(validated_data)
 
 
@@ -232,9 +250,9 @@ class BookingSerializer(serializers.ModelSerializer):
             "description", "proposed_price", "handyman_comment",
             "response_date", "status",
             "created_at", "updated_at",
-            "type", "is_immediate",
         ]
-        read_only_fields = ["created_at", "updated_at"]
+        # 'status' n'est PAS modifiable via PATCH : passer par /bookings/{id}/transition/.
+        read_only_fields = ["created_at", "updated_at", "status"]
 
 
 # ========= PAYMENTS =========
@@ -362,11 +380,18 @@ class MatchRequestSerializer(serializers.Serializer):
 
 class MatchResponseSerializer(serializers.ModelSerializer):
     full_name = serializers.CharField(source="user.get_full_name")
-    distance_m = serializers.FloatField()
+    distance_m = serializers.SerializerMethodField()
 
     class Meta:
         model = HandymanProfile
         fields = ["id", "full_name", "rating", "completed_jobs", "distance_m"]
+
+    def get_distance_m(self, obj):
+        # L'annotation Distance() renvoie un objet mesure GeoDjango, pas un float.
+        d = getattr(obj, "distance_m", None)
+        if d is None:
+            return None
+        return float(d.m) if hasattr(d, "m") else float(d)
 
 
 class PriceEstimateSerializer(serializers.Serializer):

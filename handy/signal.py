@@ -29,12 +29,9 @@ def update_rating_on_review(sender, instance: Review, created, **kwargs):
     avg = qs.aggregate(avg=models.Avg('rating'))['avg'] or 0
     HandymanProfile.objects.filter(user=handyman).update(rating=avg)
 
-@receiver(post_save, sender=Booking)
-def increment_completed_jobs(sender, instance: Booking, **kwargs):
-    if instance.status == 'completed':
-        HandymanProfile.objects.filter(user=instance.handyman).update(
-            completed_jobs=models.F('completed_jobs') + 1
-        )
+# NB: l'incrément de completed_jobs est désormais géré de façon IDEMPOTENTE
+# dans Booking.transition_to() (uniquement à l'entrée dans 'completed').
+# L'ancien signal post_save incrémentait à CHAQUE sauvegarde -> double comptage. Supprimé.
 
 
 @receiver(post_save, sender=Booking)
