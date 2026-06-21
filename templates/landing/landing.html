@@ -2,887 +2,324 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
-    <meta charset="UTF-8"/>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-    <title>Tratra — Artisans domestiques en Côte d'Ivoire</title>
-    <!-- Tailwind -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-        tailwind.config = {
-            theme: {
-                extend: {
-                    colors: {
-                        primary: '#2e8b57',            // vert Tratra
-                        primaryDark: '#1f6a41',
-                        primarySoft: '#e8f6ee',
-                        yellow: '#F6C90E',            // jaune accent
-                        yellowSoft: '#FFF8D6',
-                        ink: '#0f172a',
-                        ash: '#6b7280',
-                        ivory: '#fffff0'
-                    },
-                    fontFamily: {
-                        poppins: ['Poppins', 'ui-sans-serif', 'system-ui'],
-                        montserrat: ['Montserrat', 'ui-sans-serif', 'system-ui']
-                    },
-                    boxShadow: {
-                        soft: '0 8px 24px rgba(15, 23, 42, .08)',
-                        strong: '0 16px 48px rgba(15, 23, 42, .12)'
-                    },
-                    keyframes: {
-                        floaty: {
-                            '0%, 100%': {transform: 'translateY(0)'},
-                            '50%': {transform: 'translateY(-10px)'}
-                        }
-                    },
-                    animation: {
-                        floaty: 'floaty 6s ease-in-out infinite'
-                    }
-                }
-            }
-        }
-    </script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tratra — Trouvez un artisan de confiance près de chez vous</title>
+  <meta name="description" content="Tratra met en relation clients et artisans vérifiés : plomberie, électricité, ménage et plus. Paiement sécurisé sous séquestre, suivi en temps réel, artisans notés.">
+  <style>
+    :root{
+      --green:#00B14F; --green-d:#008E40; --green-l:#E8F8EE;
+      --ink:#11271c; --txt:#2d3a33; --mut:#65766c; --line:#e6ece8;
+      --bg:#ffffff; --soft:#f6faf7; --amber:#f5a623; --radius:16px;
+      --shadow:0 10px 30px rgba(0,40,20,.08);
+    }
+    *{box-sizing:border-box}
+    html{scroll-behavior:smooth}
+    body{margin:0;background:var(--bg);color:var(--txt);
+      font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;line-height:1.55}
+    a{color:inherit;text-decoration:none}
+    .wrap{max-width:1140px;margin:0 auto;padding:0 20px}
+    .btn{display:inline-flex;align-items:center;gap:8px;border-radius:999px;padding:12px 22px;
+      font-weight:700;font-size:15px;border:1px solid transparent;cursor:pointer;transition:.15s;white-space:nowrap}
+    .btn-primary{background:var(--green);color:#fff}
+    .btn-primary:hover{background:var(--green-d)}
+    .btn-ghost{background:#fff;color:var(--ink);border-color:var(--line)}
+    .btn-ghost:hover{border-color:var(--green)}
+    .btn-light{background:rgba(255,255,255,.15);color:#fff;border-color:rgba(255,255,255,.4)}
+    .btn-light:hover{background:rgba(255,255,255,.25)}
 
-    <!-- Fonts & Icons -->
-    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=Montserrat:wght@700;800&display=swap"
-          rel="stylesheet"/>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
-<link rel="shortcut icon" href="{% static 'img/favicon.png'%}">
-    <!-- Swiper -->
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swiper@11/swiper-bundle.min.css"/>
-    <script src="https://cdn.jsdelivr.net/npm/swiper@11/swiper-bundle.min.js"></script>
+    /* Header */
+    header.nav{position:sticky;top:0;z-index:50;background:rgba(255,255,255,.92);
+      backdrop-filter:saturate(150%) blur(10px);border-bottom:1px solid var(--line)}
+    .nav .wrap{display:flex;align-items:center;justify-content:space-between;height:68px}
+    .logo{display:flex;align-items:center;gap:9px;font-weight:800;font-size:21px;color:var(--ink)}
+    .logo .mark{width:32px;height:32px;border-radius:9px;background:var(--green);color:#fff;
+      display:grid;place-items:center;font-size:18px}
+    .nav-links{display:flex;align-items:center;gap:26px}
+    .nav-links a.l{color:var(--mut);font-weight:600;font-size:14.5px}
+    .nav-links a.l:hover{color:var(--ink)}
+    .nav-cta{display:flex;gap:10px;align-items:center}
+    @media(max-width:820px){.nav-links .l{display:none}}
 
-    <style>
-        html {
-            scroll-behavior: smooth;
-        }
+    /* Hero */
+    .hero{position:relative;color:#fff;overflow:hidden;
+      background:radial-gradient(1100px 500px at 80% -10%,#16c768,transparent),
+                 linear-gradient(135deg,#0a6e3a 0%,#00B14F 55%,#16c768 100%)}
+    .hero .wrap{padding:72px 20px 90px;position:relative;z-index:2}
+    .hero h1{font-size:clamp(30px,5vw,52px);line-height:1.08;margin:0 0 16px;font-weight:850;max-width:760px;letter-spacing:-.02em}
+    .hero p.sub{font-size:clamp(16px,2.2vw,20px);max-width:600px;color:rgba(255,255,255,.92);margin:0 0 28px}
+    .searchbar{display:flex;gap:8px;background:#fff;border-radius:14px;padding:8px;max-width:600px;box-shadow:var(--shadow)}
+    .searchbar input{flex:1;border:0;outline:0;font-size:16px;padding:12px 14px;color:var(--ink);background:transparent;min-width:0}
+    .hero-cta{display:flex;gap:12px;margin-top:18px;flex-wrap:wrap}
+    .stats{display:flex;gap:34px;margin-top:42px;flex-wrap:wrap}
+    .stats .s .n{font-size:30px;font-weight:850}
+    .stats .s .l{font-size:13.5px;color:rgba(255,255,255,.85)}
+    .hero-wave{position:absolute;bottom:-1px;left:0;width:100%;display:block;z-index:1}
 
-        /* Scrollbar light */
-        ::-webkit-scrollbar {
-            width: 10px;
-            height: 10px;
-        }
+    section{padding:64px 0}
+    .eyebrow{color:var(--green);font-weight:800;letter-spacing:.12em;text-transform:uppercase;font-size:12.5px}
+    h2.sec{font-size:clamp(24px,3.5vw,34px);font-weight:820;color:var(--ink);margin:.3em 0 .2em;letter-spacing:-.01em}
+    .lead{color:var(--mut);max-width:620px;margin:0 0 8px}
+    .sec-head{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap;margin-bottom:30px}
 
-        ::-webkit-scrollbar-track {
-            background: #f8fafc;
-        }
+    /* Categories */
+    .cats{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}
+    @media(max-width:860px){.cats{grid-template-columns:repeat(2,1fr)}}
+    .cat{display:flex;flex-direction:column;gap:12px;padding:22px;border:1px solid var(--line);
+      border-radius:var(--radius);background:#fff;transition:.16s}
+    .cat:hover{border-color:var(--green);transform:translateY(-3px);box-shadow:var(--shadow)}
+    .cat .ic{width:46px;height:46px;border-radius:12px;background:var(--green-l);color:var(--green-d);
+      display:grid;place-items:center;font-size:22px;font-weight:800}
+    .cat .nm{font-weight:750;color:var(--ink)}
+    .cat .ds{font-size:13px;color:var(--mut)}
 
-        ::-webkit-scrollbar-thumb {
-            background: #cbd5e1;
-            border-radius: 999px;
-        }
+    /* Services */
+    .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:22px}
+    @media(max-width:860px){.grid3{grid-template-columns:1fr}}
+    .card{border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;background:#fff;
+      display:flex;flex-direction:column;transition:.16s}
+    .card:hover{box-shadow:var(--shadow);transform:translateY(-3px)}
+    .card .ph{height:140px;display:grid;place-items:center;color:#fff;font-size:40px;font-weight:800}
+    .card .bd{padding:18px;display:flex;flex-direction:column;gap:8px;flex:1}
+    .chip{align-self:flex-start;background:var(--green-l);color:var(--green-d);font-size:12px;
+      font-weight:700;padding:4px 10px;border-radius:999px}
+    .card h3{margin:0;font-size:17px;color:var(--ink)}
+    .card .by{font-size:13.5px;color:var(--mut)}
+    .card .ft{display:flex;justify-content:space-between;align-items:center;margin-top:auto;padding-top:10px;border-top:1px solid var(--line)}
+    .price{font-weight:800;color:var(--ink)}
+    .rate{color:var(--amber);font-weight:700;font-size:14px}
 
-        ::-webkit-scrollbar-thumb:hover {
-            background: #94a3b8;
-        }
+    /* Steps */
+    .soft{background:var(--soft)}
+    .steps{display:grid;grid-template-columns:repeat(3,1fr);gap:22px}
+    @media(max-width:860px){.steps{grid-template-columns:1fr}}
+    .step{background:#fff;border:1px solid var(--line);border-radius:var(--radius);padding:26px}
+    .step .num{width:40px;height:40px;border-radius:11px;background:var(--ink);color:#fff;
+      display:grid;place-items:center;font-weight:800;margin-bottom:14px}
+    .step h3{margin:0 0 6px;color:var(--ink);font-size:18px}
+    .step p{margin:0;color:var(--mut);font-size:14.5px}
 
-        .container {
-            max-width: 1152px;
-        }
-    </style>
+    /* Trust */
+    .feats{display:grid;grid-template-columns:repeat(4,1fr);gap:20px}
+    @media(max-width:860px){.feats{grid-template-columns:repeat(2,1fr)}}
+    @media(max-width:520px){.feats{grid-template-columns:1fr}}
+    .feat .ic{font-size:26px}
+    .feat h4{margin:10px 0 4px;color:var(--ink);font-size:16px}
+    .feat p{margin:0;color:var(--mut);font-size:14px}
+
+    /* CTA band */
+    .band{background:linear-gradient(135deg,#0a6e3a,#00B14F);color:#fff;border-radius:24px;
+      padding:48px;display:flex;justify-content:space-between;align-items:center;gap:24px;flex-wrap:wrap}
+    .band h2{margin:0 0 6px;font-size:28px;font-weight:820}
+    .band p{margin:0;color:rgba(255,255,255,.9);max-width:520px}
+
+    footer{background:var(--ink);color:#cdd8d1;padding:46px 0 28px;font-size:14px}
+    footer .cols{display:flex;justify-content:space-between;gap:30px;flex-wrap:wrap;margin-bottom:26px}
+    footer h5{color:#fff;font-size:14px;margin:0 0 12px;letter-spacing:.04em}
+    footer a{display:block;color:#a9b8af;padding:4px 0}
+    footer a:hover{color:#fff}
+    .copyr{border-top:1px solid rgba(255,255,255,.12);padding-top:18px;color:#8b9b91;font-size:13px}
+    .empty{color:var(--mut);font-size:14px;padding:20px;border:1px dashed var(--line);border-radius:12px}
+  </style>
 </head>
-<body class="bg-ivory text-ink font-poppins">
-<!-- ====== Header ====== -->
-<header id="header" class="sticky top-0 z-50 bg-white/90 backdrop-blur border-b border-slate-100">
-    <div class="container mx-auto px-4 py-3 flex items-center justify-between">
-        <a href="#home" class="flex items-center gap-3 group" aria-label="Aller à l'accueil Tratra">
-  <span class="w-21 h-21 rounded-xl  from-primary to-primaryDark grid place-items-center shadow-soft transition-transform group-hover:-translate-y-0.5">
-    <img
-            src="{% static 'img/tratra_logo_final.webp' %}"
-            srcset="{% static 'img/tratra_logo_final.webp' %} 1x, {% static 'img/tratra_logo_final.webp' %} 2x"
-            alt="Logo Tratra"
-            class="w-7 h-7 object-contain"
-            width="58" height="58"
-            decoding="async"
-            fetchpriority="high"/>
-      <!-- Fallback si l'image ne charge pas -->
-    <span class="sr-only">Tratra</span>
-  </span>
+<body>
 
-            <span class="font-montserrat text-2xl font-extrabold tracking-tight leading-none">
-    <span class="text-primary">TRA</span><span class="text-yellow">TRA</span>
-  </span>
-        </a>
-
-        <nav class="hidden md:flex items-center gap-7">
-            <a class="text-ink/80 hover:text-primary transition" href="#services">Services</a>
-            <a class="text-ink/80 hover:text-primary transition" href="#vedettes">Vedettes</a>
-            <a class="text-ink/80 hover:text-primary transition" href="#process">Fonctionnement</a>
-            <a class="text-ink/80 hover:text-primary transition" href="#temoignages">Témoignages</a>
-            <a class="text-ink/80 hover:text-primary transition" href="#faq">FAQ</a>
-        </nav>
-
-        <div class="hidden md:flex items-center gap-3">
-            {% if not request.user.is_authenticated %}
-                <a href="{% url 'account_login' %}"
-                   class="px-4 py-2 rounded-xl border border-primary text-primary hover:bg-primary/5">Connexion</a>
-                <a href="{% url 'employer_signup' %}"
-                   class="px-4 py-2 rounded-xl bg-primary text-white hover:bg-primaryDark shadow-soft">Créer un
-                    compte</a>
-            {% else %}
-                <span class="text-sm text-ash">Bonjour <strong>{{ request.user.get_short_name|default:request.user.username }}</strong></span>
-                <a href="{% url 'handydash' %}"
-                   class="px-3 py-2 rounded-xl bg-yellow text-ink font-semibold hover:brightness-95">Tableau de bord</a>
-                <a href="{% url 'account_logout' %}"
-                   class="px-3 py-2 rounded-xl border border-slate-200 hover:bg-slate-50">Déconnexion</a>
-            {% endif %}
-        </div>
-
-        <!-- Mobile -->
-        <button id="openMenu" class="md:hidden p-2 rounded-xl border border-slate-200" aria-label="Ouvrir le menu">
-            <i class="fa-solid fa-bars"></i>
-        </button>
-    </div>
-
-    <!-- Drawer -->
-    <div id="drawer" class="fixed inset-0 z-[60] hidden">
-        <div class="absolute inset-0 bg-black/30" id="drawerBackdrop" aria-hidden="true"></div>
-        <aside class="absolute right-0 top-0 h-full w-80 bg-white shadow-strong p-6 flex flex-col gap-6">
-            <div class="flex items-center justify-between">
-                <span class="font-montserrat text-xl font-extrabold"><span class="text-primary">TRA</span><span
-                        class="text-yellow">TRA</span></span>
-                <button id="closeMenu" class="p-2 rounded-lg bg-slate-50" aria-label="Fermer le menu"><i
-                        class="fa-solid fa-xmark"></i></button>
-            </div>
-            <nav class="flex flex-col gap-4 text-lg">
-                <a href="#services" class="hover:text-primary">Services</a>
-                <a href="#vedettes" class="hover:text-primary">Vedettes</a>
-                <a href="#process" class="hover:text-primary">Fonctionnement</a>
-                <a href="#temoignages" class="hover:text-primary">Témoignages</a>
-                <a href="#faq" class="hover:text-primary">FAQ</a>
-            </nav>
-            <div class="mt-auto grid gap-3">
-                {% if not request.user.is_authenticated %}
-                    <a href="{% url 'account_login' %}"
-                       class="px-4 py-3 rounded-xl border border-primary text-primary hover:bg-primary/5">Connexion</a>
-                    <a href="{% url 'employer_signup' %}"
-                       class="px-4 py-3 rounded-xl bg-primary text-white hover:bg-primaryDark">Créer un compte</a>
-                {% else %}
-                    <a href="{% url 'handydash' %}"
-                       class="px-4 py-3 rounded-xl bg-yellow text-ink font-semibold hover:brightness-95">Tableau de
-                        bord</a>
-                    <a href="{% url 'account_logout' %}"
-                       class="px-4 py-3 rounded-xl border border-slate-200 hover:bg-slate-50">Déconnexion</a>
-                {% endif %}
-            </div>
-        </aside>
-    </div>
+<header class="nav">
+  <div class="wrap">
+    <a href="{% url 'landing' %}" class="logo"><span class="mark">T</span> Tratra</a>
+    <nav class="nav-links">
+      <a class="l" href="#categories">Catégories</a>
+      <a class="l" href="#how">Comment ça marche</a>
+      <a class="l" href="#trust">Sécurité</a>
+      <a class="l" href="#pro">Devenir artisan</a>
+      <span class="nav-cta">
+        <a href="{% url 'account_login' %}" class="btn btn-ghost">Se connecter</a>
+        <a href="{% url 'employer_signup' %}" class="btn btn-primary">S'inscrire</a>
+      </span>
+    </nav>
+  </div>
 </header>
 
-<!-- ====== Hero ====== -->
-<section id="home" class="relative overflow-hidden bg-gradient-to-b from-white to-primarySoft">
-    <div aria-hidden
-         class="pointer-events-none select-none absolute -top-24 -right-24 w-[420px] h-[420px] rounded-full bg-yellow/20 blur-3xl animate-floaty"></div>
-    <div class="container mx-auto px-4 py-16 lg:py-24 grid lg:grid-cols-2 gap-12 items-center">
-        <div>
-        <span class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-yellowSoft border border-yellow/30 text-ink text-sm font-semibold">
-          <i class="fa-solid fa-shield-heart text-primary"></i> Artisans vérifiés & notés
-        </span>
-            <h1 class="mt-5 font-montserrat text-4xl md:text-5xl leading-tight font-extrabold">
-                Simplifiez votre quotidien avec <span class="text-primary">Tratra</span>
-            </h1>
-            <p class="mt-4 text-lg text-ash max-w-xl">Trouvez servantes, cuisiniers, nounous, chauffeurs et jardiniers
-                fiables près de chez vous. Réservation rapide, profils transparents, paiement sécurisé.</p>
+<!-- HERO -->
+<div class="hero">
+  <div class="wrap">
+    <div class="eyebrow" style="color:#d6ffe7">La marketplace des services à domicile</div>
+    <h1>Trouvez un artisan de confiance, près de chez vous</h1>
+    <p class="sub">Plomberie, électricité, ménage, menuiserie… Réservez un professionnel vérifié, payez en toute sécurité et suivez votre intervention en temps réel.</p>
 
-            <!-- Barre de recherche -->
-            <form class="mt-6 grid md:grid-cols-[1fr,1fr,auto] gap-3" action="{% url 'employer_signup' %}">
-                <input aria-label="Localisation"
-                       class="px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-yellow"
-                       placeholder="Quartier / Ville (ex: Cocody)"/>
-                <select aria-label="Catégorie"
-                        class="px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-yellow">
-                    <option>Choisir un service</option>
-                    <option>Servante</option>
-                    <option>Cuisinier</option>
-                    <option>Nounou</option>
-                    <option>Chauffeur</option>
-                    <option>Jardinier</option>
-                </select>
-                <button class="px-6 py-3 rounded-xl bg-primary text-white hover:bg-primaryDark shadow-soft"><i
-                        class="fa-solid fa-magnifying-glass me-2"></i> Rechercher
-                </button>
-            </form>
+    <form class="searchbar" method="get" action="{% url 'service_search' %}" role="search">
+      <input type="text" name="q" placeholder="De quel service avez-vous besoin&nbsp;?" aria-label="Rechercher un service">
+      <button class="btn btn-primary" type="submit">Rechercher</button>
+    </form>
 
-            <!-- Badges de confiance -->
-            <div class="mt-6 flex flex-wrap gap-4 text-sm">
-                <span class="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-white border border-slate-100 shadow-soft"><i
-                        class="fa-solid fa-id-card-clip text-primary"></i> Identités vérifiées</span>
-                <span class="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-white border border-slate-100 shadow-soft"><i
-                        class="fa-solid fa-user-shield text-primary"></i> Assurance basique incluse</span>
-                <span class="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-white border border-slate-100 shadow-soft"><i
-                        class="fa-solid fa-sparkles text-yellow"></i> 4.8/5 satisfaction</span>
-            </div>
-        </div>
-
-        <!-- Collage d'images -->
-        <div class="relative">
-            <div class="grid grid-cols-2 gap-4">
-                <img loading="lazy" class="rounded-2xl shadow-strong w-full h-56 object-cover"
-                     src="https://images.unsplash.com/photo-1585320806297-9794b3e4eeae?q=80&w=900&auto=format&fit=crop"
-                     alt="Nettoyage à domicile"/>
-                <img loading="lazy" class="rounded-2xl shadow-strong w-full h-56 object-cover mt-8"
-                     src="https://images.unsplash.com/photo-1606787366850-de6330128bfc?q=80&w=900&auto=format&fit=crop"
-                     alt="Cuisinier préparant un repas"/>
-                <img loading="lazy" class="rounded-2xl shadow-strong w-full h-56 object-cover"
-                     src="https://images.unsplash.com/photo-1594824476967-48c8b964273f?q=80&w=900&auto=format&fit=crop"
-                     alt="Nounou jouant avec un enfant"/>
-                <img loading="lazy" class="rounded-2xl shadow-strong w-full h-56 object-cover mt-8"
-                     src="https://images.unsplash.com/photo-1558981806-ec527fa84c39?q=80&w=900&auto=format&fit=crop"
-                     alt="Chauffeur professionnel"/>
-            </div>
-            <div class="absolute -bottom-6 -left-6 bg-white rounded-2xl shadow-strong p-4 flex items-center gap-3">
-                <span class="w-10 h-10 rounded-xl bg-yellow/20 grid place-items-center text-yellow"><i
-                        class="fa-solid fa-people-group"></i></span>
-                <div>
-                    <p class="text-sm font-semibold text-ink">5K+ familles</p>
-                    <p class="text-xs text-ash">nous font confiance</p>
-                </div>
-            </div>
-        </div>
+    <div class="hero-cta">
+      <a href="{% url 'service_search' %}" class="btn btn-light">Explorer les services</a>
+      <a href="{% url 'handyman_signup' %}" class="btn btn-light">Je suis artisan</a>
     </div>
+
+    <div class="stats">
+      <div class="s"><div class="n">{{ stats.artisans|default:"0" }}+</div><div class="l">Artisans vérifiés</div></div>
+      <div class="s"><div class="n">{{ stats.services|default:"0" }}</div><div class="l">Services disponibles</div></div>
+      <div class="s"><div class="n">{{ stats.categories|default:"0" }}</div><div class="l">Catégories de métiers</div></div>
+    </div>
+  </div>
+  <svg class="hero-wave" viewBox="0 0 1440 80" preserveAspectRatio="none" aria-hidden="true">
+    <path fill="#ffffff" d="M0,40 C360,90 1080,-10 1440,40 L1440,80 L0,80 Z"></path>
+  </svg>
+</div>
+
+<!-- CATEGORIES -->
+<section id="categories">
+  <div class="wrap">
+    <div class="sec-head">
+      <div>
+        <div class="eyebrow">Catégories</div>
+        <h2 class="sec">Quel métier recherchez-vous&nbsp;?</h2>
+        <p class="lead">Des professionnels qualifiés pour chaque besoin du quotidien.</p>
+      </div>
+      <a href="{% url 'service_search' %}" class="btn btn-ghost">Tout voir</a>
+    </div>
+    {% if categories %}
+    <div class="cats">
+      {% for c in categories %}
+      <a class="cat" href="{% url 'service_search' %}?category={{ c.id }}">
+        <span class="ic">{% if c.icon %}{{ c.icon }}{% else %}{{ c.name|slice:":1"|upper }}{% endif %}</span>
+        <span class="nm">{{ c.name }}</span>
+        {% if c.description %}<span class="ds">{{ c.description|truncatechars:48 }}</span>{% endif %}
+      </a>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty">Les catégories seront bientôt disponibles.</div>
+    {% endif %}
+  </div>
 </section>
 
-<!-- ====== Catégories rapides ====== -->
-<section class="py-10 bg-white">
-    <div class="container mx-auto px-4">
-        <ul class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
-            <li><a href="#services"
-                   class="group block p-4 rounded-xl border border-slate-200 bg-white hover:shadow-soft">
-                <i class="fa-solid fa-broom text-primary text-xl"></i>
-                <p class="mt-2 font-semibold">Servantes</p>
-                <span class="text-xs text-ash">Nettoyage, linge</span>
-            </a></li>
-            <li><a href="#services"
-                   class="group block p-4 rounded-xl border border-slate-200 bg-white hover:shadow-soft">
-                <i class="fa-solid fa-utensils text-primary text-xl"></i>
-                <p class="mt-2 font-semibold">Cuisiniers</p>
-                <span class="text-xs text-ash">Repas, buffets</span>
-            </a></li>
-            <li><a href="#services"
-                   class="group block p-4 rounded-xl border border-slate-200 bg-white hover:shadow-soft">
-                <i class="fa-solid fa-baby text-primary text-xl"></i>
-                <p class="mt-2 font-semibold">Nounous</p>
-                <span class="text-xs text-ash">Enfants, devoirs</span>
-            </a></li>
-            <li><a href="#services"
-                   class="group block p-4 rounded-xl border border-slate-200 bg-white hover:shadow-soft">
-                <i class="fa-solid fa-car-side text-primary text-xl"></i>
-                <p class="mt-2 font-semibold">Chauffeurs</p>
-                <span class="text-xs text-ash">Transports, aéro.</span>
-            </a></li>
-            <li><a href="#services"
-                   class="group block p-4 rounded-xl border border-slate-200 bg-white hover:shadow-soft">
-                <i class="fa-solid fa-leaf text-primary text-xl"></i>
-                <p class="mt-2 font-semibold">Jardiniers</p>
-                <span class="text-xs text-ash">Espaces verts</span>
-            </a></li>
-            <li><a href="#services"
-                   class="group block p-4 rounded-xl border border-slate-200 bg-white hover:shadow-soft">
-                <i class="fa-solid fa-shield-halved text-primary text-xl"></i>
-                <p class="mt-2 font-semibold">Gardiens</p>
-                <span class="text-xs text-ash">Sécurité maison</span>
-            </a></li>
-        </ul>
+<!-- FEATURED SERVICES -->
+<section class="soft" id="services">
+  <div class="wrap">
+    <div class="sec-head">
+      <div>
+        <div class="eyebrow">À la une</div>
+        <h2 class="sec">Services les mieux notés</h2>
+        <p class="lead">Sélectionnés selon la satisfaction client et l'expérience des artisans.</p>
+      </div>
+      <a href="{% url 'service_search' %}" class="btn btn-ghost">Voir tous les services</a>
     </div>
+    {% if featured_services %}
+    <div class="grid3">
+      {% for s in featured_services %}
+      <a class="card" href="{% url 'service_detail' s.id %}">
+        {% if s.banner %}
+          <div class="ph" style="background-image:url('{{ s.banner.url }}');background-size:cover;background-position:center"></div>
+        {% else %}
+          <div class="ph" style="background:linear-gradient(135deg,#0a6e3a,#16c768)">{{ s.category.name|slice:":1"|upper }}</div>
+        {% endif %}
+        <div class="bd">
+          {% if s.category %}<span class="chip">{{ s.category.name }}</span>{% endif %}
+          <h3>{{ s.title }}</h3>
+          <span class="by">par {{ s.handyman.get_full_name|default:s.handyman.username }}</span>
+          <div class="ft">
+            <span class="price">
+              {% if s.price %}{{ s.price|floatformat:0 }} FCFA{% else %}Sur devis{% endif %}
+            </span>
+            {% with r=s.handyman.handyman_profile.rating %}
+              {% if r %}<span class="rate">★ {{ r|floatformat:1 }}</span>{% endif %}
+            {% endwith %}
+          </div>
+        </div>
+      </a>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty">Aucun service publié pour le moment — revenez bientôt&nbsp;!</div>
+    {% endif %}
+  </div>
 </section>
 
-<!-- ====== Services (avec filtres) ====== -->
-<section id="services" class="py-20 bg-gradient-to-b from-white to-yellowSoft">
-    <div class="container mx-auto px-4">
-        <div class="text-center max-w-2xl mx-auto">
-            <h2 class="font-montserrat text-3xl md:text-4xl font-extrabold">Nos services domestiques</h2>
-            <p class="mt-3 text-ash">Des professionnels qualifiés sélectionnés pour vous, partout en Côte d'Ivoire.</p>
-        </div>
-
-        <!-- Filtres -->
-        <div class="mt-8 flex flex-wrap items-center justify-center gap-3">
-            <button data-filter="all"
-                    class="filter-btn px-4 py-2 rounded-full bg-white border border-slate-200 hover:bg-yellow/10">Tous
-            </button>
-            <button data-filter="servante" class="filter-btn px-4 py-2 rounded-full bg-white border border-slate-200">
-                Servantes
-            </button>
-            <button data-filter="cuisine" class="filter-btn px-4 py-2 rounded-full bg-white border border-slate-200">
-                Cuisine
-            </button>
-            <button data-filter="enfant" class="filter-btn px-4 py-2 rounded-full bg-white border border-slate-200">
-                Enfants
-            </button>
-            <button data-filter="chauffeur" class="filter-btn px-4 py-2 rounded-full bg-white border border-slate-200">
-                Chauffeurs
-            </button>
-            <button data-filter="jardin" class="filter-btn px-4 py-2 rounded-full bg-white border border-slate-200">
-                Jardin
-            </button>
-        </div>
-
-        <!-- Cartes -->
-        <div class="mt-10 grid sm:grid-cols-2 lg:grid-cols-3 gap-6" id="servicesGrid">
-            <!-- Carte -->
-            <article class="service-card" data-cat="servante">
-                <div class="h-48 overflow-hidden rounded-t-2xl">
-                    <img loading="lazy" class="w-full h-full object-cover"
-                         src="https://images.unsplash.com/photo-1585320806297-9794b3e4eeae?q=80&w=1200&auto=format&fit=crop"
-                         alt="Servante en nettoyage"/>
-                </div>
-                <div class="p-6 rounded-b-2xl bg-white border border-slate-100 shadow-soft">
-                    <div class="flex items-center justify-between">
-                        <h3 class="text-xl font-semibold">Servantes / Hommes à tout faire</h3>
-                        <span class="px-2 py-1 text-xs rounded bg-yellow/20 text-ink font-semibold">Populaire</span>
-                    </div>
-                    <p class="mt-2 text-ash">Entretien, linge, repassage et tâches ménagères du quotidien.</p>
-                    <div class="mt-4 flex items-center justify-between">
-                        <span class="font-bold text-primary">30.000 FCFA/mois</span>
-                        <a href="#" class="inline-flex items-center gap-2 text-primary hover:underline">Détails <i
-                                class="fa-solid fa-arrow-right-long"></i></a>
-                    </div>
-                </div>
-            </article>
-
-            <article class="service-card" data-cat="cuisine">
-                <div class="h-48 overflow-hidden rounded-t-2xl">
-                    <img loading="lazy" class="w-full h-full object-cover"
-                         src="https://images.unsplash.com/photo-1606787366850-de6330128bfc?q=80&w=1200&auto=format&fit=crop"
-                         alt="Chef cuisinier"/>
-                </div>
-                <div class="p-6 rounded-b-2xl bg-white border border-slate-100 shadow-soft">
-                    <div class="flex items-center justify-between">
-                        <h3 class="text-xl font-semibold">Cuisiniers</h3>
-                        <span class="px-2 py-1 text-xs rounded bg-primary/10 text-primary font-semibold">5★</span>
-                    </div>
-                    <p class="mt-2 text-ash">Plats ivoiriens & internationaux. Service à domicile & événements.</p>
-                    <div class="mt-4 flex items-center justify-between">
-                        <span class="font-bold text-primary">50.000 FCFA/mois</span>
-                        <a href="#" class="inline-flex items-center gap-2 text-primary hover:underline">Détails <i
-                                class="fa-solid fa-arrow-right-long"></i></a>
-                    </div>
-                </div>
-            </article>
-
-            <article class="service-card" data-cat="enfant">
-                <div class="h-48 overflow-hidden rounded-t-2xl">
-                    <img loading="lazy" class="w-full h-full object-cover"
-                         src="https://images.unsplash.com/photo-1594824476967-48c8b964273f?q=80&w=1200&auto=format&fit=crop"
-                         alt="Nounou et enfant"/>
-                </div>
-                <div class="p-6 rounded-b-2xl bg-white border border-slate-100 shadow-soft">
-                    <div class="flex items-center justify-between">
-                        <h3 class="text-xl font-semibold">Nounous / Garde d'enfants</h3>
-                        <span class="px-2 py-1 text-xs rounded bg-yellow/20 text-ink font-semibold">Disponible</span>
-                    </div>
-                    <p class="mt-2 text-ash">Garde, éveil, aide aux devoirs, premiers soins formés.</p>
-                    <div class="mt-4 flex items-center justify-between">
-                        <span class="font-bold text-primary">40.000 FCFA/mois</span>
-                        <a href="#" class="inline-flex items-center gap-2 text-primary hover:underline">Détails <i
-                                class="fa-solid fa-arrow-right-long"></i></a>
-                    </div>
-                </div>
-            </article>
-
-            <article class="service-card" data-cat="chauffeur">
-                <div class="h-48 overflow-hidden rounded-t-2xl">
-                    <img loading="lazy" class="w-full h-full object-cover"
-                         src="https://images.unsplash.com/photo-1558981806-ec527fa84c39?q=80&w=1200&auto=format&fit=crop"
-                         alt="Chauffeur"/>
-                </div>
-                <div class="p-6 rounded-b-2xl bg-white border border-slate-100 shadow-soft">
-                    <div class="flex items-center justify-between">
-                        <h3 class="text-xl font-semibold">Chauffeurs</h3>
-                        <span class="px-2 py-1 text-xs rounded bg-primary/10 text-primary font-semibold">Exp. 10 ans</span>
-                    </div>
-                    <p class="mt-2 text-ash">Transports quotidiens, événements, transferts aéroport.</p>
-                    <div class="mt-4 flex items-center justify-between">
-                        <span class="font-bold text-primary">60.000 FCFA/mois</span>
-                        <a href="#" class="inline-flex items-center gap-2 text-primary hover:underline">Détails <i
-                                class="fa-solid fa-arrow-right-long"></i></a>
-                    </div>
-                </div>
-            </article>
-
-            <article class="service-card" data-cat="jardin">
-                <div class="h-48 overflow-hidden rounded-t-2xl">
-                    <img loading="lazy" class="w-full h-full object-cover"
-                         src="https://images.unsplash.com/photo-1606744837616-56c9a5c6a6eb?q=80&w=1200&auto=format&fit=crop"
-                         alt="Jardinier"/>
-                </div>
-                <div class="p-6 rounded-b-2xl bg-white border border-slate-100 shadow-soft">
-                    <div class="flex items-center justify-between">
-                        <h3 class="text-xl font-semibold">Jardiniers</h3>
-                        <span class="px-2 py-1 text-xs rounded bg-yellow/20 text-ink font-semibold">Éco</span>
-                    </div>
-                    <p class="mt-2 text-ash">Tonte, taille, aménagement paysager et entretien saisonnier.</p>
-                    <div class="mt-4 flex items-center justify-between">
-                        <span class="font-bold text-primary">25.000 FCFA/mois</span>
-                        <a href="#" class="inline-flex items-center gap-2 text-primary hover:underline">Détails <i
-                                class="fa-solid fa-arrow-right-long"></i></a>
-                    </div>
-                </div>
-            </article>
-
-            <article class="service-card" data-cat="gardien">
-                <div class="h-48 overflow-hidden rounded-t-2xl">
-                    <img loading="lazy" class="w-full h-full object-cover"
-                         src="https://images.unsplash.com/photo-1556740738-b6a63e27c4df?q=80&w=1200&auto=format&fit=crop"
-                         alt="Gardiennage"/>
-                </div>
-                <div class="p-6 rounded-b-2xl bg-white border border-slate-100 shadow-soft">
-                    <div class="flex items-center justify-between">
-                        <h3 class="text-xl font-semibold">Gardiens de maison</h3>
-                        <span class="px-2 py-1 text-xs rounded bg-primary/10 text-primary font-semibold">24/7</span>
-                    </div>
-                    <p class="mt-2 text-ash">Surveillance, rondes, contrôle d'accès pendant vos absences.</p>
-                    <div class="mt-4 flex items-center justify-between">
-                        <span class="font-bold text-primary">35.000 FCFA/mois</span>
-                        <a href="#" class="inline-flex items-center gap-2 text-primary hover:underline">Détails <i
-                                class="fa-solid fa-arrow-right-long"></i></a>
-                    </div>
-                </div>
-            </article>
-        </div>
-
-        <div class="mt-10 text-center">
-            {% if not request.user.is_authenticated %}
-                <a href="{% url 'employer_signup' %}"
-                   class="px-6 py-3 rounded-xl bg-primary text-white hover:bg-primaryDark shadow-soft">Voir tous les
-                    services</a>
-            {% else %}
-                <a href="{% url 'handydash' %}"
-                   class="px-6 py-3 rounded-xl bg-primary text-white hover:bg-primaryDark shadow-soft">Gérer mes
-                    services</a>
-            {% endif %}
-        </div>
+<!-- HOW IT WORKS -->
+<section id="how">
+  <div class="wrap">
+    <div class="sec-head"><div>
+      <div class="eyebrow">Simple &amp; rapide</div>
+      <h2 class="sec">Comment ça marche</h2>
+    </div></div>
+    <div class="steps">
+      <div class="step"><div class="num">1</div><h3>Décrivez votre besoin</h3>
+        <p>Choisissez une catégorie, indiquez votre adresse et la date souhaitée — ou demandez une intervention immédiate.</p></div>
+      <div class="step"><div class="num">2</div><h3>Choisissez votre artisan</h3>
+        <p>Comparez les profils vérifiés, les notes et les tarifs. Réservez en quelques clics.</p></div>
+      <div class="step"><div class="num">3</div><h3>Réglez en toute sécurité</h3>
+        <p>Votre paiement est conservé sous séquestre et libéré à l'artisan une fois la mission terminée.</p></div>
     </div>
+  </div>
 </section>
 
-<!-- ====== Vedettes (Swiper) ====== -->
-<section id="vedettes" class="py-20 bg-white">
-    <div class="container mx-auto px-4">
-        <div class="text-center max-w-2xl mx-auto">
-            <h2 class="font-montserrat text-3xl md:text-4xl font-extrabold">Artisans en vedette</h2>
-            <p class="mt-3 text-ash">Sélection hebdomadaire des profils les mieux notés et disponibles rapidement.</p>
-        </div>
-
-        <div class="mt-10 swiper" id="starsSwiper">
-            <div class="swiper-wrapper">
-                <!-- Slide -->
-                <div class="swiper-slide">
-                    <div class="rounded-2xl border border-slate-100 shadow-soft overflow-hidden grid md:grid-cols-2">
-                        <div class="p-6">
-                            <div class="flex items-center gap-4">
-                                <img class="w-16 h-16 rounded-full object-cover border-4 border-white shadow-soft"
-                                     src="https://images.unsplash.com/photo-1560250097-0b93528c311a?q=80&w=300&auto=format&fit=crop"
-                                     alt="Chef Amadou"/>
-                                <div>
-                                    <h3 class="text-xl font-semibold">Chef Amadou</h3>
-                                    <p class="text-ash">Cuisinier professionnel</p>
-                                    <p class="text-yellow"><i class="fa-solid fa-star"></i> 5.0 (42 avis)</p>
-                                </div>
-                            </div>
-                            <ul class="mt-4 grid grid-cols-2 gap-2 text-sm">
-                                <li class="flex items-center gap-2"><i class="fa-solid fa-check text-primary"></i>
-                                    Cuisine ivoirienne
-                                </li>
-                                <li class="flex items-center gap-2"><i class="fa-solid fa-check text-primary"></i>
-                                    Pâtisserie
-                                </li>
-                                <li class="flex items-center gap-2"><i class="fa-solid fa-check text-primary"></i>
-                                    Événementiel
-                                </li>
-                                <li class="flex items-center gap-2"><i class="fa-solid fa-check text-primary"></i> Menu
-                                    santé
-                                </li>
-                            </ul>
-                            <div class="mt-6 flex items-center justify-between bg-yellowSoft rounded-xl p-4">
-                                <div>
-                                    <p class="text-sm line-through text-ash">50.000 FCFA/mois</p>
-                                    <p class="text-2xl font-extrabold text-primary">40.000 FCFA/mois</p>
-                                </div>
-                                <a href="#" class="px-4 py-3 rounded-xl bg-primary text-white hover:bg-primaryDark">Réserver</a>
-                            </div>
-                        </div>
-                        <div class="min-h-72 bg-cover bg-center"
-                             style="background-image:url('https://images.unsplash.com/photo-1606787366850-de6330128bfc?q=80&w=1200&auto=format&fit=crop')"></div>
-                    </div>
-                </div>
-
-                <div class="swiper-slide">
-                    <div class="rounded-2xl border border-slate-100 shadow-soft overflow-hidden grid md:grid-cols-2">
-                        <div class="p-6">
-                            <div class="flex items-center gap-4">
-                                <img class="w-16 h-16 rounded-full object-cover border-4 border-white shadow-soft"
-                                     src="https://images.unsplash.com/photo-1595152772835-219674b2a8a6?q=80&w=300&auto=format&fit=crop"
-                                     alt="Aïcha Koné"/>
-                                <div>
-                                    <h3 class="text-xl font-semibold">Aïcha Koné</h3>
-                                    <p class="text-ash">Nounou expérimentée</p>
-                                    <p class="text-yellow"><i class="fa-solid fa-star"></i> 4.8 (37 avis)</p>
-                                </div>
-                            </div>
-                            <ul class="mt-4 grid grid-cols-2 gap-2 text-sm">
-                                <li class="flex items-center gap-2"><i class="fa-solid fa-check text-primary"></i> Aide
-                                    aux devoirs
-                                </li>
-                                <li class="flex items-center gap-2"><i class="fa-solid fa-check text-primary"></i>
-                                    Premiers soins
-                                </li>
-                                <li class="flex items-center gap-2"><i class="fa-solid fa-check text-primary"></i> Éveil
-                                    éducatif
-                                </li>
-                                <li class="flex items-center gap-2"><i class="fa-solid fa-check text-primary"></i> Réfs
-                                    vérifiées
-                                </li>
-                            </ul>
-                            <div class="mt-6 flex items-center justify-between bg-yellowSoft rounded-xl p-4">
-                                <div>
-                                    <p class="text-sm text-ash">Tarif standard</p>
-                                    <p class="text-2xl font-extrabold text-primary">35.000 FCFA/mois</p>
-                                </div>
-                                <a href="#" class="px-4 py-3 rounded-xl bg-primary text-white hover:bg-primaryDark">Réserver</a>
-                            </div>
-                        </div>
-                        <div class="min-h-72 bg-cover bg-center"
-                             style="background-image:url('https://images.unsplash.com/photo-1594824476967-48c8b964273f?q=80&w=1200&auto=format&fit=crop')"></div>
-                    </div>
-                </div>
-
-                <div class="swiper-slide">
-                    <div class="rounded-2xl border border-slate-100 shadow-soft overflow-hidden grid md:grid-cols-2">
-                        <div class="p-6">
-                            <div class="flex items-center gap-4">
-                                <img class="w-16 h-16 rounded-full object-cover border-4 border-white shadow-soft"
-                                     src="https://images.unsplash.com/photo-1558981806-ec527fa84c39?q=80&w=300&auto=format&fit=crop"
-                                     alt="Jean Kouadio"/>
-                                <div>
-                                    <h3 class="text-xl font-semibold">Jean Kouadio</h3>
-                                    <p class="text-ash">Chauffeur pro</p>
-                                    <p class="text-yellow"><i class="fa-solid fa-star"></i> 5.0 (28 avis)</p>
-                                </div>
-                            </div>
-                            <ul class="mt-4 grid grid-cols-2 gap-2 text-sm">
-                                <li class="flex items-center gap-2"><i class="fa-solid fa-check text-primary"></i>
-                                    Défensive
-                                </li>
-                                <li class="flex items-center gap-2"><i class="fa-solid fa-check text-primary"></i>
-                                    Aéroport
-                                </li>
-                                <li class="flex items-center gap-2"><i class="fa-solid fa-check text-primary"></i>
-                                    Direction
-                                </li>
-                                <li class="flex items-center gap-2"><i class="fa-solid fa-check text-primary"></i> Temps
-                                    plein
-                                </li>
-                            </ul>
-                            <div class="mt-6 flex items-center justify-between bg-yellowSoft rounded-xl p-4">
-                                <div>
-                                    <p class="text-sm line-through text-ash">60.000 FCFA/mois</p>
-                                    <p class="text-2xl font-extrabold text-primary">55.000 FCFA/mois</p>
-                                </div>
-                                <a href="#" class="px-4 py-3 rounded-xl bg-primary text-white hover:bg-primaryDark">Réserver</a>
-                            </div>
-                        </div>
-                        <div class="min-h-72 bg-cover bg-center"
-                             style="background-image:url('https://images.unsplash.com/photo-1585320806297-9794b3e4eeae?q=80&w=1200&auto=format&fit=crop')"></div>
-                    </div>
-                </div>
-            </div>
-
-            <div class="mt-6 flex items-center justify-center gap-4">
-                <button class="starsPrev w-10 h-10 rounded-full bg-white border border-slate-200 grid place-items-center hover:bg-yellow/10"
-                        aria-label="Précédent"><i class="fa-solid fa-chevron-left"></i></button>
-                <button class="starsNext w-10 h-10 rounded-full bg-white border border-slate-200 grid place-items-center hover:bg-yellow/10"
-                        aria-label="Suivant"><i class="fa-solid fa-chevron-right"></i></button>
-            </div>
-        </div>
+<!-- TRUST -->
+<section class="soft" id="trust">
+  <div class="wrap">
+    <div class="sec-head"><div>
+      <div class="eyebrow">Confiance</div>
+      <h2 class="sec">Pourquoi choisir Tratra</h2>
+      <p class="lead">Une plateforme pensée pour la sécurité des clients et des artisans.</p>
+    </div></div>
+    <div class="feats">
+      <div class="feat"><div class="ic">🛡️</div><h4>Paiement sous séquestre</h4>
+        <p>Les fonds ne sont versés qu'une fois la prestation validée.</p></div>
+      <div class="feat"><div class="ic">✅</div><h4>Artisans vérifiés (KYC)</h4>
+        <p>Pièces justificatives contrôlées avant toute mise en ligne.</p></div>
+      <div class="feat"><div class="ic">📍</div><h4>Suivi en temps réel</h4>
+        <p>Localisez votre artisan et suivez l'avancement de la mission.</p></div>
+      <div class="feat"><div class="ic">⚖️</div><h4>Litiges &amp; remboursements</h4>
+        <p>Une médiation et un remboursement encadrés en cas de problème.</p></div>
     </div>
+  </div>
 </section>
 
-<!-- ====== Process ====== -->
-<section id="process" class="py-20 bg-primarySoft">
-    <div class="container mx-auto px-4">
-        <div class="text-center max-w-2xl mx-auto">
-            <h2 class="font-montserrat text-3xl md:text-4xl font-extrabold">Comment ça marche</h2>
-            <p class="mt-3 text-ash">Trois étapes simples pour recruter l'artisan idéal.</p>
-        </div>
-
-        <ol class="mt-10 grid md:grid-cols-3 gap-6">
-            <li class="bg-white rounded-2xl p-6 shadow-soft border border-slate-100">
-                <div class="w-12 h-12 rounded-xl bg-yellow/20 grid place-items-center text-yellow text-xl"><i
-                        class="fa-solid fa-bullseye"></i></div>
-                <h3 class="mt-4 text-xl font-semibold">1. Définissez vos besoins</h3>
-                <p class="text-ash mt-1">Annonce claire : horaires, tâches, localisation et préférences.</p>
-            </li>
-            <li class="bg-white rounded-2xl p-6 shadow-soft border border-slate-100">
-                <div class="w-12 h-12 rounded-xl bg-yellow/20 grid place-items-center text-yellow text-xl"><i
-                        class="fa-solid fa-user-check"></i></div>
-                <h3 class="mt-4 text-xl font-semibold">2. Comparez les profils</h3>
-                <p class="text-ash mt-1">Candidatures, notes, références et disponibilités en temps réel.</p>
-            </li>
-            <li class="bg-white rounded-2xl p-6 shadow-soft border border-slate-100">
-                <div class="w-12 h-12 rounded-xl bg-yellow/20 grid place-items-center text-yellow text-xl"><i
-                        class="fa-solid fa-handshake"></i></div>
-                <h3 class="mt-4 text-xl font-semibold">3. Réservez en confiance</h3>
-                <p class="text-ash mt-1">Contrat, paiement sécurisé et accompagnement après-vente.</p>
-            </li>
-        </ol>
-
-        <div class="text-center mt-10">
-            <a href="{% url 'employer_signup' %}"
-               class="px-6 py-3 rounded-xl bg-primary text-white hover:bg-primaryDark shadow-soft"><i
-                    class="fa-solid fa-play me-2"></i> Voir la démo</a>
-        </div>
+<!-- PRO CTA -->
+<section id="pro">
+  <div class="wrap">
+    <div class="band">
+      <div>
+        <h2>Vous êtes artisan&nbsp;?</h2>
+        <p>Développez votre activité, recevez des missions près de chez vous et soyez payé en toute sécurité. Inscription gratuite.</p>
+      </div>
+      <a href="{% url 'handyman_signup' %}" class="btn btn-light" style="font-size:16px;padding:14px 28px">Devenir artisan partenaire</a>
     </div>
+  </div>
 </section>
 
-<!-- ====== Témoignages ====== -->
-<section id="temoignages" class="py-20 bg-white">
-    <div class="container mx-auto px-4">
-        <div class="text-center max-w-xl mx-auto">
-            <h2 class="font-montserrat text-3xl md:text-4xl font-extrabold">Ils nous font confiance</h2>
-            <p class="mt-3 text-ash">Des retours authentiques de familles et d'artisans.</p>
-        </div>
-
-        <div class="mt-10 grid lg:grid-cols-3 gap-6">
-            <figure class="rounded-2xl border border-slate-100 shadow-soft p-6">
-                <blockquote class="text-ash italic">“Tratra a changé notre quotidien. Marie est ponctuelle,
-                    professionnelle et adorable.”
-                </blockquote>
-                <figcaption class="mt-4 flex items-center gap-3">
-                    <img class="w-12 h-12 rounded-full object-cover border"
-                         src="https://images.unsplash.com/photo-1595152772835-219674b2a8a6?q=80&w=200&auto=format&fit=crop"
-                         alt="Fatoumata Diarra"/>
-                    <div>
-                        <p class="font-semibold">Fatoumata Diarra</p>
-                        <p class="text-xs text-ash">Cocody, Abidjan</p>
-                    </div>
-                </figcaption>
-            </figure>
-            <figure class="rounded-2xl border border-slate-100 shadow-soft p-6">
-                <blockquote class="text-ash italic">“Après plusieurs essais, Aïcha est la nounou parfaite. Processus
-                    clair et rapide.”
-                </blockquote>
-                <figcaption class="mt-4 flex items-center gap-3">
-                    <img class="w-12 h-12 rounded-full object-cover border"
-                         src="https://images.unsplash.com/photo-1508214751196-bcfd4ca60f91?q=80&w=200&auto=format&fit=crop"
-                         alt="Jean Kouassi"/>
-                    <div>
-                        <p class="font-semibold">Jean Kouassi</p>
-                        <p class="text-xs text-ash">Bouaké</p>
-                    </div>
-                </figcaption>
-            </figure>
-            <figure class="rounded-2xl border border-slate-100 shadow-soft p-6">
-                <blockquote class="text-ash italic">“La plateforme m'a apporté des missions régulières et des clients
-                    sérieux.”
-                </blockquote>
-                <figcaption class="mt-4 flex items-center gap-3">
-                    <img class="w-12 h-12 rounded-full object-cover border"
-                         src="https://images.unsplash.com/photo-1560250097-0b93528c311a?q=80&w=200&auto=format&fit=crop"
-                         alt="Mohamed Traoré"/>
-                    <div>
-                        <p class="font-semibold">Mohamed Traoré</p>
-                        <p class="text-xs text-ash">Cuisinier</p>
-                    </div>
-                </figcaption>
-            </figure>
-        </div>
-
-        <div class="text-center mt-10">
-            <a href="#" class="px-6 py-3 rounded-xl border border-slate-200 hover:bg-slate-50">Lire tous les
-                témoignages</a>
-        </div>
+<footer>
+  <div class="wrap">
+    <div class="cols">
+      <div style="max-width:280px">
+        <a href="{% url 'landing' %}" class="logo" style="color:#fff;margin-bottom:10px"><span class="mark">T</span> Tratra</a>
+        <p style="color:#a9b8af;margin:0">La marketplace de confiance pour vos services à domicile.</p>
+      </div>
+      <div>
+        <h5>Services</h5>
+        {% for c in categories|slice:":4" %}
+          <a href="{% url 'service_search' %}?category={{ c.id }}">{{ c.name }}</a>
+        {% empty %}
+          <a href="{% url 'service_search' %}">Tous les services</a>
+        {% endfor %}
+      </div>
+      <div>
+        <h5>Compte</h5>
+        <a href="{% url 'account_login' %}">Se connecter</a>
+        <a href="{% url 'employer_signup' %}">Créer un compte client</a>
+        <a href="{% url 'handyman_signup' %}">Devenir artisan</a>
+      </div>
+      <div>
+        <h5>Plateforme</h5>
+        <a href="#trust">Sécurité &amp; séquestre</a>
+        <a href="#how">Comment ça marche</a>
+        <a href="#categories">Catégories</a>
+      </div>
     </div>
-</section>
-
-<!-- ====== FAQ ====== -->
-<section id="faq" class="py-20 bg-yellowSoft">
-    <div class="container mx-auto px-4">
-        <div class="text-center max-w-xl mx-auto">
-            <h2 class="font-montserrat text-3xl md:text-4xl font-extrabold">Questions fréquentes</h2>
-            <p class="mt-3 text-ash">Tout ce qu'il faut savoir pour démarrer en confiance.</p>
-        </div>
-
-        <div class="mt-10 max-w-2xl mx-auto bg-white rounded-2xl border border-slate-100 shadow-soft divide-y">
-            <details class="group p-6" open>
-                <summary class="flex items-center justify-between cursor-pointer list-none">
-                    <span class="font-semibold text-ink">Comment contacter un artisan ?</span>
-                    <i class="fa-solid fa-chevron-down text-ash transition group-open:rotate-180"></i>
-                </summary>
-                <p class="mt-3 text-ash">Inscrivez-vous, puis envoyez un message depuis le profil de l'artisan ou
-                    planifiez un entretien vidéo. La réservation est ensuite possible selon ses disponibilités.</p>
-            </details>
-            <details class="group p-6">
-                <summary class="flex items-center justify-between cursor-pointer list-none">
-                    <span class="font-semibold text-ink">Quelles garanties de sécurité ?</span>
-                    <i class="fa-solid fa-chevron-down text-ash transition group-open:rotate-180"></i>
-                </summary>
-                <p class="mt-3 text-ash">Vérification d'identité, entretien individuel et références. Notation
-                    communautaire et assistance dédiée en cas de souci.</p>
-            </details>
-            <details class="group p-6">
-                <summary class="flex items-center justify-between cursor-pointer list-none">
-                    <span class="font-semibold text-ink">Comment se passe le paiement ?</span>
-                    <i class="fa-solid fa-chevron-down text-ash transition group-open:rotate-180"></i>
-                </summary>
-                <p class="mt-3 text-ash">Mobile money, carte bancaire ou virement. Le versement à l'artisan intervient
-                    après confirmation du service.</p>
-            </details>
-            <details class="group p-6">
-                <summary class="flex items-center justify-between cursor-pointer list-none">
-                    <span class="font-semibold text-ink">Puis-je changer d'artisan ?</span>
-                    <i class="fa-solid fa-chevron-down text-ash transition group-open:rotate-180"></i>
-                </summary>
-                <p class="mt-3 text-ash">Oui. Garantie de remplacement sous 7 jours sans frais si le service ne
-                    correspond pas.</p>
-            </details>
-        </div>
-
-        <div class="text-center mt-10">
-            <a href="#" class="px-6 py-3 rounded-xl bg-primary text-white hover:bg-primaryDark shadow-soft"><i
-                    class="fa-solid fa-headset me-2"></i> Contacter le support</a>
-        </div>
-    </div>
-</section>
-
-<!-- ====== CTA ====== -->
-<section class="relative overflow-hidden py-20 bg-gradient-to-r from-primary to-primaryDark">
-    <div aria-hidden
-         class="absolute -right-24 -bottom-24 w-[420px] h-[420px] bg-yellow/30 rounded-full blur-3xl animate-floaty"></div>
-    <div class="container mx-auto px-4 text-center text-white">
-        <h2 class="text-3xl md:text-4xl font-montserrat font-extrabold">Prêt à simplifier votre quotidien ?</h2>
-        <p class="mt-3 text-white/90">Rejoignez des milliers de familles et d'artisans satisfaits.</p>
-        <div class="mt-8 flex flex-wrap justify-center gap-3">
-            {% if not request.user.is_authenticated %}
-                <a href="{% url 'employer_signup' %}" class="px-6 py-3 rounded-xl bg-white text-ink hover:bg-slate-100">Trouver
-                    un artisan</a>
-                <a href="{% url 'handyman_signup' %}"
-                   class="px-6 py-3 rounded-xl bg-yellow text-ink font-semibold hover:brightness-95"><i
-                        class="fa-solid fa-user-plus me-2"></i>Devenir artisan</a>
-            {% else %}
-                <a href="{% url 'handydash' %}" class="px-6 py-3 rounded-xl bg-white text-ink hover:bg-slate-100"><i
-                        class="fa-solid fa-gauge-high me-2"></i> Accéder au tableau de bord</a>
-            {% endif %}
-        </div>
-    </div>
-</section>
-
-<!-- ====== Footer ====== -->
-<footer class="bg-ink text-white">
-    <div class="container mx-auto px-4 py-14 grid md:grid-cols-2 lg:grid-cols-4 gap-10">
-        <div>
-            <div class="flex items-center gap-3">
-                <span class="w-10 h-10 rounded-lg bg-yellow text-ink grid place-items-center font-extrabold">T</span>
-                <span class="font-montserrat text-xl font-extrabold"><span class="text-white">TRA</span><span
-                        class="text-yellow">TRA</span></span>
-            </div>
-            <p class="mt-4 text-sm text-white/80">Plateforme ivoirienne de mise en relation entre familles et
-                travailleurs domestiques qualifiés.</p>
-            <div class="mt-4 flex gap-3">
-                <a aria-label="Facebook"
-                   class="w-10 h-10 grid place-items-center rounded-full bg-white/10 hover:bg-white/20" href="#"><i
-                        class="fa-brands fa-facebook-f"></i></a>
-                <a aria-label="Twitter"
-                   class="w-10 h-10 grid place-items-center rounded-full bg-white/10 hover:bg-white/20" href="#"><i
-                        class="fa-brands fa-x-twitter"></i></a>
-                <a aria-label="Instagram"
-                   class="w-10 h-10 grid place-items-center rounded-full bg-white/10 hover:bg-white/20" href="#"><i
-                        class="fa-brands fa-instagram"></i></a>
-                <a aria-label="LinkedIn"
-                   class="w-10 h-10 grid place-items-center rounded-full bg-white/10 hover:bg-white/20" href="#"><i
-                        class="fa-brands fa-linkedin-in"></i></a>
-            </div>
-        </div>
-
-        <div>
-            <h3 class="font-semibold">Services</h3>
-            <ul class="mt-3 space-y-2 text-white/80">
-                <li><a href="#services" class="hover:underline">Servantes</a></li>
-                <li><a href="#services" class="hover:underline">Cuisiniers</a></li>
-                <li><a href="#services" class="hover:underline">Nounous</a></li>
-                <li><a href="#services" class="hover:underline">Chauffeurs</a></li>
-                <li><a href="#services" class="hover:underline">Jardiniers</a></li>
-            </ul>
-        </div>
-
-        <div>
-            <h3 class="font-semibold">Liens utiles</h3>
-            <ul class="mt-3 space-y-2 text-white/80">
-                <li><a href="#process" class="hover:underline">Comment ça marche</a></li>
-                <li><a href="#faq" class="hover:underline">Tarifs & paiements</a></li>
-                <li><a href="#temoignages" class="hover:underline">Avis clients</a></li>
-                <li><a href="#" class="hover:underline">Blog</a></li>
-                <li><a href="#" class="hover:underline">Contact</a></li>
-            </ul>
-        </div>
-
-        <div>
-            <h3 class="font-semibold">Contact</h3>
-            <ul class="mt-3 space-y-2 text-white/80">
-                <li><i class="fa-solid fa-location-dot text-yellow me-2"></i> Abidjan, Plateau, Côte d'Ivoire</li>
-                <li><i class="fa-solid fa-phone text-yellow me-2"></i> +225 20 30 40 50</li>
-                <li><i class="fa-solid fa-envelope text-yellow me-2"></i> contact@tratra.ci</li>
-                <li><i class="fa-solid fa-clock text-yellow me-2"></i> Lun–Ven : 8h–18h</li>
-            </ul>
-        </div>
-    </div>
-    <div class="border-t border-white/10">
-        <div class="container mx-auto px-4 py-6 text-center text-sm text-white/70">© 2025 Tratra — Tous droits
-            réservés.
-        </div>
-    </div>
+    <div class="copyr">© Tratra — Tous droits réservés.</div>
+  </div>
 </footer>
 
-<!-- Bouton Top -->
-<button id="backToTop"
-        class="fixed bottom-6 right-6 w-12 h-12 rounded-full bg-yellow text-ink shadow-strong hidden hover:translate-y-[-2px] transition"
-        aria-label="Revenir en haut">
-    <i class="fa-solid fa-arrow-up"></i>
-</button>
-
-<!-- ====== Scripts ====== -->
-<script>
-    // Header compact on scroll + bouton Top
-    const header = document.getElementById('header');
-    const backToTop = document.getElementById('backToTop');
-    window.addEventListener('scroll', () => {
-        if (window.scrollY > 12) header.classList.add('shadow'); else header.classList.remove('shadow');
-        if (window.scrollY > 400) backToTop.classList.remove('hidden'); else backToTop.classList.add('hidden');
-    });
-    backToTop.addEventListener('click', () => window.scrollTo({top: 0, behavior: 'smooth'}));
-
-    // Drawer mobile
-    const drawer = document.getElementById('drawer');
-    document.getElementById('openMenu').addEventListener('click', () => drawer.classList.remove('hidden'));
-    document.getElementById('closeMenu').addEventListener('click', () => drawer.classList.add('hidden'));
-    document.getElementById('drawerBackdrop').addEventListener('click', () => drawer.classList.add('hidden'));
-
-    // Filtres services
-    const buttons = document.querySelectorAll('.filter-btn');
-    const cards = document.querySelectorAll('.service-card');
-    buttons.forEach(btn => btn.addEventListener('click', () => {
-        buttons.forEach(b => b.classList.remove('bg-yellow/10'));
-        btn.classList.add('bg-yellow/10');
-        const cat = btn.dataset.filter;
-        cards.forEach(card => {
-            const show = cat === 'all' || card.dataset.cat === cat;
-            card.style.display = show ? 'block' : 'none';
-        });
-    }));
-
-    // Swiper vedettes
-    const starsSwiper = new Swiper('#starsSwiper', {
-        slidesPerView: 1,
-        spaceBetween: 20,
-        loop: true,
-        navigation: {nextEl: '.starsNext', prevEl: '.starsPrev'},
-        autoplay: {delay: 6000, disableOnInteraction: false},
-        breakpoints: {768: {slidesPerView: 1}, 1024: {slidesPerView: 1}}
-    });
-
-    // Respecte les préférences de mouvement
-    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)');
-    if (reduce.matches) {
-        document.querySelectorAll('[class*="animate-"]').forEach(el => el.classList.remove(...Array.from(el.classList).filter(c => c.startsWith('animate-'))));
-    }
-</script>
 </body>
 </html>

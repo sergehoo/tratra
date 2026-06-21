@@ -94,6 +94,17 @@ def test_souscription_cycle(api_client):
 
 
 @pytest.mark.django_db
+def test_landing_page_rend_200_avec_donnees_reelles(api_client):
+    ServiceCategory.objects.create(name="Plomberie", slug="plomberie", is_active=True)
+    r = api_client.get("/")
+    assert r.status_code == 200
+    body = r.content.decode("utf-8", "replace")
+    assert "Trouvez un artisan" in body          # nouveau hero
+    assert "Plomberie" in body                    # catégorie réelle injectée
+    assert "cdn.tailwindcss.com" not in body      # plus de dépendance CDN dev
+
+
+@pytest.mark.django_db
 def test_souscription_renouvellement_annule_la_precedente():
     plan = SubscriptionPlan.objects.create(name="Std", slug="std", price=Decimal("0"),
                                            interval="monthly", active=True)

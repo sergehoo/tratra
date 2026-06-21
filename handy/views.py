@@ -33,6 +33,26 @@ logger = logging.getLogger(__name__)
 class Landing(TemplateView):
     template_name = "landing/landing.html"
 
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        from handy.models import ServiceCategory, Service, HandymanProfile, HeroSlide
+        ctx['categories'] = ServiceCategory.objects.filter(is_active=True).order_by('name')[:8]
+        ctx['featured_services'] = (
+            Service.objects.filter(is_active=True)
+            .select_related('handyman', 'category', 'handyman__handyman_profile')
+            .order_by('-handyman__handyman_profile__rating', '-created_at')[:6]
+        )
+        ctx['stats'] = {
+            'artisans': HandymanProfile.objects.filter(is_approved=True).count(),
+            'services': Service.objects.filter(is_active=True).count(),
+            'categories': ServiceCategory.objects.filter(is_active=True).count(),
+        }
+        try:
+            ctx['hero_slides'] = list(HeroSlide.objects.active_now())
+        except Exception:
+            ctx['hero_slides'] = []
+        return ctx
+
 
 class HomePageView(LoginRequiredMixin, TemplateView):
     login_url = '/accounts/login/'
