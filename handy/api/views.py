@@ -33,7 +33,7 @@ from handy.models import (
     User, HandymanProfile, ServiceCategory, Service, ServiceImage, Booking,
     Payment, PaymentLog, Review, Conversation, Message, Notification,
     HandymanDocument, Report, Device, Payout, Dispute, TimeOff, ReplacementSuggestion,
-    Coupon, OTPCode, artisan_available_earnings,
+    Coupon, OTPCode, PayoutAccount, SubscriptionPlan, Subscription, artisan_available_earnings,
     # ↓ suivants : assure-toi de les avoir dans tes models (cf. reco précédentes)
     BookingRoute, JobTracking, HeroSlide,  # tracking & ETA
     # Optionnel si tu as ajouté ces modèles :
@@ -175,7 +175,8 @@ from .serializers import (
     HandymanDocumentSerializer, ReportSerializer, DeviceSerializer,
     MatchRequestSerializer, MatchResponseSerializer, PriceEstimateSerializer, PaymentInitSerializer,
     EmailOrUsernameTokenObtainPairSerializer, HeroSlideSerializer, PayoutSerializer, DisputeSerializer,
-    TimeOffSerializer, ReplacementSuggestionSerializer
+    TimeOffSerializer, ReplacementSuggestionSerializer,
+    PayoutAccountSerializer, SubscriptionPlanSerializer, SubscriptionSerializer
 )
 
 class EmailOrUsernameTokenObtainPairView(TokenObtainPairView):
@@ -783,6 +784,62 @@ def coupon_validate(request):
         "discount": str(coupon.discount_for(amount)),
         "net": str(coupon.apply(amount)),
     }, status=status.HTTP_200_OK)
+
+
+# ---- Compte de versement artisan ----
+@api_view(["GET", "POST"])
+@permission_classes([permissions.IsAuthenticated])
+def payout_account(request):
+    """GET: compte de versement courant. POST: créer/mettre à jour (repasse non vérifié)."""
+    acc = PayoutAccount.objects.filter(handyman=request.user).first()
+    if request.method == "GET":
+        return Response(PayoutAccountSerializer(acc).data if acc else {})
+    ser = PayoutAccountSerializer(acc, data=request.data, partial=bool(acc))
+    ser.is_valid(raise_exception=True)
+    ser.save(handyman=request.user, verified=False)
+    return Response(ser.data, status=status.HTTP_200_OK if acc else status.HTTP_201_CREATED)
+
+
+# ---- Abonnements / B2B ----
+class SubscriptionPlanViewSet(viewsets.ReadOnlyModelViewSet):
+    serializer_class = SubscriptionPlanSerializer
+    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+    pagination_class = DefaultPageNumberPagination
+
+    def get_queryset(self):
+        qs = SubscriptionPlan.objects.filter(active=True).order_by('price')
+        audience = self.request.query_params.get('audience')
+        return qs.filter(audience=audience) if audience else qs
+
+
+class SubscriptionViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
+    queryset = Subscription.objects.select_related('plan', 'user').order_by('-started_at')
+    serializer_class = SubscriptionSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    owner_lookups = ("user",)
+    http_method_names = ["get", "post", "head", "options"]
+    pagination_class = DefaultPageNumberPagination
+
+    def create(self, request, *args, **kwargs):
+        plan = SubscriptionPlan.objects.filter(pk=request.data.get("plan"), active=True).first()
+        if not plan:
+            return Response({"detail": "Plan introuvable ou inactif."}, status=status.HTTP_400_BAD_REQUEST)
+        sub = Subscription.subscribe(request.user, plan)
+        return Response(SubscriptionSerializer(sub).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=["get"])
+    def current(self, request):
+        sub = (Subscription.objects.filter(user=request.user, status="active")
+               .order_by("-started_at").first())
+        if not sub or not sub.is_active():
+            return Response({"active": False})
+        return Response(SubscriptionSerializer(sub).data)
+
+    @action(detail=True, methods=["post"])
+    def cancel(self, request, pk=None):
+        sub = self.get_object()
+        sub.cancel()
+        return Response(SubscriptionSerializer(sub).data)
 
 
 # ---- Webhook Paiement (idempotent + signé) ----

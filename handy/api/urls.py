@@ -7,9 +7,9 @@ from .views import (
     UserViewSet, HandymanProfileViewSet, ServiceCategoryViewSet, ServiceViewSet, ServiceImageViewSet,
     BookingViewSet, PaymentViewSet, PaymentLogViewSet, PayoutViewSet, ReviewViewSet, ConversationViewSet,
     MessageViewSet, NotificationViewSet, HandymanDocumentViewSet, ReportViewSet, DeviceViewSet, DisputeViewSet,
-    TimeOffViewSet,
+    TimeOffViewSet, SubscriptionPlanViewSet, SubscriptionViewSet,
     price_estimate, payment_initiate, match, PaymentWebhook, EmailOrUsernameTokenObtainPairView, HeroSlideViewSet,
-    otp_request, otp_verify, coupon_validate
+    otp_request, otp_verify, coupon_validate, payout_account
 )
 
 router = DefaultRouter()
@@ -24,6 +24,8 @@ router.register(r'payment-logs', PaymentLogViewSet, basename='payment-logs')
 router.register(r'payouts', PayoutViewSet, basename='payouts')
 router.register(r'disputes', DisputeViewSet, basename='disputes')
 router.register(r'timeoffs', TimeOffViewSet, basename='timeoffs')
+router.register(r'subscription-plans', SubscriptionPlanViewSet, basename='subscription-plans')
+router.register(r'subscriptions', SubscriptionViewSet, basename='subscriptions')
 router.register(r'reviews', ReviewViewSet, basename='reviews')
 router.register(r'conversations', ConversationViewSet, basename='conversations')
 router.register(r'messages', MessageViewSet, basename='messages')
@@ -46,6 +48,7 @@ urlpatterns = [
     path('auth/otp/request/', otp_request, name='otp-request'),
     path('auth/otp/verify/', otp_verify, name='otp-verify'),
     path('coupons/validate/', coupon_validate, name='coupon-validate'),
+    path('payout-account/', payout_account, name='payout-account'),
 
     path('', include(router.urls)),
 ]

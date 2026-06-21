@@ -439,6 +439,9 @@ class Booking(models.Model):
     total_price = models.DecimalField(max_digits=10, decimal_places=2, blank=True, null=True)
     cancellation_fee = models.DecimalField(max_digits=10, decimal_places=2, default=0)  # pénalité d'annulation appliquée
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending', db_index=True)
+    booking_type = models.CharField(
+        max_length=20, choices=[('instant', 'Instantané'), ('scheduled', 'Planifié')],
+        default='scheduled', db_index=True)
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -456,6 +459,10 @@ class Booking(models.Model):
 
     def __str__(self):
         return f"Réservation #{self.id} - {self.client} / {self.handyman}"
+
+    @property
+    def is_immediate(self) -> bool:
+        return self.booking_type == 'instant'
 
     def generate_replacement_suggestions(self, limit=5):
         """Propose des services de remplacement (même catégorie, autre artisan,
@@ -992,6 +999,56 @@ class OTPCode(models.Model):
             user=user, code=code, purpose=purpose,
             expires_at=timezone.now() + timedelta(minutes=ttl_minutes),
         )
+
+
+class SubscriptionPlan(models.Model):
+    AUDIENCES = [('client', 'Client'), ('handyman', 'Artisan'), ('business', 'Entreprise (B2B)')]
+    INTERVALS = [('monthly', 'Mensuel'), ('yearly', 'Annuel')]
+    name = models.CharField(max_length=80)
+    slug = models.SlugField(unique=True)
+    audience = models.CharField(max_length=20, choices=AUDIENCES, default='client', db_index=True)
+    price = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    interval = models.CharField(max_length=20, choices=INTERVALS, default='monthly')
+    features = models.JSONField(default=list, blank=True)
+    active = models.BooleanField(default=True, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.name} ({self.get_interval_display()})"
+
+
+class Subscription(models.Model):
+    STATUS_CHOICES = [('active', 'Actif'), ('cancelled', 'Annulé'), ('expired', 'Expiré')]
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='subscriptions', db_index=True)
+    plan = models.ForeignKey(SubscriptionPlan, on_delete=models.PROTECT, related_name='subscriptions')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='active', db_index=True)
+    started_at = models.DateTimeField(auto_now_add=True)
+    current_period_end = models.DateTimeField()
+    cancelled_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        indexes = [models.Index(fields=['user', 'status'])]
+
+    def is_active(self, at=None) -> bool:
+        at = at or timezone.now()
+        return self.status == 'active' and at <= self.current_period_end
+
+    @classmethod
+    def subscribe(cls, user, plan):
+        """Souscrit/renouvelle un abonnement actif (annule le précédent actif)."""
+        cls.objects.filter(user=user, status='active').update(
+            status='cancelled', cancelled_at=timezone.now())
+        days = 365 if plan.interval == 'yearly' else 30
+        return cls.objects.create(
+            user=user, plan=plan, status='active',
+            current_period_end=timezone.now() + timedelta(days=days),
+        )
+
+    def cancel(self):
+        self.status = 'cancelled'
+        self.cancelled_at = timezone.now()
+        self.save(update_fields=['status', 'cancelled_at'])
+        return self
 
 class Invoice(models.Model):
     booking = models.OneToOneField(Booking, on_delete=models.CASCADE, related_name='invoice')

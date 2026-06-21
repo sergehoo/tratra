@@ -11,7 +11,8 @@ from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from handy.models import (
     User, HandymanProfile, ServiceCategory, ServiceImage, Service, Booking,
     Payment, PaymentLog, Review, Conversation, Message, Notification,
-    HandymanDocument, Report, Device, HeroSlide, Payout, Dispute, TimeOff, ReplacementSuggestion
+    HandymanDocument, Report, Device, HeroSlide, Payout, Dispute, TimeOff, ReplacementSuggestion,
+    PayoutAccount, SubscriptionPlan, Subscription
 )
 from handy.services.pricing import estimate_price
 from handy.services.fees import compute_platform_fee
@@ -198,9 +199,12 @@ class BookingCreateSerializer(serializers.ModelSerializer):
     # écriture: IDs + infos pratiques
     service = serializers.PrimaryKeyRelatedField(queryset=Service.objects.all(), required=False, allow_null=True)
     handyman = serializers.PrimaryKeyRelatedField(queryset=User.objects.all(), required=False, allow_null=True)
+    type = serializers.ChoiceField(source='booking_type',
+                                   choices=[('instant', 'Instantané'), ('scheduled', 'Planifié')],
+                                   required=False, default='scheduled')
+    is_immediate = serializers.BooleanField(read_only=True)
 
     # champs annexes côté pricing/matching (NON stockés sur Booking, retirés avant create)
-    # TODO(S2): réintroduire 'type' (instant/scheduled) comme vrai champ modèle + migration.
     category_id = serializers.IntegerField(write_only=True, required=False)
     minutes = serializers.IntegerField(write_only=True, required=False, default=60)
 
@@ -211,11 +215,11 @@ class BookingCreateSerializer(serializers.ModelSerializer):
             "booking_date", "end_date",
             "address", "city", "postal_code",
             "description", "proposed_price", "handyman_comment",
-            "response_date", "status",
+            "response_date", "status", "type", "is_immediate",
             # auxiliaires (write_only)
             "category_id", "minutes",
         ]
-        read_only_fields = ["client", "status", "response_date"]
+        read_only_fields = ["client", "status", "response_date", "is_immediate"]
 
     def validate(self, attrs):
         start = attrs.get("booking_date")
@@ -238,6 +242,8 @@ class BookingSerializer(serializers.ModelSerializer):
     client_detail = UserMiniSerializer(source="client", read_only=True)
     handyman_detail = UserMiniSerializer(source="handyman", read_only=True)
     service_detail = ServiceSerializer(source="service", read_only=True)
+    type = serializers.CharField(source="booking_type", read_only=True)
+    is_immediate = serializers.BooleanField(read_only=True)
 
     class Meta:
         model = Booking
@@ -248,7 +254,7 @@ class BookingSerializer(serializers.ModelSerializer):
             "booking_date", "end_date",
             "address", "city", "postal_code",
             "description", "proposed_price", "handyman_comment",
-            "response_date", "status",
+            "response_date", "status", "type", "is_immediate",
             "created_at", "updated_at",
         ]
         # 'status' n'est PAS modifiable via PATCH : passer par /bookings/{id}/transition/.
@@ -312,6 +318,29 @@ class PayoutSerializer(serializers.ModelSerializer):
         fields = ["id", "handyman", "amount", "status", "requested_at", "processed_at", "notes"]
         # handyman & statut posés côté serveur (l'artisan ne fait que demander un montant)
         read_only_fields = ["handyman", "status", "requested_at", "processed_at", "notes"]
+
+
+class PayoutAccountSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PayoutAccount
+        fields = ["id", "provider", "account_ref", "verified", "created_at"]
+        read_only_fields = ["verified", "created_at"]  # la vérification est faite côté admin
+
+
+class SubscriptionPlanSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SubscriptionPlan
+        fields = ["id", "name", "slug", "audience", "price", "interval", "features", "active"]
+
+
+class SubscriptionSerializer(serializers.ModelSerializer):
+    plan_detail = SubscriptionPlanSerializer(source="plan", read_only=True)
+
+    class Meta:
+        model = Subscription
+        fields = ["id", "user", "plan", "plan_detail", "status",
+                  "started_at", "current_period_end", "cancelled_at"]
+        read_only_fields = ["user", "status", "started_at", "current_period_end", "cancelled_at"]
 
 
 class PaymentLogSerializer(serializers.ModelSerializer):
