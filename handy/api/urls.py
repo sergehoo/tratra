@@ -7,6 +7,7 @@ from .views import (
     UserViewSet, HandymanProfileViewSet, ServiceCategoryViewSet, ServiceViewSet, ServiceImageViewSet,
     BookingViewSet, PaymentViewSet, PaymentLogViewSet, PayoutViewSet, ReviewViewSet, ConversationViewSet,
     MessageViewSet, NotificationViewSet, HandymanDocumentViewSet, ReportViewSet, DeviceViewSet, DisputeViewSet,
+    TimeOffViewSet,
     price_estimate, payment_initiate, match, PaymentWebhook, EmailOrUsernameTokenObtainPairView, HeroSlideViewSet
 )
 
@@ -21,6 +22,7 @@ router.register(r'payments', PaymentViewSet, basename='payments')
 router.register(r'payment-logs', PaymentLogViewSet, basename='payment-logs')
 router.register(r'payouts', PayoutViewSet, basename='payouts')
 router.register(r'disputes', DisputeViewSet, basename='disputes')
+router.register(r'timeoffs', TimeOffViewSet, basename='timeoffs')
 router.register(r'reviews', ReviewViewSet, basename='reviews')
 router.register(r'conversations', ConversationViewSet, basename='conversations')
 router.register(r'messages', MessageViewSet, basename='messages')

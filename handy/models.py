@@ -164,6 +164,11 @@ class HandymanProfile(models.Model):
         )
         return self.REQUIRED_KYC_DOCS.issubset(approved)
 
+    def is_on_timeoff(self, at=None) -> bool:
+        """L'artisan est-il en congé/absence à l'instant `at` (par défaut maintenant) ?"""
+        at = at or timezone.now()
+        return self.time_off.filter(start__lte=at, end__gte=at).exists()
+
     def __str__(self):
         return f"Profil de {self.user.get_full_name() or self.user.username}"
 
@@ -363,7 +368,25 @@ class ReplacementSuggestion(models.Model):
     original_service = models.ForeignKey(Service, on_delete=models.SET_NULL, null=True, related_name='+')
     suggested_service = models.ForeignKey(Service, on_delete=models.CASCADE, related_name='+')
     score = models.FloatField(default=0)
+    accepted = models.BooleanField(default=False, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['booking', 'suggested_service'],
+                                    name='uniq_replacement_per_service'),
+        ]
+
+    @transaction.atomic
+    def accept(self):
+        """Réassigne la réservation à l'artisan/service suggéré."""
+        booking = self.booking
+        booking.handyman = self.suggested_service.handyman
+        booking.service = self.suggested_service
+        booking.save(update_fields=['handyman', 'service', 'updated_at'])
+        self.accepted = True
+        self.save(update_fields=['accepted'])
+        return booking
 
 
 class TimeOff(models.Model):
@@ -415,6 +438,29 @@ class Booking(models.Model):
 
     def __str__(self):
         return f"Réservation #{self.id} - {self.client} / {self.handyman}"
+
+    def generate_replacement_suggestions(self, limit=5):
+        """Propose des services de remplacement (même catégorie, autre artisan,
+        approuvé) — utilisé quand l'artisan devient indisponible (absence)."""
+        if not self.service or not self.service.category_id:
+            return []
+        candidates = (Service.objects
+                      .filter(category_id=self.service.category_id, is_active=True,
+                              handyman__handyman_profile__is_approved=True)
+                      .exclude(handyman_id=self.handyman_id)
+                      .select_related('handyman__handyman_profile')
+                      .order_by('-handyman__handyman_profile__rating')[:limit])
+        out = []
+        for svc in candidates:
+            sugg, _ = ReplacementSuggestion.objects.get_or_create(
+                booking=self, suggested_service=svc,
+                defaults=dict(
+                    original_service=self.service,
+                    score=float(getattr(svc.handyman.handyman_profile, 'rating', 0) or 0),
+                ),
+            )
+            out.append(sugg)
+        return out
 
     # ----- Machine à états -----
     # Transitions autorisées : source -> {destinations}

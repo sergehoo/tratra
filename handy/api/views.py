@@ -32,7 +32,8 @@ from rest_framework_simplejwt.views import TokenObtainPairView
 from handy.models import (
     User, HandymanProfile, ServiceCategory, Service, ServiceImage, Booking,
     Payment, PaymentLog, Review, Conversation, Message, Notification,
-    HandymanDocument, Report, Device, Payout, Dispute, artisan_available_earnings,
+    HandymanDocument, Report, Device, Payout, Dispute, TimeOff, ReplacementSuggestion,
+    artisan_available_earnings,
     # ↓ suivants : assure-toi de les avoir dans tes models (cf. reco précédentes)
     BookingRoute, JobTracking, HeroSlide,  # tracking & ETA
     # Optionnel si tu as ajouté ces modèles :
@@ -173,7 +174,8 @@ from .serializers import (
     ConversationSerializer, MessageSerializer, NotificationSerializer,
     HandymanDocumentSerializer, ReportSerializer, DeviceSerializer,
     MatchRequestSerializer, MatchResponseSerializer, PriceEstimateSerializer, PaymentInitSerializer,
-    EmailOrUsernameTokenObtainPairSerializer, HeroSlideSerializer, PayoutSerializer, DisputeSerializer
+    EmailOrUsernameTokenObtainPairSerializer, HeroSlideSerializer, PayoutSerializer, DisputeSerializer,
+    TimeOffSerializer, ReplacementSuggestionSerializer
 )
 
 class EmailOrUsernameTokenObtainPairView(TokenObtainPairView):
@@ -434,6 +436,29 @@ class BookingViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
             return Response({"detail": msg}, status=status.HTTP_400_BAD_REQUEST)
         return Response(BookingSerializer(booking).data, status=status.HTTP_200_OK)
 
+    @action(detail=True, methods=["get"])
+    def replacements(self, request, pk=None):
+        """Suggestions de remplacement (générées à la volée si aucune)."""
+        booking = self.get_object()
+        sugg = booking.replacement_suggestions.select_related(
+            "suggested_service", "suggested_service__handyman")
+        if not sugg.exists():
+            booking.generate_replacement_suggestions()
+            sugg = booking.replacement_suggestions.select_related(
+                "suggested_service", "suggested_service__handyman")
+        return Response(ReplacementSuggestionSerializer(sugg, many=True).data)
+
+    @action(detail=True, methods=["post"], url_path="accept-replacement")
+    def accept_replacement(self, request, pk=None):
+        """POST { "suggestion_id": N } -> réassigne la mission à l'artisan suggéré."""
+        booking = self.get_object()
+        sugg = booking.replacement_suggestions.filter(pk=request.data.get("suggestion_id")).first()
+        if not sugg:
+            return Response({"detail": "Suggestion introuvable."}, status=status.HTTP_404_NOT_FOUND)
+        sugg.accept()
+        booking.refresh_from_db()
+        return Response(BookingSerializer(booking).data)
+
 
 # ---- Paiements ----
 class PaymentViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
@@ -526,6 +551,29 @@ class DisputeViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
             msg = e.messages[0] if getattr(e, "messages", None) else str(e)
             return Response({"detail": msg}, status=status.HTTP_400_BAD_REQUEST)
         return Response(DisputeSerializer(dispute).data)
+
+
+# ---- Absences artisan (TimeOff) ----
+class TimeOffViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
+    """Déclaration d'absences par l'artisan. À la création, génère des
+    suggestions de remplacement pour les missions impactées."""
+    queryset = TimeOff.objects.select_related("handyman", "handyman__user").order_by("-start")
+    serializer_class = TimeOffSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    owner_lookups = ("handyman__user",)
+    pagination_class = DefaultPageNumberPagination
+
+    def perform_create(self, serializer):
+        profile = HandymanProfile.objects.filter(user=self.request.user).first()
+        if profile is None:
+            raise PermissionDenied("Profil artisan requis pour déclarer une absence.")
+        timeoff = serializer.save(handyman=profile)
+        impacted = Booking.objects.filter(
+            handyman=profile.user, status__in=['pending', 'confirmed'],
+            booking_date__gte=timeoff.start, booking_date__lte=timeoff.end,
+        )
+        for b in impacted:
+            b.generate_replacement_suggestions()
 
 
 # ---- Avis / Chat / Notifications / Docs / Reports / Devices ----

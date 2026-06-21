@@ -42,7 +42,7 @@ def on_booking_status_change(sender, instance: Booking, created: bool, **kwargs)
 
     if notify_booking_status:
         try:
-            notify_booking_status.delay(instance.client_id, instance.id, instance.status)
+            notify_booking_status.delay(instance.id, instance.status)
         except Exception:
             logger.exception("Échec d'envoi de la tâche Celery notify_booking_status")
     else:

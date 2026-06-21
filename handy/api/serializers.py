@@ -11,7 +11,7 @@ from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from handy.models import (
     User, HandymanProfile, ServiceCategory, ServiceImage, Service, Booking,
     Payment, PaymentLog, Review, Conversation, Message, Notification,
-    HandymanDocument, Report, Device, HeroSlide, Payout, Dispute
+    HandymanDocument, Report, Device, HeroSlide, Payout, Dispute, TimeOff, ReplacementSuggestion
 )
 from handy.services.pricing import estimate_price
 from handy.services.fees import compute_platform_fee
@@ -269,6 +269,29 @@ class PaymentSerializer(serializers.ModelSerializer):
             "payment_date", "created_at", "updated_at",
         ]
         read_only_fields = ["is_paid", "created_at", "updated_at"]
+
+
+class TimeOffSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TimeOff
+        fields = ["id", "handyman", "start", "end", "reason"]
+        read_only_fields = ["handyman"]  # posé serveur = profil du requérant
+
+    def validate(self, attrs):
+        start, end = attrs.get("start"), attrs.get("end")
+        if start and end and end < start:
+            raise serializers.ValidationError("end doit être >= start.")
+        return attrs
+
+
+class ReplacementSuggestionSerializer(serializers.ModelSerializer):
+    suggested_service_detail = ServiceSerializer(source="suggested_service", read_only=True)
+
+    class Meta:
+        model = ReplacementSuggestion
+        fields = ["id", "booking", "original_service", "suggested_service",
+                  "suggested_service_detail", "score", "accepted", "created_at"]
+        read_only_fields = fields
 
 
 class DisputeSerializer(serializers.ModelSerializer):

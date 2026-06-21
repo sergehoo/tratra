@@ -1215,19 +1215,8 @@ class BookingActionView(LoginRequiredMixin, View):
         """Effectue l'action sur la réservation via la machine à états
         (transition validée + horodatage BookingTimeline + completed_jobs)."""
         booking.transition_to(self.new_status, actor=self.request.user)
-
-        # Créer une notification
-        recipient = booking.handyman if self.request.user == booking.client else booking.client
-        Notification.objects.create(
-            user=recipient,
-            notification_type='booking_status',
-            message=self.notification_message.format(
-                booking_id=booking.id,
-                status=booking.get_status_display()
-            ),
-            content_object=booking
-        )
-
+        # La notification in-app + push des deux parties est gérée par le signal
+        # post_save -> tâche Celery notify_booking_status (Sprint 5), pas en double ici.
         messages.success(self.request, self.success_message)
 
     def post(self, request, *args, **kwargs):

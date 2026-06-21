@@ -2,12 +2,21 @@
 from channels.generic.websocket import AsyncJsonWebsocketConsumer
 from asgiref.sync import sync_to_async
 from django.contrib.gis.geos import Point
+
 from handy.models import JobTracking
+from handy.services.tracking import can_access_booking_tracking
+
 
 class TrackingConsumer(AsyncJsonWebsocketConsumer):
     async def connect(self):
         self.booking_id = self.scope["url_route"]["kwargs"]["booking_id"]
+        user = self.scope.get("user")
+        # Autorisation : refuse si l'utilisateur n'est pas partie à la mission.
+        if not await sync_to_async(can_access_booking_tracking)(user, self.booking_id):
+            await self.close(code=4403)
+            return
         await self.channel_layer.group_add(f"bk_{self.booking_id}", self.channel_name)
+        self._joined = True
         await self.accept()
 
     @sync_to_async
@@ -22,8 +31,12 @@ class TrackingConsumer(AsyncJsonWebsocketConsumer):
     async def receive_json(self, content, **kwargs):
         await self._save_point(content)
         await self.channel_layer.group_send(
-            f"bk_{self.booking_id}", {"type":"loc.update","data":content}
+            f"bk_{self.booking_id}", {"type": "loc.update", "data": content}
         )
 
-    async def loc_update(self, event): await self.send_json(event["data"])
-    async def disconnect(self, code): await self.channel_layer.group_discard(f"bk_{self.booking_id}", self.channel_name)
+    async def loc_update(self, event):
+        await self.send_json(event["data"])
+
+    async def disconnect(self, code):
+        if getattr(self, "_joined", False):
+            await self.channel_layer.group_discard(f"bk_{self.booking_id}", self.channel_name)
