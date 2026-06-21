@@ -94,12 +94,14 @@ def test_souscription_cycle(api_client):
 
 
 @pytest.mark.django_db
-def test_landing_page_rend_200(api_client):
+def test_api_root_json(api_client):
+    """Backend découplé : '/' renvoie un JSON API-root (plus de page HTML Django)."""
     r = api_client.get("/")
     assert r.status_code == 200
-    body = r.content.decode("utf-8", "replace")
-    assert "tratra_logo_final" in body            # logo Tratra présent
-    assert reverse("service_search") in body      # recherche & CTA câblés
+    data = r.json()
+    assert data["name"] == "Tratra API"
+    assert data["docs"] == "/api/docs/"
+    assert data["api"] == "/handy/"
 
 
 @pytest.mark.django_db
