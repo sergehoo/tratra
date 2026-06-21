@@ -33,6 +33,50 @@ logger = logging.getLogger(__name__)
 class Landing(TemplateView):
     template_name = "landing/landing.html"
 
+    # mots-clés (slug/nom) -> icône FontAwesome, pour garder des icônes variées
+    _CAT_ICONS = {
+        'menage': 'fa-broom', 'ménage': 'fa-broom', 'servant': 'fa-broom', 'nettoy': 'fa-broom',
+        'cuisin': 'fa-utensils', 'chef': 'fa-utensils',
+        'nounou': 'fa-baby', 'enfant': 'fa-baby', 'garde d': 'fa-baby',
+        'chauff': 'fa-car-side', 'transport': 'fa-car-side',
+        'jardin': 'fa-leaf', 'espace vert': 'fa-leaf',
+        'gardien': 'fa-shield-halved', 'securit': 'fa-shield-halved', 'sécurit': 'fa-shield-halved',
+        'plomb': 'fa-faucet', 'electric': 'fa-bolt', 'électric': 'fa-bolt',
+        'peint': 'fa-paint-roller', 'clim': 'fa-snowflake', 'menuis': 'fa-hammer',
+    }
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        from handy.models import ServiceCategory, Service, HandymanProfile, Review, User
+
+        cats = list(ServiceCategory.objects.filter(is_active=True).order_by('name')[:6])
+        for c in cats:
+            key = f"{c.slug or ''} {c.name or ''}".lower()
+            c.fa = next((v for k, v in self._CAT_ICONS.items() if k in key), 'fa-screwdriver-wrench')
+        ctx['categories'] = cats
+
+        ctx['featured_services'] = (
+            Service.objects.filter(is_active=True)
+            .select_related('handyman', 'category', 'handyman__handyman_profile')
+            .order_by('-handyman__handyman_profile__rating', '-created_at')[:6]
+        )
+        ctx['featured_artisans'] = (
+            HandymanProfile.objects.filter(is_approved=True)
+            .select_related('user').prefetch_related('skills')
+            .order_by('-rating', '-completed_jobs')[:6]
+        )
+        ctx['testimonials'] = (
+            Review.objects.select_related('booking__client', 'booking__handyman')
+            .exclude(comment__isnull=True).exclude(comment__exact='')
+            .order_by('-created_at')[:3]
+        )
+        ctx['stats'] = {
+            'artisans': HandymanProfile.objects.filter(is_approved=True).count(),
+            'services': Service.objects.filter(is_active=True).count(),
+            'clients': User.objects.filter(user_type__in=['client', 'employeur']).count(),
+        }
+        return ctx
+
 
 class HomePageView(LoginRequiredMixin, TemplateView):
     login_url = '/accounts/login/'
