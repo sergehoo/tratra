@@ -88,6 +88,7 @@ class HandymanProfile(models.Model):
     is_approved = models.BooleanField(default=False, db_index=True)
     rating = models.FloatField(default=0)
     completed_jobs = models.PositiveIntegerField(default=0)
+    quality_score = models.PositiveSmallIntegerField(default=0, db_index=True)  # score composite 0-100
     photo = models.ImageField(upload_to='profile_pics/', blank=True, null=True)
 
     # Localisation précise (si dispo)
@@ -168,6 +169,23 @@ class HandymanProfile(models.Model):
         """L'artisan est-il en congé/absence à l'instant `at` (par défaut maintenant) ?"""
         at = at or timezone.now()
         return self.time_off.filter(start__lte=at, end__gte=at).exists()
+
+    def compute_quality_score(self) -> int:
+        """Score de confiance composite 0-100 :
+        note (50) + volume de missions (25, plafonné à 50) + KYC vérifié (15)
+        + complétude du profil (10)."""
+        rating_pts = (Decimal(str(self.rating or 0)) / Decimal('5')) * Decimal('50')
+        jobs = min(self.completed_jobs or 0, 50)
+        jobs_pts = (Decimal(jobs) / Decimal('50')) * Decimal('25')
+        kyc_pts = Decimal('15') if self.is_approved else Decimal('0')
+        completion_pts = (Decimal(self.profile_completion()) / Decimal('100')) * Decimal('10')
+        total = rating_pts + jobs_pts + kyc_pts + completion_pts
+        return int(max(Decimal('0'), min(total, Decimal('100'))))
+
+    def refresh_quality_score(self) -> int:
+        self.quality_score = self.compute_quality_score()
+        self.save(update_fields=['quality_score'])
+        return self.quality_score
 
     def __str__(self):
         return f"Profil de {self.user.get_full_name() or self.user.username}"
@@ -527,6 +545,9 @@ class Booking(models.Model):
             HandymanProfile.objects.filter(user=self.handyman).update(
                 completed_jobs=models.F('completed_jobs') + 1
             )
+            prof = HandymanProfile.objects.filter(user=self.handyman).first()
+            if prof:
+                prof.refresh_quality_score()
 
         # Escrow : libère (mission terminée) ou rembourse (annulation) le séquestre.
         # getattr fonctionne car le reverse O2O 'payment' lève une DoesNotExist
@@ -599,6 +620,8 @@ class Payment(models.Model):
     is_paid = models.BooleanField(default=False, db_index=True)  # garde pour compat; synchro dans save()
     currency = models.CharField(max_length=8, default='XOF')
     refunded_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)  # montant remboursé (partiel possible)
+    coupon = models.ForeignKey('Coupon', on_delete=models.SET_NULL, null=True, blank=True, related_name='payments')
+    discount = models.DecimalField(max_digits=10, decimal_places=2, default=0)  # réduction appliquée
 
     payment_date = models.DateTimeField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
@@ -923,6 +946,52 @@ class Coupon(models.Model):
     valid_from = models.DateTimeField()
     valid_to = models.DateTimeField()
     active = models.BooleanField(default=True)
+
+    def __str__(self):
+        return self.code
+
+    def is_valid(self, at=None) -> bool:
+        at = at or timezone.now()
+        return bool(self.active and self.valid_from <= at <= self.valid_to)
+
+    def discount_for(self, amount) -> Decimal:
+        amount = Decimal(amount)
+        if self.percent_off:
+            d = amount * (Decimal(self.percent_off) / Decimal('100'))
+        elif self.amount_off:
+            d = Decimal(self.amount_off)
+        else:
+            d = Decimal('0')
+        return min(d, amount).quantize(Decimal('1.'))
+
+    def apply(self, amount) -> Decimal:
+        """Montant net après réduction (plancher 0)."""
+        return (Decimal(amount) - self.discount_for(amount)).quantize(Decimal('1.'))
+
+
+class OTPCode(models.Model):
+    PURPOSES = [('signup', 'Inscription'), ('login', 'Connexion'), ('phone', 'Vérification téléphone')]
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='otp_codes')
+    code = models.CharField(max_length=6, db_index=True)
+    purpose = models.CharField(max_length=20, choices=PURPOSES, default='signup')
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    expires_at = models.DateTimeField()
+    used = models.BooleanField(default=False)
+
+    class Meta:
+        indexes = [models.Index(fields=['user', 'used', '-created_at'])]
+
+    def is_valid(self) -> bool:
+        return (not self.used) and timezone.now() <= self.expires_at
+
+    @classmethod
+    def issue(cls, user, purpose='signup', ttl_minutes=10):
+        import secrets
+        code = f"{secrets.randbelow(1000000):06d}"
+        return cls.objects.create(
+            user=user, code=code, purpose=purpose,
+            expires_at=timezone.now() + timedelta(minutes=ttl_minutes),
+        )
 
 class Invoice(models.Model):
     booking = models.OneToOneField(Booking, on_delete=models.CASCADE, related_name='invoice')

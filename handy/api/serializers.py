@@ -452,6 +452,7 @@ class PaymentInitSerializer(serializers.Serializer):
     method = serializers.ChoiceField(choices=Payment.PAYMENT_METHODS)
     category_id = serializers.IntegerField(required=False)
     minutes = serializers.IntegerField(min_value=1)
+    coupon_code = serializers.CharField(required=False, allow_blank=True)
 
     def create(self, validated):
         """
@@ -465,14 +466,28 @@ class PaymentInitSerializer(serializers.Serializer):
         category_slug = svc.category.slug if svc and svc.category else "menage"
         minutes = validated["minutes"]
 
-        # pricing + frais
-        amount = estimate_price(category_slug, minutes)
-        fee = compute_platform_fee(Decimal(amount), category_id=category_id)
+        # pricing
+        amount = Decimal(estimate_price(category_slug, minutes))
+
+        # coupon éventuel (ignoré silencieusement si invalide)
+        coupon, discount = None, Decimal('0')
+        code = (validated.get("coupon_code") or "").strip()
+        if code:
+            from handy.models import Coupon
+            c = Coupon.objects.filter(code=code).first()
+            if c and c.is_valid():
+                discount = c.discount_for(amount)
+                amount = c.apply(amount)
+                coupon = c
+
+        # frais plateforme sur le montant NET
+        fee = compute_platform_fee(amount, category_id=category_id)
 
         payment, _ = Payment.objects.get_or_create(
             booking=booking,
             defaults=dict(
-                amount=amount, platform_fee=fee, method=validated["method"], status="pending", currency="XOF"
+                amount=amount, platform_fee=fee, method=validated["method"],
+                status="pending", currency="XOF", coupon=coupon, discount=discount,
             ),
         )
 

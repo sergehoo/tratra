@@ -33,7 +33,7 @@ from handy.models import (
     User, HandymanProfile, ServiceCategory, Service, ServiceImage, Booking,
     Payment, PaymentLog, Review, Conversation, Message, Notification,
     HandymanDocument, Report, Device, Payout, Dispute, TimeOff, ReplacementSuggestion,
-    artisan_available_earnings,
+    Coupon, OTPCode, artisan_available_earnings,
     # ↓ suivants : assure-toi de les avoir dans tes models (cf. reco précédentes)
     BookingRoute, JobTracking, HeroSlide,  # tracking & ETA
     # Optionnel si tu as ajouté ces modèles :
@@ -736,6 +736,53 @@ def match(request):
     qs = qs.annotate(distance_m=Distance("location", origin))
     data = MatchResponseSerializer(qs, many=True).data
     return Response(data, status=status.HTTP_200_OK)
+
+
+# ---- OTP (vérification de compte) ----
+@api_view(["POST"])
+@permission_classes([permissions.IsAuthenticated])
+def otp_request(request):
+    """Génère un code OTP pour l'utilisateur courant et l'envoie (SMS best-effort)."""
+    otp = OTPCode.issue(request.user, purpose="signup")
+    from handy.tasks import _send_sms, _resolve_msisdn
+    _send_sms(_resolve_msisdn(request.user.id), f"Votre code de vérification Tratra : {otp.code}")
+    payload = {"sent": True}
+    if settings.DEBUG:
+        payload["code"] = otp.code  # exposé uniquement en dev
+    return Response(payload, status=status.HTTP_201_CREATED)
+
+
+@api_view(["POST"])
+@permission_classes([permissions.IsAuthenticated])
+def otp_verify(request):
+    """Vérifie le code OTP -> marque le compte comme vérifié."""
+    code = str(request.data.get("code") or "")
+    otp = (OTPCode.objects.filter(user=request.user, code=code, used=False)
+           .order_by("-created_at").first())
+    if not otp or not otp.is_valid():
+        return Response({"detail": "Code invalide ou expiré."}, status=status.HTTP_400_BAD_REQUEST)
+    otp.used = True
+    otp.save(update_fields=["used"])
+    request.user.is_verified = True
+    request.user.save(update_fields=["is_verified"])
+    return Response({"verified": True})
+
+
+# ---- Coupons ----
+@api_view(["POST"])
+@permission_classes([permissions.IsAuthenticated])
+def coupon_validate(request):
+    """POST { "code": "...", "amount": 10000 } -> validité + réduction/net."""
+    code = str(request.data.get("code") or "").strip()
+    amount = Decimal(str(request.data.get("amount") or "0"))
+    coupon = Coupon.objects.filter(code=code).first()
+    if not coupon or not coupon.is_valid():
+        return Response({"valid": False}, status=status.HTTP_200_OK)
+    return Response({
+        "valid": True,
+        "discount": str(coupon.discount_for(amount)),
+        "net": str(coupon.apply(amount)),
+    }, status=status.HTTP_200_OK)
 
 
 # ---- Webhook Paiement (idempotent + signé) ----

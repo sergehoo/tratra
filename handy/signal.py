@@ -28,6 +28,9 @@ def update_rating_on_review(sender, instance: Review, created, **kwargs):
     qs = Review.objects.filter(booking__handyman=handyman)
     avg = qs.aggregate(avg=models.Avg('rating'))['avg'] or 0
     HandymanProfile.objects.filter(user=handyman).update(rating=avg)
+    profile = HandymanProfile.objects.filter(user=handyman).first()
+    if profile:
+        profile.refresh_quality_score()
 
 # NB: l'incrément de completed_jobs est désormais géré de façon IDEMPOTENTE
 # dans Booking.transition_to() (uniquement à l'entrée dans 'completed').

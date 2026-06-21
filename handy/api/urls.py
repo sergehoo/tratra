@@ -8,7 +8,8 @@ from .views import (
     BookingViewSet, PaymentViewSet, PaymentLogViewSet, PayoutViewSet, ReviewViewSet, ConversationViewSet,
     MessageViewSet, NotificationViewSet, HandymanDocumentViewSet, ReportViewSet, DeviceViewSet, DisputeViewSet,
     TimeOffViewSet,
-    price_estimate, payment_initiate, match, PaymentWebhook, EmailOrUsernameTokenObtainPairView, HeroSlideViewSet
+    price_estimate, payment_initiate, match, PaymentWebhook, EmailOrUsernameTokenObtainPairView, HeroSlideViewSet,
+    otp_request, otp_verify, coupon_validate
 )
 
 router = DefaultRouter()
@@ -42,6 +43,9 @@ urlpatterns = [
     path('payments/initiate/', payment_initiate, name='payment-initiate'),
     path('payments/webhook/<str:provider>/', PaymentWebhook.as_view(), name='payment-webhook'),
     path('match/', match, name='match'),
+    path('auth/otp/request/', otp_request, name='otp-request'),
+    path('auth/otp/verify/', otp_verify, name='otp-verify'),
+    path('coupons/validate/', coupon_validate, name='coupon-validate'),
 
     path('', include(router.urls)),
 ]
