@@ -10,6 +10,12 @@ GEOS_LIBRARY_PATH = os.getenv('GEOS_LIBRARY_PATH', '/opt/homebrew/opt/geos/lib/l
 
 DEBUG = True
 
+# En dev/test : stockage statique simple (pas de manifeste hashé prod).
+# {% static %} renvoie /static/... sans exiger un collectstatic préalable.
+STORAGES["staticfiles"] = {
+    "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
+}
+
 DATABASES = {
     'default': {
         'ENGINE': 'django.contrib.gis.db.backends.postgis',

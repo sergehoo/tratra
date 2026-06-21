@@ -292,6 +292,9 @@ else:
 
 WHITENOISE_AUTOREFRESH = DEBUG
 WHITENOISE_MAX_AGE = 60 * 60 * 24 * 365
+# Tolère un manifeste statique incomplet (tests/dev sans collectstatic récent) :
+# {% static %} renvoie le chemin brut au lieu de lever une erreur.
+WHITENOISE_MANIFEST_STRICT = False
 # Default primary key field type
 # https://docs.djangoproject.com/en/4.2/ref/settings/#default-auto-field
 

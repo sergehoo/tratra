@@ -6,172 +6,275 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Tratra — Trouvez un artisan de confiance près de chez vous</title>
   <meta name="description" content="Tratra met en relation clients et artisans vérifiés : plomberie, électricité, ménage et plus. Paiement sécurisé sous séquestre, suivi en temps réel, artisans notés.">
+  <link rel="icon" href="{% static 'img/favicon.png' %}">
   <style>
     :root{
-      --green:#00B14F; --green-d:#008E40; --green-l:#E8F8EE;
-      --ink:#11271c; --txt:#2d3a33; --mut:#65766c; --line:#e6ece8;
-      --bg:#ffffff; --soft:#f6faf7; --amber:#f5a623; --radius:16px;
-      --shadow:0 10px 30px rgba(0,40,20,.08);
+      --green:#00B14F; --green-d:#007A37; --green-l:#E8F8EE; --green-glow:#16c768;
+      --ink:#0c1f16; --txt:#33453c; --mut:#6a7a71; --line:#e7ede9;
+      --bg:#ffffff; --soft:#f5faf6; --amber:#ffb020; --radius:18px;
+      --shadow:0 18px 50px -12px rgba(0,55,28,.18);
+      --shadow-sm:0 8px 24px -10px rgba(0,55,28,.16);
+      --maxw:1180px;
     }
     *{box-sizing:border-box}
     html{scroll-behavior:smooth}
-    body{margin:0;background:var(--bg);color:var(--txt);
+    body{margin:0;background:var(--bg);color:var(--txt);-webkit-font-smoothing:antialiased;
       font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;line-height:1.55}
     a{color:inherit;text-decoration:none}
-    .wrap{max-width:1140px;margin:0 auto;padding:0 20px}
-    .btn{display:inline-flex;align-items:center;gap:8px;border-radius:999px;padding:12px 22px;
-      font-weight:700;font-size:15px;border:1px solid transparent;cursor:pointer;transition:.15s;white-space:nowrap}
-    .btn-primary{background:var(--green);color:#fff}
-    .btn-primary:hover{background:var(--green-d)}
+    img{max-width:100%;display:block}
+    .wrap{max-width:var(--maxw);margin:0 auto;padding:0 22px}
+    .btn{display:inline-flex;align-items:center;gap:9px;border-radius:999px;padding:13px 24px;
+      font-weight:700;font-size:15px;border:1.5px solid transparent;cursor:pointer;transition:.18s;white-space:nowrap}
+    .btn-primary{background:linear-gradient(135deg,var(--green),var(--green-glow));color:#fff;
+      box-shadow:0 10px 24px -8px rgba(0,177,79,.6)}
+    .btn-primary:hover{transform:translateY(-2px);box-shadow:0 16px 30px -8px rgba(0,177,79,.7)}
     .btn-ghost{background:#fff;color:var(--ink);border-color:var(--line)}
-    .btn-ghost:hover{border-color:var(--green)}
-    .btn-light{background:rgba(255,255,255,.15);color:#fff;border-color:rgba(255,255,255,.4)}
-    .btn-light:hover{background:rgba(255,255,255,.25)}
+    .btn-ghost:hover{border-color:var(--green);color:var(--green-d)}
+    .btn-light{background:rgba(255,255,255,.16);color:#fff;border-color:rgba(255,255,255,.45);backdrop-filter:blur(4px)}
+    .btn-light:hover{background:rgba(255,255,255,.28)}
+    .btn-dark{background:var(--ink);color:#fff}
+    .btn-dark:hover{transform:translateY(-2px)}
+
+    /* Reveal animation */
+    .reveal{opacity:0;transform:translateY(22px);transition:opacity .7s cubic-bezier(.2,.7,.2,1),transform .7s cubic-bezier(.2,.7,.2,1)}
+    .reveal.in{opacity:1;transform:none}
 
     /* Header */
-    header.nav{position:sticky;top:0;z-index:50;background:rgba(255,255,255,.92);
-      backdrop-filter:saturate(150%) blur(10px);border-bottom:1px solid var(--line)}
-    .nav .wrap{display:flex;align-items:center;justify-content:space-between;height:68px}
-    .logo{display:flex;align-items:center;gap:9px;font-weight:800;font-size:21px;color:var(--ink)}
-    .logo .mark{width:32px;height:32px;border-radius:9px;background:var(--green);color:#fff;
-      display:grid;place-items:center;font-size:18px}
-    .nav-links{display:flex;align-items:center;gap:26px}
-    .nav-links a.l{color:var(--mut);font-weight:600;font-size:14.5px}
+    header.nav{position:sticky;top:0;z-index:60;background:rgba(255,255,255,.82);
+      backdrop-filter:saturate(160%) blur(14px);border-bottom:1px solid var(--line)}
+    .nav .wrap{display:flex;align-items:center;justify-content:space-between;height:74px}
+    .brand img{height:38px;width:auto}
+    .nav-links{display:flex;align-items:center;gap:30px}
+    .nav-links a.l{color:var(--mut);font-weight:600;font-size:14.5px;transition:.15s}
     .nav-links a.l:hover{color:var(--ink)}
     .nav-cta{display:flex;gap:10px;align-items:center}
-    @media(max-width:820px){.nav-links .l{display:none}}
+    .burger{display:none;background:none;border:0;cursor:pointer;padding:8px}
+    .burger span{display:block;width:24px;height:2.5px;background:var(--ink);border-radius:2px;margin:5px 0;transition:.2s}
+    @media(max-width:900px){
+      .nav-links .l{display:none}
+      .nav-cta .ghost-hide{display:none}
+      .burger{display:block}
+    }
 
     /* Hero */
-    .hero{position:relative;color:#fff;overflow:hidden;
-      background:radial-gradient(1100px 500px at 80% -10%,#16c768,transparent),
-                 linear-gradient(135deg,#0a6e3a 0%,#00B14F 55%,#16c768 100%)}
-    .hero .wrap{padding:72px 20px 90px;position:relative;z-index:2}
-    .hero h1{font-size:clamp(30px,5vw,52px);line-height:1.08;margin:0 0 16px;font-weight:850;max-width:760px;letter-spacing:-.02em}
-    .hero p.sub{font-size:clamp(16px,2.2vw,20px);max-width:600px;color:rgba(255,255,255,.92);margin:0 0 28px}
-    .searchbar{display:flex;gap:8px;background:#fff;border-radius:14px;padding:8px;max-width:600px;box-shadow:var(--shadow)}
-    .searchbar input{flex:1;border:0;outline:0;font-size:16px;padding:12px 14px;color:var(--ink);background:transparent;min-width:0}
+    .hero{position:relative;overflow:hidden;color:#fff;
+      background:radial-gradient(900px 480px at 12% -8%,#1fd178,transparent 60%),
+                 radial-gradient(1000px 560px at 92% 8%,#0a7d40,transparent 55%),
+                 linear-gradient(135deg,#053d24 0%,#018a40 52%,#06b552 100%)}
+    .blob{position:absolute;border-radius:50%;filter:blur(60px);opacity:.5;z-index:0;animation:float 12s ease-in-out infinite}
+    .blob.b1{width:340px;height:340px;background:#26e07f;top:-90px;right:6%}
+    .blob.b2{width:300px;height:300px;background:#0bd07a;bottom:-120px;left:0;animation-delay:-4s}
+    @keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(26px)}}
+    .hero .wrap{position:relative;z-index:2;display:grid;grid-template-columns:1.05fr .95fr;gap:40px;align-items:center;
+      padding:64px 22px 96px}
+    @media(max-width:900px){.hero .wrap{grid-template-columns:1fr;padding:48px 22px 80px}}
+    .badge-pill{display:inline-flex;align-items:center;gap:8px;background:rgba(255,255,255,.14);
+      border:1px solid rgba(255,255,255,.32);border-radius:999px;padding:7px 14px;font-size:13px;font-weight:700;
+      backdrop-filter:blur(6px);margin-bottom:20px}
+    .badge-pill .dot{width:8px;height:8px;border-radius:50%;background:#bfffd9;box-shadow:0 0 0 4px rgba(191,255,217,.25)}
+    h1.head{font-size:clamp(33px,5.2vw,58px);line-height:1.05;margin:0 0 18px;font-weight:850;letter-spacing:-.025em}
+    h1.head .hl{background:linear-gradient(90deg,#d6ffe7,#9affc4);-webkit-background-clip:text;background-clip:text;color:transparent}
+    .hero p.sub{font-size:clamp(16px,2.1vw,20px);max-width:540px;color:rgba(255,255,255,.92);margin:0 0 28px}
+    .searchbar{display:flex;gap:8px;background:#fff;border-radius:16px;padding:9px;max-width:560px;box-shadow:var(--shadow)}
+    .searchbar .ico{display:grid;place-items:center;padding:0 6px 0 12px;color:var(--mut);font-size:18px}
+    .searchbar input{flex:1;border:0;outline:0;font-size:16px;padding:12px 6px;color:var(--ink);background:transparent;min-width:0}
     .hero-cta{display:flex;gap:12px;margin-top:18px;flex-wrap:wrap}
-    .stats{display:flex;gap:34px;margin-top:42px;flex-wrap:wrap}
-    .stats .s .n{font-size:30px;font-weight:850}
-    .stats .s .l{font-size:13.5px;color:rgba(255,255,255,.85)}
+    .hero-trust{display:flex;gap:18px;margin-top:30px;flex-wrap:wrap}
+    .hero-trust .t{display:flex;align-items:center;gap:8px;font-size:13.5px;color:rgba(255,255,255,.9);font-weight:600}
+    .hero-trust .t b{font-size:18px}
     .hero-wave{position:absolute;bottom:-1px;left:0;width:100%;display:block;z-index:1}
 
-    section{padding:64px 0}
-    .eyebrow{color:var(--green);font-weight:800;letter-spacing:.12em;text-transform:uppercase;font-size:12.5px}
-    h2.sec{font-size:clamp(24px,3.5vw,34px);font-weight:820;color:var(--ink);margin:.3em 0 .2em;letter-spacing:-.01em}
-    .lead{color:var(--mut);max-width:620px;margin:0 0 8px}
-    .sec-head{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap;margin-bottom:30px}
+    /* Hero visual (app preview, CSS only) */
+    .preview{position:relative;justify-self:center;width:100%;max-width:380px}
+    .pcard{background:#fff;border-radius:22px;box-shadow:0 30px 60px -20px rgba(0,40,20,.5);padding:18px;color:var(--txt)}
+    .pcard .ph{height:150px;border-radius:14px;background:linear-gradient(135deg,#0a7d40,#26e07f);
+      display:grid;place-items:center;color:#fff;font-size:46px;font-weight:800;position:relative;overflow:hidden}
+    .pcard .ph::after{content:"";position:absolute;inset:0;background:radial-gradient(120px 80px at 80% 20%,rgba(255,255,255,.3),transparent)}
+    .pcard h4{margin:14px 4px 2px;color:var(--ink);font-size:17px}
+    .pcard .meta{display:flex;justify-content:space-between;align-items:center;margin:0 4px}
+    .pcard .meta .pr{font-weight:800;color:var(--ink)}
+    .pcard .meta .rt{color:var(--amber);font-weight:700;font-size:14px}
+    .pcard .row{display:flex;align-items:center;gap:10px;margin:14px 4px 2px;padding-top:12px;border-top:1px solid var(--line)}
+    .pcard .av{width:34px;height:34px;border-radius:50%;background:var(--green-l);display:grid;place-items:center;color:var(--green-d);font-weight:800}
+    .pcard .nm{font-size:13.5px;color:var(--txt)} .pcard .nm small{display:block;color:var(--mut)}
+    .float-chip{position:absolute;background:#fff;border-radius:14px;box-shadow:var(--shadow);padding:11px 14px;
+      display:flex;align-items:center;gap:9px;font-size:13px;font-weight:700;color:var(--ink);animation:float 6s ease-in-out infinite}
+    .float-chip .ic{width:30px;height:30px;border-radius:9px;display:grid;place-items:center;font-size:15px;color:#fff}
+    .fc1{top:-18px;left:-26px} .fc1 .ic{background:var(--green)}
+    .fc2{bottom:38px;right:-24px;animation-delay:-3s} .fc2 .ic{background:var(--amber)}
+    @media(max-width:900px){.preview{margin-top:40px;max-width:340px}.float-chip{display:none}}
+
+    /* Sections */
+    section{padding:74px 0}
+    .eyebrow{color:var(--green);font-weight:800;letter-spacing:.14em;text-transform:uppercase;font-size:12.5px}
+    h2.sec{font-size:clamp(26px,3.6vw,38px);font-weight:840;color:var(--ink);margin:.35em 0 .25em;letter-spacing:-.02em}
+    .lead{color:var(--mut);max-width:640px;margin:0;font-size:16px}
+    .sec-head{display:flex;justify-content:space-between;align-items:flex-end;gap:18px;flex-wrap:wrap;margin-bottom:36px}
 
     /* Categories */
-    .cats{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}
-    @media(max-width:860px){.cats{grid-template-columns:repeat(2,1fr)}}
-    .cat{display:flex;flex-direction:column;gap:12px;padding:22px;border:1px solid var(--line);
-      border-radius:var(--radius);background:#fff;transition:.16s}
-    .cat:hover{border-color:var(--green);transform:translateY(-3px);box-shadow:var(--shadow)}
-    .cat .ic{width:46px;height:46px;border-radius:12px;background:var(--green-l);color:var(--green-d);
-      display:grid;place-items:center;font-size:22px;font-weight:800}
-    .cat .nm{font-weight:750;color:var(--ink)}
-    .cat .ds{font-size:13px;color:var(--mut)}
+    .cats{display:grid;grid-template-columns:repeat(4,1fr);gap:18px}
+    @media(max-width:900px){.cats{grid-template-columns:repeat(2,1fr)}}
+    .cat{position:relative;display:flex;flex-direction:column;gap:13px;padding:24px;border:1px solid var(--line);
+      border-radius:var(--radius);background:#fff;transition:.2s;overflow:hidden}
+    .cat::before{content:"";position:absolute;inset:0;background:linear-gradient(135deg,rgba(0,177,79,.06),transparent);opacity:0;transition:.2s}
+    .cat:hover{border-color:transparent;transform:translateY(-4px);box-shadow:var(--shadow)}
+    .cat:hover::before{opacity:1}
+    .cat .ic{width:52px;height:52px;border-radius:14px;background:linear-gradient(135deg,var(--green-l),#d3f3df);
+      color:var(--green-d);display:grid;place-items:center;font-size:24px;font-weight:800;position:relative;z-index:1}
+    .cat .nm{font-weight:760;color:var(--ink);position:relative;z-index:1}
+    .cat .ds{font-size:13px;color:var(--mut);position:relative;z-index:1}
+    .cat .go{margin-top:auto;color:var(--green-d);font-weight:700;font-size:13.5px;position:relative;z-index:1}
 
     /* Services */
-    .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:22px}
-    @media(max-width:860px){.grid3{grid-template-columns:1fr}}
+    .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:24px}
+    @media(max-width:900px){.grid3{grid-template-columns:1fr}}
     .card{border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;background:#fff;
-      display:flex;flex-direction:column;transition:.16s}
-    .card:hover{box-shadow:var(--shadow);transform:translateY(-3px)}
-    .card .ph{height:140px;display:grid;place-items:center;color:#fff;font-size:40px;font-weight:800}
-    .card .bd{padding:18px;display:flex;flex-direction:column;gap:8px;flex:1}
-    .chip{align-self:flex-start;background:var(--green-l);color:var(--green-d);font-size:12px;
-      font-weight:700;padding:4px 10px;border-radius:999px}
-    .card h3{margin:0;font-size:17px;color:var(--ink)}
-    .card .by{font-size:13.5px;color:var(--mut)}
-    .card .ft{display:flex;justify-content:space-between;align-items:center;margin-top:auto;padding-top:10px;border-top:1px solid var(--line)}
-    .price{font-weight:800;color:var(--ink)}
+      display:flex;flex-direction:column;transition:.2s}
+    .card:hover{box-shadow:var(--shadow);transform:translateY(-4px);border-color:transparent}
+    .card .ph{height:158px;display:grid;place-items:center;color:#fff;font-size:44px;font-weight:800;position:relative}
+    .card .ph .tag{position:absolute;top:12px;left:12px;background:rgba(255,255,255,.92);color:var(--green-d);
+      font-size:11.5px;font-weight:800;padding:5px 11px;border-radius:999px}
+    .card .bd{padding:20px;display:flex;flex-direction:column;gap:9px;flex:1}
+    .card h3{margin:0;font-size:17.5px;color:var(--ink)}
+    .card .by{font-size:13.5px;color:var(--mut);display:flex;align-items:center;gap:8px}
+    .card .av{width:26px;height:26px;border-radius:50%;background:var(--green-l);display:grid;place-items:center;color:var(--green-d);font-weight:800;font-size:12px}
+    .card .ft{display:flex;justify-content:space-between;align-items:center;margin-top:auto;padding-top:13px;border-top:1px solid var(--line)}
+    .price{font-weight:850;color:var(--ink);font-size:16px}
     .rate{color:var(--amber);font-weight:700;font-size:14px}
 
-    /* Steps */
+    /* How it works */
     .soft{background:var(--soft)}
-    .steps{display:grid;grid-template-columns:repeat(3,1fr);gap:22px}
-    @media(max-width:860px){.steps{grid-template-columns:1fr}}
-    .step{background:#fff;border:1px solid var(--line);border-radius:var(--radius);padding:26px}
-    .step .num{width:40px;height:40px;border-radius:11px;background:var(--ink);color:#fff;
-      display:grid;place-items:center;font-weight:800;margin-bottom:14px}
-    .step h3{margin:0 0 6px;color:var(--ink);font-size:18px}
+    .steps{display:grid;grid-template-columns:repeat(3,1fr);gap:24px;position:relative}
+    @media(max-width:900px){.steps{grid-template-columns:1fr}}
+    .step{background:#fff;border:1px solid var(--line);border-radius:var(--radius);padding:30px;position:relative}
+    .step .num{width:46px;height:46px;border-radius:13px;background:linear-gradient(135deg,var(--green),var(--green-glow));
+      color:#fff;display:grid;place-items:center;font-weight:850;font-size:18px;margin-bottom:16px;
+      box-shadow:0 10px 20px -8px rgba(0,177,79,.6)}
+    .step h3{margin:0 0 7px;color:var(--ink);font-size:18.5px}
     .step p{margin:0;color:var(--mut);font-size:14.5px}
 
-    /* Trust */
-    .feats{display:grid;grid-template-columns:repeat(4,1fr);gap:20px}
-    @media(max-width:860px){.feats{grid-template-columns:repeat(2,1fr)}}
-    @media(max-width:520px){.feats{grid-template-columns:1fr}}
-    .feat .ic{font-size:26px}
-    .feat h4{margin:10px 0 4px;color:var(--ink);font-size:16px}
+    /* Why grid */
+    .feats{display:grid;grid-template-columns:repeat(4,1fr);gap:22px}
+    @media(max-width:900px){.feats{grid-template-columns:repeat(2,1fr)}}
+    @media(max-width:540px){.feats{grid-template-columns:1fr}}
+    .feat{padding:24px;border-radius:var(--radius);background:#fff;border:1px solid var(--line);transition:.2s}
+    .feat:hover{box-shadow:var(--shadow-sm);transform:translateY(-3px)}
+    .feat .ic{width:48px;height:48px;border-radius:13px;background:var(--green-l);display:grid;place-items:center;font-size:24px;margin-bottom:12px}
+    .feat h4{margin:0 0 5px;color:var(--ink);font-size:16.5px}
     .feat p{margin:0;color:var(--mut);font-size:14px}
 
-    /* CTA band */
-    .band{background:linear-gradient(135deg,#0a6e3a,#00B14F);color:#fff;border-radius:24px;
-      padding:48px;display:flex;justify-content:space-between;align-items:center;gap:24px;flex-wrap:wrap}
-    .band h2{margin:0 0 6px;font-size:28px;font-weight:820}
-    .band p{margin:0;color:rgba(255,255,255,.9);max-width:520px}
+    /* Stats band */
+    .statband{background:linear-gradient(135deg,#053d24,#018a40 60%,#06b552);border-radius:26px;color:#fff;
+      padding:46px;display:grid;grid-template-columns:repeat(3,1fr);gap:20px;text-align:center}
+    @media(max-width:640px){.statband{grid-template-columns:1fr;gap:26px;padding:36px}}
+    .statband .n{font-size:clamp(34px,5vw,48px);font-weight:860;line-height:1}
+    .statband .l{color:rgba(255,255,255,.85);font-size:14.5px;margin-top:6px}
 
-    footer{background:var(--ink);color:#cdd8d1;padding:46px 0 28px;font-size:14px}
-    footer .cols{display:flex;justify-content:space-between;gap:30px;flex-wrap:wrap;margin-bottom:26px}
-    footer h5{color:#fff;font-size:14px;margin:0 0 12px;letter-spacing:.04em}
-    footer a{display:block;color:#a9b8af;padding:4px 0}
+    /* App section */
+    .appsec{display:grid;grid-template-columns:1fr 1fr;gap:40px;align-items:center}
+    @media(max-width:900px){.appsec{grid-template-columns:1fr}}
+    .applist{list-style:none;padding:0;margin:18px 0 26px;display:grid;gap:12px}
+    .applist li{display:flex;gap:11px;align-items:flex-start;color:var(--txt);font-size:15px}
+    .applist .ck{color:var(--green);font-weight:900;flex:0 0 auto}
+    .appvisual{justify-self:center;width:100%;max-width:300px;aspect-ratio:9/16;border-radius:30px;
+      background:linear-gradient(150deg,#053d24,#06b552);padding:14px;box-shadow:var(--shadow)}
+    .appvisual .scr{height:100%;border-radius:20px;background:#fff;display:flex;flex-direction:column;gap:10px;padding:16px}
+    .appvisual .h{height:14px;border-radius:6px;background:var(--green-l)}
+    .appvisual .h.w2{width:60%} .appvisual .blk{flex:1;border-radius:14px;background:linear-gradient(135deg,#eef9f2,#d6f3e0)}
+    .appvisual .bar{height:42px;border-radius:12px;background:linear-gradient(135deg,var(--green),var(--green-glow))}
+
+    /* CTA band */
+    .band{position:relative;overflow:hidden;background:linear-gradient(135deg,#053d24,#018a40);color:#fff;border-radius:28px;
+      padding:54px;display:flex;justify-content:space-between;align-items:center;gap:26px;flex-wrap:wrap}
+    .band .blob{opacity:.35}
+    .band h2{margin:0 0 8px;font-size:clamp(24px,3vw,32px);font-weight:850;position:relative;z-index:2}
+    .band p{margin:0;color:rgba(255,255,255,.92);max-width:520px;position:relative;z-index:2}
+    .band .btn{position:relative;z-index:2}
+
+    /* Footer */
+    footer{background:var(--ink);color:#b9c8bf;padding:54px 0 30px;font-size:14px}
+    footer .cols{display:flex;justify-content:space-between;gap:34px;flex-wrap:wrap;margin-bottom:30px}
+    footer .logo-badge{background:#fff;border-radius:12px;padding:8px 12px;display:inline-block;margin-bottom:14px}
+    footer .logo-badge img{height:30px}
+    footer h5{color:#fff;font-size:13.5px;margin:0 0 13px;letter-spacing:.05em;text-transform:uppercase}
+    footer a{display:block;color:#9fb3a7;padding:4px 0;transition:.15s}
     footer a:hover{color:#fff}
-    .copyr{border-top:1px solid rgba(255,255,255,.12);padding-top:18px;color:#8b9b91;font-size:13px}
-    .empty{color:var(--mut);font-size:14px;padding:20px;border:1px dashed var(--line);border-radius:12px}
+    .copyr{border-top:1px solid rgba(255,255,255,.12);padding-top:20px;color:#7e9388;font-size:13px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+    .empty{color:var(--mut);font-size:14px;padding:24px;border:1px dashed var(--line);border-radius:14px;text-align:center}
   </style>
 </head>
 <body>
 
 <header class="nav">
   <div class="wrap">
-    <a href="{% url 'landing' %}" class="logo"><span class="mark">T</span> Tratra</a>
-    <nav class="nav-links">
+    <a href="{% url 'landing' %}" class="brand" aria-label="Accueil Tratra">
+      <img src="{% static 'img/tratra_logo_final.webp' %}" alt="Tratra">
+    </a>
+    <nav class="nav-links" id="navlinks">
       <a class="l" href="#categories">Catégories</a>
       <a class="l" href="#how">Comment ça marche</a>
       <a class="l" href="#trust">Sécurité</a>
-      <a class="l" href="#pro">Devenir artisan</a>
+      <a class="l" href="#app">Application</a>
       <span class="nav-cta">
-        <a href="{% url 'account_login' %}" class="btn btn-ghost">Se connecter</a>
+        <a href="{% url 'account_login' %}" class="btn btn-ghost ghost-hide">Se connecter</a>
         <a href="{% url 'employer_signup' %}" class="btn btn-primary">S'inscrire</a>
       </span>
     </nav>
+    <button class="burger" id="burger" aria-label="Menu"><span></span><span></span><span></span></button>
   </div>
 </header>
 
 <!-- HERO -->
 <div class="hero">
+  <span class="blob b1"></span><span class="blob b2"></span>
   <div class="wrap">
-    <div class="eyebrow" style="color:#d6ffe7">La marketplace des services à domicile</div>
-    <h1>Trouvez un artisan de confiance, près de chez vous</h1>
-    <p class="sub">Plomberie, électricité, ménage, menuiserie… Réservez un professionnel vérifié, payez en toute sécurité et suivez votre intervention en temps réel.</p>
+    <div>
+      <span class="badge-pill"><span class="dot"></span> La marketplace des services à domicile</span>
+      <h1 class="head">Trouvez un artisan<br><span class="hl">de confiance</span>, près de chez vous</h1>
+      <p class="sub">Plomberie, électricité, ménage, menuiserie… Réservez un professionnel vérifié, payez en toute sécurité et suivez votre intervention en temps réel.</p>
 
-    <form class="searchbar" method="get" action="{% url 'service_search' %}" role="search">
-      <input type="text" name="q" placeholder="De quel service avez-vous besoin&nbsp;?" aria-label="Rechercher un service">
-      <button class="btn btn-primary" type="submit">Rechercher</button>
-    </form>
+      <form class="searchbar" method="get" action="{% url 'service_search' %}" role="search">
+        <span class="ico" aria-hidden="true">🔎</span>
+        <input type="text" name="q" placeholder="De quel service avez-vous besoin&nbsp;?" aria-label="Rechercher un service">
+        <button class="btn btn-primary" type="submit">Rechercher</button>
+      </form>
 
-    <div class="hero-cta">
-      <a href="{% url 'service_search' %}" class="btn btn-light">Explorer les services</a>
-      <a href="{% url 'handyman_signup' %}" class="btn btn-light">Je suis artisan</a>
+      <div class="hero-cta">
+        <a href="{% url 'service_search' %}" class="btn btn-light">Explorer les services</a>
+        <a href="{% url 'handyman_signup' %}" class="btn btn-light">Je suis artisan →</a>
+      </div>
+
+      <div class="hero-trust">
+        <span class="t"><b>{{ stats.artisans|default:"0" }}+</b> artisans vérifiés</span>
+        <span class="t"><b>★ 4.8</b> satisfaction moyenne</span>
+        <span class="t">🛡️ Paiement sécurisé</span>
+      </div>
     </div>
 
-    <div class="stats">
-      <div class="s"><div class="n">{{ stats.artisans|default:"0" }}+</div><div class="l">Artisans vérifiés</div></div>
-      <div class="s"><div class="n">{{ stats.services|default:"0" }}</div><div class="l">Services disponibles</div></div>
-      <div class="s"><div class="n">{{ stats.categories|default:"0" }}</div><div class="l">Catégories de métiers</div></div>
+    <!-- Aperçu produit (CSS only) -->
+    <div class="preview" aria-hidden="true">
+      <div class="float-chip fc1"><span class="ic">✓</span> Artisan vérifié</div>
+      <div class="pcard">
+        <div class="ph">🛠️</div>
+        <h4>Réparation plomberie</h4>
+        <div class="meta"><span class="pr">15 000 FCFA</span><span class="rt">★ 4.9</span></div>
+        <div class="row">
+          <span class="av">A</span>
+          <span class="nm">Awa K. <small>Plombière certifiée · 2,3 km</small></span>
+        </div>
+      </div>
+      <div class="float-chip fc2"><span class="ic">📍</span> Suivi en temps réel</div>
     </div>
   </div>
-  <svg class="hero-wave" viewBox="0 0 1440 80" preserveAspectRatio="none" aria-hidden="true">
-    <path fill="#ffffff" d="M0,40 C360,90 1080,-10 1440,40 L1440,80 L0,80 Z"></path>
+  <svg class="hero-wave" viewBox="0 0 1440 90" preserveAspectRatio="none" aria-hidden="true">
+    <path fill="#ffffff" d="M0,45 C320,100 1100,-10 1440,45 L1440,90 L0,90 Z"></path>
   </svg>
 </div>
 
 <!-- CATEGORIES -->
 <section id="categories">
   <div class="wrap">
-    <div class="sec-head">
+    <div class="sec-head reveal">
       <div>
         <div class="eyebrow">Catégories</div>
         <h2 class="sec">Quel métier recherchez-vous&nbsp;?</h2>
@@ -182,10 +285,11 @@
     {% if categories %}
     <div class="cats">
       {% for c in categories %}
-      <a class="cat" href="{% url 'service_search' %}?category={{ c.id }}">
+      <a class="cat reveal" href="{% url 'service_search' %}?category={{ c.id }}">
         <span class="ic">{% if c.icon %}{{ c.icon }}{% else %}{{ c.name|slice:":1"|upper }}{% endif %}</span>
         <span class="nm">{{ c.name }}</span>
-        {% if c.description %}<span class="ds">{{ c.description|truncatechars:48 }}</span>{% endif %}
+        {% if c.description %}<span class="ds">{{ c.description|truncatechars:50 }}</span>{% endif %}
+        <span class="go">Découvrir →</span>
       </a>
       {% endfor %}
     </div>
@@ -198,34 +302,35 @@
 <!-- FEATURED SERVICES -->
 <section class="soft" id="services">
   <div class="wrap">
-    <div class="sec-head">
+    <div class="sec-head reveal">
       <div>
         <div class="eyebrow">À la une</div>
         <h2 class="sec">Services les mieux notés</h2>
         <p class="lead">Sélectionnés selon la satisfaction client et l'expérience des artisans.</p>
       </div>
-      <a href="{% url 'service_search' %}" class="btn btn-ghost">Voir tous les services</a>
+      <a href="{% url 'service_search' %}" class="btn btn-ghost">Voir tout</a>
     </div>
     {% if featured_services %}
     <div class="grid3">
       {% for s in featured_services %}
-      <a class="card" href="{% url 'service_detail' s.id %}">
+      <a class="card reveal" href="{% url 'service_detail' s.id %}">
         {% if s.banner %}
-          <div class="ph" style="background-image:url('{{ s.banner.url }}');background-size:cover;background-position:center"></div>
+          <div class="ph" style="background-image:url('{{ s.banner.url }}');background-size:cover;background-position:center">
+            {% if s.category %}<span class="tag">{{ s.category.name }}</span>{% endif %}
+          </div>
         {% else %}
-          <div class="ph" style="background:linear-gradient(135deg,#0a6e3a,#16c768)">{{ s.category.name|slice:":1"|upper }}</div>
+          <div class="ph" style="background:linear-gradient(135deg,#0a7d40,#26e07f)">
+            {{ s.category.name|slice:":1"|upper }}
+            {% if s.category %}<span class="tag">{{ s.category.name }}</span>{% endif %}
+          </div>
         {% endif %}
         <div class="bd">
-          {% if s.category %}<span class="chip">{{ s.category.name }}</span>{% endif %}
           <h3>{{ s.title }}</h3>
-          <span class="by">par {{ s.handyman.get_full_name|default:s.handyman.username }}</span>
+          <span class="by"><span class="av">{{ s.handyman.get_full_name|default:s.handyman.username|slice:":1"|upper }}</span>
+            par {{ s.handyman.get_full_name|default:s.handyman.username }}</span>
           <div class="ft">
-            <span class="price">
-              {% if s.price %}{{ s.price|floatformat:0 }} FCFA{% else %}Sur devis{% endif %}
-            </span>
-            {% with r=s.handyman.handyman_profile.rating %}
-              {% if r %}<span class="rate">★ {{ r|floatformat:1 }}</span>{% endif %}
-            {% endwith %}
+            <span class="price">{% if s.price %}{{ s.price|floatformat:0 }} FCFA{% else %}Sur devis{% endif %}</span>
+            {% with r=s.handyman.handyman_profile.rating %}{% if r %}<span class="rate">★ {{ r|floatformat:1 }}</span>{% endif %}{% endwith %}
           </div>
         </div>
       </a>
@@ -240,51 +345,87 @@
 <!-- HOW IT WORKS -->
 <section id="how">
   <div class="wrap">
-    <div class="sec-head"><div>
+    <div class="sec-head reveal"><div>
       <div class="eyebrow">Simple &amp; rapide</div>
       <h2 class="sec">Comment ça marche</h2>
+      <p class="lead">Trois étapes pour résoudre n'importe quel besoin à domicile.</p>
     </div></div>
     <div class="steps">
-      <div class="step"><div class="num">1</div><h3>Décrivez votre besoin</h3>
-        <p>Choisissez une catégorie, indiquez votre adresse et la date souhaitée — ou demandez une intervention immédiate.</p></div>
-      <div class="step"><div class="num">2</div><h3>Choisissez votre artisan</h3>
+      <div class="step reveal"><div class="num">1</div><h3>Décrivez votre besoin</h3>
+        <p>Choisissez une catégorie, indiquez votre adresse et la date — ou demandez une intervention immédiate.</p></div>
+      <div class="step reveal"><div class="num">2</div><h3>Choisissez votre artisan</h3>
         <p>Comparez les profils vérifiés, les notes et les tarifs. Réservez en quelques clics.</p></div>
-      <div class="step"><div class="num">3</div><h3>Réglez en toute sécurité</h3>
-        <p>Votre paiement est conservé sous séquestre et libéré à l'artisan une fois la mission terminée.</p></div>
+      <div class="step reveal"><div class="num">3</div><h3>Réglez en toute sécurité</h3>
+        <p>Votre paiement reste sous séquestre et n'est versé à l'artisan qu'une fois la mission validée.</p></div>
     </div>
   </div>
 </section>
 
-<!-- TRUST -->
+<!-- WHY / TRUST -->
 <section class="soft" id="trust">
   <div class="wrap">
-    <div class="sec-head"><div>
+    <div class="sec-head reveal"><div>
       <div class="eyebrow">Confiance</div>
       <h2 class="sec">Pourquoi choisir Tratra</h2>
-      <p class="lead">Une plateforme pensée pour la sécurité des clients et des artisans.</p>
+      <p class="lead">Une plateforme pensée pour la sécurité des clients comme des artisans.</p>
     </div></div>
     <div class="feats">
-      <div class="feat"><div class="ic">🛡️</div><h4>Paiement sous séquestre</h4>
-        <p>Les fonds ne sont versés qu'une fois la prestation validée.</p></div>
-      <div class="feat"><div class="ic">✅</div><h4>Artisans vérifiés (KYC)</h4>
+      <div class="feat reveal"><div class="ic">🛡️</div><h4>Paiement sous séquestre</h4>
+        <p>Les fonds ne sont libérés qu'une fois la prestation validée.</p></div>
+      <div class="feat reveal"><div class="ic">✅</div><h4>Artisans vérifiés (KYC)</h4>
         <p>Pièces justificatives contrôlées avant toute mise en ligne.</p></div>
-      <div class="feat"><div class="ic">📍</div><h4>Suivi en temps réel</h4>
+      <div class="feat reveal"><div class="ic">📍</div><h4>Suivi en temps réel</h4>
         <p>Localisez votre artisan et suivez l'avancement de la mission.</p></div>
-      <div class="feat"><div class="ic">⚖️</div><h4>Litiges &amp; remboursements</h4>
-        <p>Une médiation et un remboursement encadrés en cas de problème.</p></div>
+      <div class="feat reveal"><div class="ic">⚖️</div><h4>Litiges &amp; remboursements</h4>
+        <p>Une médiation et un remboursement encadrés en cas de souci.</p></div>
+    </div>
+
+    <div class="statband reveal" style="margin-top:40px">
+      <div><div class="n">{{ stats.artisans|default:"0" }}+</div><div class="l">Artisans vérifiés</div></div>
+      <div><div class="n">{{ stats.services|default:"0" }}</div><div class="l">Services disponibles</div></div>
+      <div><div class="n">{{ stats.categories|default:"0" }}</div><div class="l">Catégories de métiers</div></div>
     </div>
   </div>
 </section>
 
-<!-- PRO CTA -->
+<!-- APP -->
+<section id="app">
+  <div class="wrap appsec">
+    <div class="reveal">
+      <div class="eyebrow">Application mobile</div>
+      <h2 class="sec">Tratra dans votre poche</h2>
+      <p class="lead">Réservez, payez et suivez vos interventions où que vous soyez. Artisans : recevez vos missions en temps réel.</p>
+      <ul class="applist">
+        <li><span class="ck">✓</span> Réservation instantanée ou planifiée</li>
+        <li><span class="ck">✓</span> Notifications &amp; suivi GPS en direct</li>
+        <li><span class="ck">✓</span> Paiement sécurisé &amp; portefeuille artisan</li>
+        <li><span class="ck">✓</span> Messagerie intégrée client ↔ artisan</li>
+      </ul>
+      <div class="hero-cta">
+        <a href="{% url 'employer_signup' %}" class="btn btn-dark">Créer un compte</a>
+        <a href="{% url 'handyman_signup' %}" class="btn btn-ghost">Devenir artisan</a>
+      </div>
+    </div>
+    <div class="appvisual reveal" aria-hidden="true">
+      <div class="scr">
+        <div class="h"></div><div class="h w2"></div>
+        <div class="blk"></div>
+        <div class="bar"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- CTA -->
 <section id="pro">
   <div class="wrap">
-    <div class="band">
+    <div class="band reveal">
+      <span class="blob b1" style="top:-60px;right:4%"></span>
       <div>
         <h2>Vous êtes artisan&nbsp;?</h2>
-        <p>Développez votre activité, recevez des missions près de chez vous et soyez payé en toute sécurité. Inscription gratuite.</p>
+        <p>Développez votre activité, recevez des missions près de chez vous et soyez payé en toute sécurité. Inscription gratuite, sans engagement.</p>
       </div>
-      <a href="{% url 'handyman_signup' %}" class="btn btn-light" style="font-size:16px;padding:14px 28px">Devenir artisan partenaire</a>
+      <a href="{% url 'handyman_signup' %}" class="btn btn-light" style="font-size:16px;padding:15px 30px">Devenir artisan partenaire →</a>
     </div>
   </div>
 </section>
@@ -292,9 +433,9 @@
 <footer>
   <div class="wrap">
     <div class="cols">
-      <div style="max-width:280px">
-        <a href="{% url 'landing' %}" class="logo" style="color:#fff;margin-bottom:10px"><span class="mark">T</span> Tratra</a>
-        <p style="color:#a9b8af;margin:0">La marketplace de confiance pour vos services à domicile.</p>
+      <div style="max-width:300px">
+        <span class="logo-badge"><img src="{% static 'img/tratra_logo_final.webp' %}" alt="Tratra"></span>
+        <p style="color:#9fb3a7;margin:0">La marketplace de confiance pour vos services à domicile en Côte d'Ivoire.</p>
       </div>
       <div>
         <h5>Services</h5>
@@ -314,12 +455,37 @@
         <h5>Plateforme</h5>
         <a href="#trust">Sécurité &amp; séquestre</a>
         <a href="#how">Comment ça marche</a>
-        <a href="#categories">Catégories</a>
+        <a href="#app">Application mobile</a>
       </div>
     </div>
-    <div class="copyr">© Tratra — Tous droits réservés.</div>
+    <div class="copyr">
+      <span>© Tratra — Tous droits réservés.</span>
+      <span>Fait avec ♥ pour les services à domicile.</span>
+    </div>
   </div>
 </footer>
 
+<script>
+  // Menu mobile : révèle les liens
+  (function(){
+    var b=document.getElementById('burger'), n=document.getElementById('navlinks');
+    if(b&&n){b.addEventListener('click',function(){
+      var open=n.style.display==='flex';
+      n.style.display=open?'':'flex';
+      if(!open){n.style.position='absolute';n.style.top='74px';n.style.left='0';n.style.right='0';
+        n.style.flexDirection='column';n.style.gap='14px';n.style.background='#fff';
+        n.style.padding='18px 22px';n.style.borderBottom='1px solid var(--line)';
+        n.querySelectorAll('.l').forEach(function(a){a.style.display='block'});}
+    });}
+  })();
+  // Reveal au scroll
+  (function(){
+    var els=document.querySelectorAll('.reveal');
+    if(!('IntersectionObserver' in window)){els.forEach(function(e){e.classList.add('in')});return;}
+    var io=new IntersectionObserver(function(es){es.forEach(function(en){
+      if(en.isIntersecting){en.target.classList.add('in');io.unobserve(en.target);}});},{threshold:.12});
+    els.forEach(function(e){io.observe(e);});
+  })();
+</script>
 </body>
 </html>
