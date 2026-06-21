@@ -155,6 +155,15 @@ class HandymanProfile(models.Model):
     def is_fully_completed(self) -> bool:
         return self.profile_completion() == 100
 
+    # Documents requis pour valider le KYC (au minimum une pièce d'identité approuvée)
+    REQUIRED_KYC_DOCS = {'id_card'}
+
+    def has_required_kyc(self) -> bool:
+        approved = set(
+            self.documents.filter(status='approved').values_list('document_type', flat=True)
+        )
+        return self.REQUIRED_KYC_DOCS.issubset(approved)
+
     def __str__(self):
         return f"Profil de {self.user.get_full_name() or self.user.username}"
 
@@ -169,14 +178,37 @@ class HandymanDocument(models.Model):
         ('other', 'Autre'),
     ]
 
+    STATUS_CHOICES = [('pending', 'En attente'), ('approved', 'Approuvé'), ('rejected', 'Rejeté')]
+
     handyman = models.ForeignKey('HandymanProfile', on_delete=models.CASCADE, related_name='documents')
     document_type = models.CharField(max_length=50, choices=DOCUMENT_TYPES)
     file = models.FileField(upload_to='handyman_documents/')
     description = models.TextField(blank=True, null=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending', db_index=True)
+    reviewed_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True,
+                                    related_name='documents_reviewed')
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    rejection_reason = models.TextField(blank=True, null=True)
     uploaded_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
         return f"{self.handyman.user.get_full_name()} - {self.get_document_type_display()}"
+
+    def approve(self, *, by):
+        self.status = 'approved'
+        self.reviewed_by = by
+        self.reviewed_at = timezone.now()
+        self.rejection_reason = ''
+        self.save(update_fields=['status', 'reviewed_by', 'reviewed_at', 'rejection_reason'])
+        return self
+
+    def reject(self, *, by, reason=''):
+        self.status = 'rejected'
+        self.reviewed_by = by
+        self.reviewed_at = timezone.now()
+        self.rejection_reason = reason
+        self.save(update_fields=['status', 'reviewed_by', 'reviewed_at', 'rejection_reason'])
+        return self
 
 
 # ---- WALLET / CAUTION ----

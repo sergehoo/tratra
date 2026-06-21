@@ -361,15 +361,15 @@ class NotificationSerializer(serializers.ModelSerializer):
 
 
 class HandymanDocumentSerializer(serializers.ModelSerializer):
-    # écriture
-    handyman = serializers.PrimaryKeyRelatedField(queryset=HandymanProfile.objects.all())
-    # lecture
+    # lecture détail (le 'handyman' est posé côté serveur = profil du requérant)
     handyman_detail = HandymanProfileSerializer(source="handyman", read_only=True)
 
     class Meta:
         model = HandymanDocument
-        fields = ["id", "handyman", "handyman_detail", "document_type", "file", "description", "uploaded_at"]
-        read_only_fields = ["uploaded_at"]
+        fields = ["id", "handyman", "handyman_detail", "document_type", "file", "description",
+                  "status", "reviewed_at", "rejection_reason", "uploaded_at"]
+        # statut & revue posés par l'admin ; handyman par le serveur (anti-usurpation)
+        read_only_fields = ["handyman", "status", "reviewed_at", "rejection_reason", "uploaded_at"]
 
 
 class ReportSerializer(serializers.ModelSerializer):

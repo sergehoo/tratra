@@ -258,6 +258,12 @@ class HandymanProfileViewSet(viewsets.ModelViewSet):
         if online is None:
             return Response({"detail": "online (booléen) requis."},
                             status=status.HTTP_400_BAD_REQUEST)
+        # Conformité : un profil non vérifié ne peut pas se rendre disponible.
+        if bool(online) and not profile.is_approved:
+            return Response(
+                {"detail": "Profil non vérifié : impossible de passer en ligne."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
         profile.online = bool(online)
         profile.save(update_fields=["online"])
         return Response({"online": profile.online})
@@ -587,6 +593,27 @@ class HandymanDocumentViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
     owner_lookups = ("handyman__user",)
     ordering = ["-uploaded_at"]
     pagination_class = DefaultPageNumberPagination
+
+    def perform_create(self, serializer):
+        # L'artisan ne peut téléverser que sur SON propre profil (KYC).
+        profile = HandymanProfile.objects.filter(user=self.request.user).first()
+        if profile is None:
+            raise PermissionDenied("Seul un artisan disposant d'un profil peut téléverser des documents.")
+        serializer.save(handyman=profile, status="pending")
+
+    @action(detail=True, methods=["post"], permission_classes=[permissions.IsAdminUser])
+    def review(self, request, pk=None):
+        """POST { "action": "approve|reject", "reason": "..." } — revue KYC (admin)."""
+        doc = self.get_object()
+        action_type = request.data.get("action")
+        if action_type == "approve":
+            doc.approve(by=request.user)
+        elif action_type == "reject":
+            doc.reject(by=request.user, reason=request.data.get("reason", ""))
+        else:
+            return Response({"detail": "action invalide (approve|reject)."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        return Response(HandymanDocumentSerializer(doc).data)
 
 
 class ReportViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
