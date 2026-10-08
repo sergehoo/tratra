@@ -165,6 +165,12 @@ services:
         # NEXT_PUBLIC_* is embedded at build time by Next.js.
         NEXT_PUBLIC_API_BASE: ${NEXT_PUBLIC_API_BASE}
         NEXT_PUBLIC_PAYMENT_METHODS: ${NEXT_PUBLIC_PAYMENT_METHODS:-cash}
+        # Canonical/sitemap/Open Graph URL; defaults to the Traefik frontend host.
+        NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL:-https://${FRONTEND_HOST}}
+        # CSP img-src (frozen at build): the MinIO/S3 endpoint that signs media
+        # URLs, plus optional extra origins. Empty items are ignored.
+        NEXT_PUBLIC_MEDIA_ORIGINS: ${AWS_S3_ENDPOINT_URL:-},${NEXT_PUBLIC_MEDIA_ORIGINS:-}
+        NEXT_PUBLIC_ESCROW_ENABLED: ${NEXT_PUBLIC_ESCROW_ENABLED:-false}
     depends_on:
       tratraweb:
         condition: service_healthy

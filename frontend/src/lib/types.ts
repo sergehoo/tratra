@@ -17,6 +17,74 @@ export interface Category {
   slug: string;
   description?: string | null;
   icon?: string | null;
+  is_active?: boolean;
+  parent?: number | null;
+  /** Nombre de services actifs — présent uniquement sur la liste /categories/. */
+  services_count?: number | null;
+}
+
+export type PriceType = "hourly" | "fixed" | "quote";
+
+/** Résumé public d'un artisan embarqué dans un service (aucune donnée sensible). */
+export interface PublicArtisanMini {
+  id: number;
+  display_name: string;
+  commune?: string | null;
+  rating: number;
+  completed_jobs: number;
+  experience_years: number;
+  is_verified: boolean;
+  online: boolean;
+  photo?: string | null;
+}
+
+/** Carte artisan publique (GET /handymen/featured/). */
+export interface PublicArtisan extends PublicArtisanMini {
+  user_id: number;
+  quartier?: string | null;
+  hourly_rate?: string | number | null;
+  skills: { id: number; name: string; slug: string }[];
+  /** Nombre de prestations ACTIVES publiées par l'artisan. */
+  services_count?: number;
+}
+
+export interface FeaturedArtisansResponse {
+  count: number;
+  results: PublicArtisan[];
+}
+
+/** Avis publié (GET /reviews/public/) — auteur affiché « Prénom N. ». */
+export interface PublicReview {
+  id: number;
+  rating: number;
+  comment: string;
+  author: string;
+  artisan: string;
+  category?: string | null;
+  created_at: string;
+}
+
+export interface PublicReviewsResponse {
+  count: number;
+  average: number | null;
+  results: PublicReview[];
+}
+
+/** Chiffres réels de la plateforme (GET /public/stats/). */
+export interface PublicStats {
+  categories: number;
+  services: number;
+  artisans_verified: number;
+  artisans_online: number;
+  missions_completed: number;
+  reviews_count: number;
+  rating_average: number | null;
+}
+
+export interface ServiceImage {
+  id: number;
+  image?: string | null;
+  alt_text?: string | null;
 }
 
 export interface Service {
@@ -24,12 +92,21 @@ export interface Service {
   title: string;
   description?: string;
   price?: string | number | null;
-  price_type?: string;
+  price_type?: PriceType | string;
+  duration?: number | null;
   category?: number | null;
   handyman?: number | null;
   category_detail?: Category | null;
   handyman_detail?: (Partial<User> & { id?: number }) | null;
+  /** Profil public de l'artisan (note, commune, vérifié, en ligne). */
+  artisan?: PublicArtisanMini | null;
+  /** Distance en km — présent uniquement sur /services/nearby/. */
+  distance_km?: number | null;
   banner?: string | null;
+  image_url?: string | null;
+  images?: ServiceImage[];
+  is_active?: boolean;
+  created_at?: string;
 }
 
 export interface Booking {

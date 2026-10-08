@@ -9,7 +9,7 @@ from .views import (
     MessageViewSet, NotificationViewSet, HandymanDocumentViewSet, ReportViewSet, DeviceViewSet, DisputeViewSet,
     TimeOffViewSet, SubscriptionPlanViewSet, SubscriptionViewSet,
     price_estimate, payment_initiate, match, PaymentWebhook, EmailOrUsernameTokenObtainPairView, HeroSlideViewSet,
-    otp_request, otp_verify, coupon_validate, payout_account, company_profile
+    otp_request, otp_verify, coupon_validate, payout_account, company_profile, public_stats
 )
 
 router = DefaultRouter()
@@ -50,6 +50,8 @@ urlpatterns = [
     path('coupons/validate/', coupon_validate, name='coupon-validate'),
     path('payout-account/', payout_account, name='payout-account'),
     path('companies/me/', company_profile, name='company-profile'),
+    # Public (landing) : chiffres réels, sans authentification.
+    path('public/stats/', public_stats, name='public-stats'),
 
     path('', include(router.urls)),
 ]

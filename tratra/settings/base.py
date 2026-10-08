@@ -296,12 +296,18 @@ KYC_ALLOWED_CONTENT_TYPES = tuple(env_list(
     'application/pdf,image/jpeg,image/png',
 ))
 KYC_SIGNED_URL_TTL_SECONDS = int(config('KYC_SIGNED_URL_TTL_SECONDS', default='300'))
+# Médias publics (photos d'artisans, images de services) : TTL de signature distinct
+# du KYC. Les pages publiques sont mises en cache (ISR, revalidate 300 s) : un TTL
+# de 300 s y figerait des URL déjà expirées (403). 604800 s = maximum SigV4.
+MEDIA_SIGNED_URL_TTL_SECONDS = int(config('MEDIA_SIGNED_URL_TTL_SECONDS', default='604800'))
 if KYC_MAX_UPLOAD_BYTES <= 0:
     raise ImproperlyConfigured('KYC_MAX_UPLOAD_BYTES must be greater than zero.')
 if not KYC_ALLOWED_CONTENT_TYPES:
     raise ImproperlyConfigured('KYC_ALLOWED_CONTENT_TYPES must contain at least one content type.')
 if not 60 <= KYC_SIGNED_URL_TTL_SECONDS <= 3600:
     raise ImproperlyConfigured('KYC_SIGNED_URL_TTL_SECONDS must be between 60 and 3600 seconds.')
+if not 3600 <= MEDIA_SIGNED_URL_TTL_SECONDS <= 604800:
+    raise ImproperlyConfigured('MEDIA_SIGNED_URL_TTL_SECONDS must be between 3600 and 604800 seconds.')
 
 if MINIO_ENABLED:
     KYC_STORAGE_BUCKET_NAME = required_env('KYC_STORAGE_BUCKET_NAME')
@@ -339,7 +345,9 @@ if MINIO_ENABLED:
     # django-storages' presigning path, so it is deliberately unset here.
     AWS_S3_CUSTOM_DOMAIN = None
     AWS_QUERYSTRING_AUTH = True
-    AWS_QUERYSTRING_EXPIRE = KYC_SIGNED_URL_TTL_SECONDS
+    # Stockage "default" (médias publics) uniquement : "private_kyc" fixe son propre
+    # querystring_expire = KYC_SIGNED_URL_TTL_SECONDS dans ses OPTIONS ci-dessus.
+    AWS_QUERYSTRING_EXPIRE = MEDIA_SIGNED_URL_TTL_SECONDS
     AWS_DEFAULT_ACL = None
     AWS_S3_FILE_OVERWRITE = False
     AWS_S3_OBJECT_PARAMETERS = {

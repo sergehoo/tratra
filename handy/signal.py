@@ -30,16 +30,31 @@ def delete_service_image_file(sender, instance, **kwargs):
         instance.image.delete(False)
 
 
-@receiver(post_save, sender=Review)
-def update_rating_on_review(sender, instance: Review, created, **kwargs):
-    if not created: return
-    handyman = instance.booking.handyman
-    qs = Review.objects.filter(booking__handyman=handyman)
+def refresh_handyman_rating(handyman_id):
+    """Note = moyenne des avis PUBLIABLES de l'artisan : mission terminée uniquement
+    (même règle que handy.api.views.published_reviews)."""
+    if not handyman_id:
+        return
+    qs = Review.objects.filter(booking__handyman_id=handyman_id, booking__status='completed')
     avg = qs.aggregate(avg=models.Avg('rating'))['avg'] or 0
-    HandymanProfile.objects.filter(user=handyman).update(rating=avg)
-    profile = HandymanProfile.objects.filter(user=handyman).first()
+    HandymanProfile.objects.filter(user_id=handyman_id).update(rating=avg)
+    profile = HandymanProfile.objects.filter(user_id=handyman_id).first()
     if profile:
         profile.refresh_quality_score()
+
+
+@receiver(post_save, sender=Review)
+def update_rating_on_review(sender, instance: Review, created, **kwargs):
+    # Création ET modification : l'auteur peut corriger sa note.
+    refresh_handyman_rating(instance.booking.handyman_id)
+
+
+@receiver(post_delete, sender=Review)
+def update_rating_on_review_delete(sender, instance: Review, **kwargs):
+    # La réservation peut être en cours de suppression (cascade) : lecture défensive.
+    handyman_id = (Booking.objects.filter(pk=instance.booking_id)
+                   .values_list('handyman_id', flat=True).first())
+    refresh_handyman_rating(handyman_id)
 
 # NB: l'incrément de completed_jobs est désormais géré de façon IDEMPOTENTE
 # dans Booking.transition_to() (uniquement à l'entrée dans 'completed').

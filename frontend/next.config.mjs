@@ -8,13 +8,32 @@ try {
   // une politique sûre et fonctionnelle plutôt que faire échouer le build.
 }
 
+// Origines servant les médias (photos de services/artisans) : l'API elle-même
+// et, en production, le stockage objet (S3/MinIO) déclaré explicitement.
+const mediaOrigins = (process.env.NEXT_PUBLIC_MEDIA_ORIGINS ?? "")
+  .split(",")
+  .map((value) => value.trim())
+  .filter(Boolean)
+  .flatMap((value) => {
+    try {
+      return [new URL(value).origin];
+    } catch {
+      return [];
+    }
+  });
+const imgSources = Array.from(new Set(["'self'", "data:", "blob:", apiOrigin, ...mediaOrigins]));
+
+// `next dev` (React Refresh / sourcemaps webpack « eval ») exige 'unsafe-eval' :
+// sans lui aucune page n'hydrate en développement. Jamais en production.
+const isDev = process.env.NODE_ENV !== "production";
+
 const contentSecurityPolicy = [
   "default-src 'self'",
   // Next.js injecte des scripts de démarrage ; un nonce par requête est l'étape
   // suivante lorsqu'un BFF/cookies HttpOnly sera introduit.
-  "script-src 'self' 'unsafe-inline'",
+  `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""}`,
   "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data: blob:",
+  `img-src ${imgSources.join(" ")}`,
   "font-src 'self' data:",
   `connect-src 'self' ${apiOrigin}`,
   "object-src 'none'",
@@ -35,11 +54,22 @@ const nextConfig = {
           { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
           { key: "X-Content-Type-Options", value: "nosniff" },
           { key: "X-Frame-Options", value: "DENY" },
-          { key: "Permissions-Policy", value: "camera=(), geolocation=(), microphone=()" },
+          // geolocation=(self) : nécessaire à la recherche « autour de moi ».
+          { key: "Permissions-Policy", value: "camera=(), geolocation=(self), microphone=()" },
           { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
           ...(process.env.NODE_ENV === "production"
             ? [{ key: "Strict-Transport-Security", value: "max-age=31536000; includeSubDomains" }]
             : []),
+        ],
+      },
+      {
+        // Service worker PWA : toujours revalidé (mises à jour immédiates),
+        // portée racine autorisée, type MIME explicite.
+        source: "/sw.js",
+        headers: [
+          { key: "Content-Type", value: "application/javascript; charset=utf-8" },
+          { key: "Cache-Control", value: "no-cache, no-store, must-revalidate" },
+          { key: "Service-Worker-Allowed", value: "/" },
         ],
       },
     ];

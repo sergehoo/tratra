@@ -2,14 +2,15 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import * as api from "./api";
-import { HOME_BY_ROLE } from "./config";
+import { isProtectedPath, loginHref, safeNext } from "./links";
 import type { User } from "./types";
 
 interface AuthState {
   user: User | null;
   loading: boolean;
-  login: (u: string, p: string) => Promise<User>;
-  register: (payload: Parameters<typeof api.register>[0]) => Promise<User>;
+  /** `next` : page de retour après connexion (validée par safeNext, sinon espace du rôle). */
+  login: (u: string, p: string, next?: string | null) => Promise<User>;
+  register: (payload: Parameters<typeof api.register>[0], next?: string | null) => Promise<User>;
   logout: () => Promise<void>;
 }
 
@@ -25,7 +26,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const handleSessionExpired = () => {
       if (!active) return;
       setUser(null);
-      router.replace("/login");
+      // Seule une page protégée renvoie vers la connexion (avec retour après
+      // connexion). Sur une page publique (/, /search, /login…), le visiteur
+      // reste où il est : sa session est simplement vidée.
+      const { pathname, search } = window.location;
+      if (isProtectedPath(pathname)) router.replace(loginHref(`${pathname}${search}`));
     };
 
     const restoreSession = async () => {
@@ -50,17 +55,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, [router]);
 
-  async function login(u: string, p: string) {
+  async function login(u: string, p: string, next?: string | null) {
     const me = await api.login(u, p);
     setUser(me);
-    router.push(HOME_BY_ROLE[me.user_type] ?? "/client");
+    router.push(safeNext(next, me.user_type));
     return me;
   }
 
-  async function register(payload: Parameters<typeof api.register>[0]) {
+  async function register(payload: Parameters<typeof api.register>[0], next?: string | null) {
     const me = await api.register(payload);
     setUser(me);
-    router.push(HOME_BY_ROLE[me.user_type] ?? "/client");
+    router.push(safeNext(next, me.user_type));
     return me;
   }
 

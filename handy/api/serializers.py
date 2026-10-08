@@ -32,9 +32,109 @@ class UserMiniSerializer(serializers.ModelSerializer):
 
 
 class ServiceCategorySerializer(serializers.ModelSerializer):
+    # Renseigné uniquement quand le queryset est annoté (liste des catégories).
+    services_count = serializers.SerializerMethodField()
+
     class Meta:
         model = ServiceCategory
-        fields = ["id", "name", "slug", "description", "icon", "is_active", "parent"]
+        fields = ["id", "name", "slug", "description", "icon", "is_active", "parent", "services_count"]
+
+    @extend_schema_field(OpenApiTypes.INT)
+    def get_services_count(self, obj):
+        return getattr(obj, "services_count", None)
+
+
+# ========= PUBLIC (landing / recherche anonyme) =========
+# Ces serializers sont exposés sans authentification : ils ne doivent JAMAIS
+# contenir d'email, téléphone, pièce d'identité, licence ni position exacte.
+
+def public_display_name(user) -> str:
+    """« Prénom N. » — jamais l'email ni le nom d'utilisateur."""
+    first = (getattr(user, "first_name", "") or "").strip()
+    last = (getattr(user, "last_name", "") or "").strip()
+    if first:
+        return f"{first} {last[:1]}." if last else first
+    return "Membre Tratra"
+
+
+def absolute_media_url(request, field) -> Optional[str]:
+    if not field:
+        return None
+    try:
+        url = field.url
+    except ValueError:
+        return None
+    if url.startswith(("http://", "https://")):
+        return url
+    return request.build_absolute_uri(url) if request else url
+
+
+class PublicUserMiniSerializer(serializers.ModelSerializer):
+    """Identité minimale d'un artisan dans les payloads publics (sans email)."""
+
+    class Meta:
+        model = User
+        fields = ["id", "first_name", "last_name", "user_type", "is_verified"]
+        read_only_fields = fields
+
+
+class PublicArtisanMiniSerializer(serializers.ModelSerializer):
+    """Résumé public d'un profil artisan, embarqué dans les services."""
+    display_name = serializers.SerializerMethodField()
+    is_verified = serializers.BooleanField(source="is_approved", read_only=True)
+    photo = serializers.SerializerMethodField()
+
+    class Meta:
+        model = HandymanProfile
+        fields = ["id", "display_name", "commune", "rating", "completed_jobs",
+                  "experience_years", "is_verified", "online", "photo"]
+        read_only_fields = fields
+
+    def get_display_name(self, obj) -> str:
+        return public_display_name(obj.user)
+
+    @extend_schema_field(OpenApiTypes.URI)
+    def get_photo(self, obj):
+        return absolute_media_url(self.context.get("request"), obj.photo)
+
+
+class PublicArtisanSerializer(PublicArtisanMiniSerializer):
+    """Carte artisan publique (artisans à la une) : + spécialités, quartier, tarif."""
+    user_id = serializers.IntegerField(source="user.id", read_only=True)
+    skills = serializers.SerializerMethodField()
+    # Prestations actives (annotation de /handymen/featured/) : 0 -> pas de lien
+    # « Voir ses prestations » côté front.
+    services_count = serializers.IntegerField(read_only=True, default=0)
+
+    class Meta(PublicArtisanMiniSerializer.Meta):
+        fields = PublicArtisanMiniSerializer.Meta.fields + [
+            "user_id", "quartier", "hourly_rate", "skills", "services_count"]
+        read_only_fields = fields
+
+    @extend_schema_field(OpenApiTypes.OBJECT)
+    def get_skills(self, obj):
+        return [{"id": c.id, "name": c.name, "slug": c.slug} for c in obj.skills.all()]
+
+
+class PublicReviewSerializer(serializers.ModelSerializer):
+    author = serializers.SerializerMethodField()
+    artisan = serializers.SerializerMethodField()
+    category = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Review
+        fields = ["id", "rating", "comment", "author", "artisan", "category", "created_at"]
+        read_only_fields = fields
+
+    def get_author(self, obj) -> str:
+        return public_display_name(obj.booking.client)
+
+    def get_artisan(self, obj) -> str:
+        return public_display_name(obj.booking.handyman)
+
+    def get_category(self, obj) -> Optional[str]:
+        service = getattr(obj.booking, "service", None)
+        return service.category.name if service and service.category_id else None
 
 
 # ========= USER =========
@@ -181,22 +281,43 @@ class ServiceSerializer(serializers.ModelSerializer):
     # écriture
     handyman = serializers.PrimaryKeyRelatedField(queryset=User.objects.all())
     category = serializers.PrimaryKeyRelatedField(queryset=ServiceCategory.objects.all())
-    # lecture
-    handyman_detail = UserMiniSerializer(source="handyman", read_only=True)
+    # lecture — /services/ est public : identité minimale SANS email.
+    handyman_detail = PublicUserMiniSerializer(source="handyman", read_only=True)
     category_detail = ServiceCategorySerializer(source="category", read_only=True)
     images = ServiceImageSerializer(many=True, read_only=True)
+    # Profil public de l'artisan (note, commune, vérifié, en ligne) ; None sans profil.
+    artisan = serializers.SerializerMethodField()
+    # Distance en km : renseignée uniquement quand le queryset est annoté
+    # `distance` (/services/nearby/, alternatives) ; None sinon.
+    distance_km = serializers.SerializerMethodField()
 
     class Meta:
         model = Service
         fields = [
-            "id", "handyman", "handyman_detail",
+            "id", "handyman", "handyman_detail", "artisan",
             "category", "category_detail",
             "title", "description",
             "price_type", "price", "duration",'banner','image_url',
             "is_active", "created_at", "updated_at",
-            "images",
+            "images", "distance_km",
         ]
         read_only_fields = ["created_at", "updated_at"]
+
+    @extend_schema_field(PublicArtisanMiniSerializer(allow_null=True))
+    def get_artisan(self, obj):
+        handyman = getattr(obj, "handyman", None)
+        # RelatedObjectDoesNotExist hérite d'AttributeError : getattr(..., None) suffit.
+        profile = getattr(handyman, "handyman_profile", None) if handyman else None
+        if profile is None:
+            return None
+        return PublicArtisanMiniSerializer(profile, context=self.context).data
+
+    @extend_schema_field(OpenApiTypes.FLOAT)
+    def get_distance_km(self, obj) -> Optional[float]:
+        distance = getattr(obj, "distance", None)
+        if distance is None or not hasattr(distance, "km"):
+            return None
+        return round(float(distance.km), 2)
 
 
 # ========= BOOKING =========
@@ -376,6 +497,12 @@ class ReviewSerializer(serializers.ModelSerializer):
         model = Review
         fields = ["id", "booking", "booking_detail", "rating", "comment", "created_at", "updated_at"]
         read_only_fields = ["created_at", "updated_at"]
+
+    def validate_booking(self, value):
+        # Un avis reste attaché à SA mission : sinon il s'afficherait au nom d'un autre client.
+        if self.instance is not None and value.pk != self.instance.booking_id:
+            raise serializers.ValidationError("La réservation d'un avis n'est pas modifiable.")
+        return value
 
 
 # ========= CONVERSATION / MESSAGE =========

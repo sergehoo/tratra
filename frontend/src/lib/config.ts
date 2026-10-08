@@ -30,6 +30,27 @@ export const PAYMENT_METHODS = (configuredPaymentMethods.length
   : ["cash"] as PaymentMethod[]
 ).map((value) => ({ value, label: PAYMENT_METHOD_LABELS[value] }));
 
+/**
+ * Séquestre des paiements (fonds conservés par la plateforme jusqu'à la fin de
+ * la mission). FAUX par défaut : aujourd'hui seul le paiement à la prestation
+ * est possible. N'activer (NEXT_PUBLIC_ESCROW_ENABLED=true au build) que
+ * lorsqu'un prestataire en ligne de handy/services/gateway.py est disponible et
+ * que son webhook place réellement les fonds sous séquestre.
+ */
+export const ESCROW_ENABLED = process.env.NEXT_PUBLIC_ESCROW_ENABLED === "true";
+
+/**
+ * Partage social par défaut, repris par le layout et par l'accueil (un
+ * `openGraph` de page remplace entièrement celui du layout).
+ */
+export const SHARE = {
+  title: "Tratra — Artisans vérifiés à domicile",
+  description: `Réservez un artisan vérifié près de chez vous. ${
+    ESCROW_ENABLED ? "Paiement sécurisé" : "Paiement à la fin de l’intervention"
+  }, suivi en temps réel.`,
+  image: { url: "/og-image.jpg", width: 1200, height: 630, alt: "Tratra — Artisans vérifiés à domicile" },
+};
+
 /** Espace d'accueil par défaut selon le type d'utilisateur. */
 export const HOME_BY_ROLE: Record<string, string> = {
   client: "/client",

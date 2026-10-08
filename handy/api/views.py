@@ -1,25 +1,33 @@
 # handy/api/views.py
 import hashlib
 import hmac
-from decimal import Decimal
+import logging
+import math
+from decimal import Decimal, InvalidOperation
 from math import radians, cos, sqrt, sin, asin
 from pathlib import Path
+from typing import Optional
 
 from django.conf import settings
 
 from django.contrib.gis.db.models.functions import Distance
 from django.contrib.gis.geos import Point
+from django.core.cache import cache
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction, models
-from django.db.models import Count, Q
+from django.db.models import Avg, Count, Exists, F, OuterRef, Q
+from django.db.models.functions import Trim
 from django.http import FileResponse
 from django.utils import timezone
 
 from django_filters.rest_framework import DjangoFilterBackend
+from rest_framework import serializers as drf_serializers
 from rest_framework import viewsets, permissions, status, mixins
 from rest_framework.authentication import SessionAuthentication
-from rest_framework.decorators import action, api_view, permission_classes
-from drf_spectacular.utils import extend_schema, OpenApiResponse
+from rest_framework.decorators import action, api_view, authentication_classes, permission_classes
+from drf_spectacular.utils import (
+    extend_schema, extend_schema_view, inline_serializer, OpenApiParameter, OpenApiResponse,
+)
 from drf_spectacular.types import OpenApiTypes
 from rest_framework.filters import OrderingFilter, SearchFilter
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -138,7 +146,10 @@ def search_services_nearby_qs(origin_point: Point, category=None, max_km=15):
           .filter(distance__lte=max_km * 1000))
     if category:
         qs = qs.filter(category=category)
-    return qs.order_by('distance', '-handyman__handyman_profile__rating', 'price')
+    # 'id' en dernier : tri total, donc pagination LIMIT/OFFSET stable (sinon les
+    # ex aequo — services d'un même artisan — sortent en doublon ou jamais).
+    return qs.order_by('distance', '-handyman__handyman_profile__rating',
+                       F('price').asc(nulls_last=True), 'id')
 
 
 def suggest_alternatives_qs(booking: Booking, price_tolerance=Decimal('0.15'), km=10):
@@ -173,6 +184,136 @@ class DefaultPageNumberPagination(PageNumberPagination):
     max_page_size = 100
 
 
+# ---- Paramètres publics (recherche anonyme, landing) ----
+# Les valeurs invalides sont IGNORÉES (jamais de 500) : un lien partagé avec un
+# paramètre mal formé doit afficher des résultats, pas une erreur.
+logger = logging.getLogger(__name__)
+
+_TRUTHY = {"1", "true", "yes", "on", "oui"}
+_MAX_PK = 2_147_483_647  # borne d'un IntegerField Postgres
+PUBLIC_STATS_CACHE_KEY = "public_stats_v1"
+PUBLIC_STATS_TTL = 60
+
+
+def _flag(params, name) -> bool:
+    return str(params.get(name) or "").strip().lower() in _TRUTHY
+
+
+def _id_list(raw, max_items=50) -> list:
+    """« 1,2,x,3 » -> [1, 2, 3] (entiers > 0 uniquement, sans doublon)."""
+    ids = []
+    for part in str(raw or "").split(","):
+        try:
+            value = int(part.strip())
+        except (TypeError, ValueError):
+            continue
+        if 0 < value <= _MAX_PK and value not in ids:
+            ids.append(value)
+            if len(ids) >= max_items:
+                break
+    return ids
+
+
+def _text_param(raw, max_len=100) -> str:
+    """Texte libre public : sans octet NUL (refusé par Postgres -> 500), rogné, borné."""
+    return str(raw or "").replace("\x00", "").strip()[:max_len]
+
+
+# Bornes de Service.price (DecimalField max_digits=10, decimal_places=2).
+_PRICE_BOUND = Decimal("99999999.99")
+_CENT = Decimal("0.01")
+
+
+def _decimal_param(raw) -> Optional[Decimal]:
+    """Prix public ramené dans NUMERIC(10,2) : 1e131072 ou 1e-20000 ne lèvent jamais de DataError."""
+    if raw is None or str(raw).strip() == "":
+        return None
+    try:
+        value = Decimal(str(raw).strip())
+    except (InvalidOperation, ValueError):
+        return None
+    if not value.is_finite():
+        return None
+    # Borner AVANT quantize (qui lèverait InvalidOperation au-delà de 28 chiffres).
+    # Le sens du filtre est conservé : min_price au-delà de la borne -> aucun résultat,
+    # max_price au-delà -> pas de plafond.
+    value = max(-_PRICE_BOUND, min(_PRICE_BOUND, value))
+    return value.quantize(_CENT)
+
+
+def _bounded_int(raw, default: int, lo: int, hi: int) -> int:
+    try:
+        value = int(str(raw).strip())
+    except (TypeError, ValueError):
+        return default
+    return max(lo, min(hi, value))
+
+
+def _round2(value) -> Optional[float]:
+    return round(float(value), 2) if value is not None else None
+
+
+def published_reviews():
+    """Avis publiables : liés à une mission TERMINÉE (écarte aussi les avis déjà en
+    base créés avant ce contrôle). Même règle que refresh_handyman_rating
+    (handy/signal.py). L'auto-évaluation est exclue par construction : la contrainte
+    bk_client_not_handyman interdit une réservation dont le client est l'artisan.
+    """
+    return Review.objects.filter(booking__status="completed")
+
+
+def apply_public_service_filters(qs, params):
+    """Filtres de recherche publics communs à /services/ et /services/nearby/.
+
+    categories=1,2 · commune=<commune ou quartier> · verified=1 · online=1 · min_price · max_price
+    """
+    category_ids = _id_list(params.get("categories"))
+    if category_ids:
+        qs = qs.filter(category_id__in=category_ids)
+
+    commune = _text_param(params.get("commune"))
+    if commune:
+        # Chemin FK + OneToOne : pas de doublon, pas de .distinct() nécessaire.
+        qs = qs.filter(Q(handyman__handyman_profile__commune__icontains=commune)
+                       | Q(handyman__handyman_profile__quartier__icontains=commune))
+
+    if _flag(params, "verified"):
+        qs = qs.filter(handyman__handyman_profile__is_approved=True)
+
+    if _flag(params, "online"):
+        # « En ligne » n'a de sens que pour un profil vérifié (cf. /handymen/presence/).
+        qs = qs.filter(handyman__handyman_profile__online=True,
+                       handyman__handyman_profile__is_approved=True)
+
+    min_price = _decimal_param(params.get("min_price"))
+    if min_price is not None:
+        qs = qs.filter(price__gte=min_price)
+    max_price = _decimal_param(params.get("max_price"))
+    if max_price is not None:
+        qs = qs.filter(price__lte=max_price)
+    return qs
+
+
+# Tris publics (?sort=) — complémentaires du paramètre DRF ?ordering= qui reste prioritaire.
+SERVICE_SORTS = {
+    "recent": ("-created_at", "-id"),
+    "price_asc": (F("price").asc(nulls_last=True), "-created_at", "-id"),
+    "price_desc": (F("price").desc(nulls_last=True), "-created_at", "-id"),
+    "rating": (F("handyman__handyman_profile__rating").desc(nulls_last=True), "-created_at", "-id"),
+}
+
+_PUBLIC_SERVICE_FILTER_PARAMS = [
+    OpenApiParameter("categories", OpenApiTypes.STR,
+                     description="Ids de catégories séparés par des virgules (ex. 1,2,3)."),
+    OpenApiParameter("commune", OpenApiTypes.STR,
+                     description="Commune ou quartier de l'artisan (contient)."),
+    OpenApiParameter("verified", OpenApiTypes.BOOL, description="1 = artisans vérifiés uniquement."),
+    OpenApiParameter("online", OpenApiTypes.BOOL, description="1 = artisans vérifiés et en ligne."),
+    OpenApiParameter("min_price", OpenApiTypes.NUMBER, description="Prix minimum (FCFA)."),
+    OpenApiParameter("max_price", OpenApiTypes.NUMBER, description="Prix maximum (FCFA)."),
+]
+
+
 # ---- Serializers (tu les as déjà) ----
 from .serializers import (
     UserSerializer, HandymanProfileSerializer, ServiceCategorySerializer, ServiceSerializer,
@@ -183,7 +324,8 @@ from .serializers import (
     MatchRequestSerializer, MatchResponseSerializer, PriceEstimateSerializer, PaymentInitSerializer,
     EmailOrUsernameTokenObtainPairSerializer, HeroSlideSerializer, PayoutSerializer, DisputeSerializer,
     TimeOffSerializer, ReplacementSuggestionSerializer,
-    PayoutAccountSerializer, SubscriptionPlanSerializer, SubscriptionSerializer, CompanyProfileSerializer
+    PayoutAccountSerializer, SubscriptionPlanSerializer, SubscriptionSerializer, CompanyProfileSerializer,
+    PublicArtisanSerializer, PublicReviewSerializer,
 )
 
 class EmailOrUsernameTokenObtainPairView(TokenObtainPairView):
@@ -278,6 +420,72 @@ class HandymanProfileViewSet(viewsets.ModelViewSet):
         profile.save(update_fields=["online"])
         return Response({"online": profile.online})
 
+    @extend_schema(
+        tags=["Public"],
+        summary="Artisans vérifiés à la une (public)",
+        description=(
+            "Artisans approuvés (KYC validé) dont le compte est actif, classés en ligne d'abord "
+            "puis par score qualité, note et missions réalisées. Aucune donnée sensible "
+            "(email, téléphone, pièce d'identité, licence, position exacte)."
+        ),
+        parameters=[
+            OpenApiParameter("limit", OpenApiTypes.INT, description="Nombre de résultats (1-24, défaut 8)."),
+            OpenApiParameter("category", OpenApiTypes.INT, description="Id d'une catégorie."),
+            OpenApiParameter("categories", OpenApiTypes.STR,
+                             description="Ids de catégories séparés par des virgules."),
+            OpenApiParameter("commune", OpenApiTypes.STR,
+                             description="Commune ou quartier de l'artisan (contient)."),
+            OpenApiParameter("online", OpenApiTypes.BOOL, description="1 = en ligne uniquement."),
+        ],
+        responses=inline_serializer(
+            name="FeaturedArtisansResponse",
+            fields={
+                "count": drf_serializers.IntegerField(),
+                "results": PublicArtisanSerializer(many=True),
+            },
+        ),
+    )
+    @action(detail=False, methods=["get"], url_path="featured",
+            permission_classes=[AllowAny], authentication_classes=[],
+            filter_backends=[], pagination_class=None)
+    def featured(self, request):
+        """GET /handymen/featured/?limit=8&category=&categories=&commune=&online=1"""
+        params = request.query_params
+        limit = _bounded_int(params.get("limit"), default=8, lo=1, hi=24)
+
+        # services_count = prestations ACTIVES : le front n'affiche « Voir ses prestations »
+        # que s'il y en a (un artisan vérifié peut ne travailler que via /match/).
+        qs = (HandymanProfile.objects
+              .filter(is_approved=True, user__is_active=True)
+              .annotate(services_count=Count("user__services",
+                                             filter=Q(user__services__is_active=True),
+                                             distinct=True))
+              .select_related("user")
+              .prefetch_related("skills"))
+
+        category_ids = _id_list(params.get("categories"))
+        single = _id_list(params.get("category"), max_items=1)
+        category_ids = list(dict.fromkeys(single + category_ids))
+        if category_ids:
+            # Spécialité déclarée OU service actif dans la catégorie. EXISTS évite
+            # les doublons d'une jointure m2m (pas de .distinct() nécessaire).
+            has_skill = HandymanProfile.skills.through.objects.filter(
+                handymanprofile_id=OuterRef("pk"), servicecategory_id__in=category_ids)
+            has_service = Service.objects.filter(
+                handyman_id=OuterRef("user_id"), is_active=True, category_id__in=category_ids)
+            qs = qs.filter(Q(Exists(has_skill)) | Q(Exists(has_service)))
+
+        commune = _text_param(params.get("commune"))
+        if commune:
+            qs = qs.filter(Q(commune__icontains=commune) | Q(quartier__icontains=commune))
+        if _flag(params, "online"):
+            qs = qs.filter(online=True)
+
+        qs = qs.order_by("-online", "-quality_score", "-rating", "-completed_jobs", "id")
+        total = qs.count()
+        data = PublicArtisanSerializer(qs[:limit], many=True, context={"request": request}).data
+        return Response({"count": total, "results": data})
+
 
 # ---- Catégories ----
 class ServiceCategoryViewSet(viewsets.ModelViewSet):
@@ -286,11 +494,31 @@ class ServiceCategoryViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticatedOrReadOnly]
     filter_backends = [SearchFilter, OrderingFilter]
     search_fields = ["name", "slug", "description"]
+    ordering_fields = ["name", "services_count"]
     ordering = ["name"]
     pagination_class = DefaultPageNumberPagination
 
+    def get_queryset(self):
+        # services_count = nombre de services ACTIFS (chiffre réel affiché au public).
+        qs = super().get_queryset().annotate(
+            services_count=Count("services", filter=Q(services__is_active=True), distinct=True)
+        )
+        user = getattr(self.request, "user", None)
+        if not (user and user.is_authenticated and user.is_staff):
+            # Public / non-staff : jamais de catégorie désactivée (liste ET détail).
+            qs = qs.filter(is_active=True)
+        return qs
+
 
 # ---- Services ----
+@extend_schema_view(
+    list=extend_schema(parameters=_PUBLIC_SERVICE_FILTER_PARAMS + [
+        OpenApiParameter("sort", OpenApiTypes.STR,
+                         enum=list(SERVICE_SORTS.keys()),
+                         description="Tri public : recent | price_asc | price_desc | rating "
+                                     "(ignoré si ?ordering= est fourni)."),
+    ]),
+)
 class ServiceViewSet(viewsets.ModelViewSet):
     queryset = (
         Service.objects.select_related("handyman", "category", "handyman__handyman_profile")
@@ -301,36 +529,78 @@ class ServiceViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticatedOrReadOnly, IsOwnerOrAdmin]
     owner_lookup = "handyman"
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ["category", "is_active", "price_type"]
-    search_fields = ["title", "description", "handyman__first_name", "handyman__last_name"]
+    filterset_fields = ["category", "is_active", "price_type", "handyman"]
+    # category__* : « plomberie », « ménage » (nom) ou « electricite » (slug sans accent)
+    # trouvent le métier. Category est une FK : pas de doublon.
+    search_fields = ["title", "description", "category__name", "category__slug",
+                     "handyman__first_name", "handyman__last_name"]
     ordering = ["-created_at"]
     pagination_class = DefaultPageNumberPagination
 
+    def filter_queryset(self, queryset):
+        queryset = super().filter_queryset(queryset)
+        if getattr(self, "action", None) != "list":
+            return queryset
+        params = self.request.query_params
+        queryset = apply_public_service_filters(queryset, params)
+        # ?ordering= (DRF) reste prioritaire ; ?sort= ne s'applique qu'en son absence.
+        sort = SERVICE_SORTS.get(str(params.get("sort") or "").strip().lower())
+        if sort and not params.get(OrderingFilter.ordering_param):
+            queryset = queryset.order_by(*sort)
+        return queryset
+
+    @extend_schema(
+        tags=["Public"],
+        summary="Services proches d'une position (public)",
+        description="Services actifs dont l'artisan est dans le rayon, triés par distance "
+                    "(champ distance_km). lat/lng obligatoires.",
+        parameters=[
+            OpenApiParameter("lat", OpenApiTypes.NUMBER, required=True),
+            OpenApiParameter("lng", OpenApiTypes.NUMBER, required=True),
+            OpenApiParameter("radius_km", OpenApiTypes.NUMBER, description="Rayon en km (défaut 15)."),
+            OpenApiParameter("category_id", OpenApiTypes.INT,
+                             description="Id de catégorie (400 si inexistante)."),
+            *_PUBLIC_SERVICE_FILTER_PARAMS,
+        ],
+        responses=ServiceSerializer(many=True),
+    )
     @action(detail=False, methods=["get"],
             permission_classes=[permissions.AllowAny],
-            authentication_classes=[])
+            authentication_classes=[], filter_backends=[])
     def nearby(self, request):
         """
         GET /services/nearby/?lat=..&lng=..&radius_km=15&category_id=...
+            [&categories=1,2&commune=..&verified=1&online=1&min_price=..&max_price=..]
         Renvoie les services triés par distance.
         """
-        lat = request.query_params.get("lat")
-        lng = request.query_params.get("lng")
-        radius_km = float(request.query_params.get("radius_km", 15))
-        cat_id = request.query_params.get("category_id")
+        params = request.query_params
+        lat = params.get("lat")
+        lng = params.get("lng")
+        cat_id = params.get("category_id")
 
-        if lat is None or lng is None:
+        if lat in (None, "") or lng in (None, ""):
             return Response({"detail": "lat et lng requis."}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            lat_f, lng_f = float(lat), float(lng)
+            radius_km = float(params.get("radius_km") or 15)
+        except (TypeError, ValueError):
+            return Response({"detail": "lat, lng et radius_km doivent être numériques."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        if not (-90 <= lat_f <= 90 and -180 <= lng_f <= 180
+                and math.isfinite(radius_km) and radius_km > 0):
+            return Response({"detail": "Coordonnées ou rayon hors limites."},
+                            status=status.HTTP_400_BAD_REQUEST)
 
-        origin = Point(float(lng), float(lat), srid=4326)
+        origin = Point(lng_f, lat_f, srid=4326)
         category = None
         if cat_id:
-            try:
-                category = ServiceCategory.objects.get(pk=cat_id)
-            except ServiceCategory.DoesNotExist:
+            parsed = _id_list(cat_id, max_items=1)
+            category = ServiceCategory.objects.filter(pk=parsed[0]).first() if parsed else None
+            if category is None:
                 return Response({"detail": "category_id invalide."}, status=status.HTTP_400_BAD_REQUEST)
 
-        qs = search_services_nearby_qs(origin, category, radius_km)
+        qs = search_services_nearby_qs(origin, category, radius_km).prefetch_related("images")
+        qs = apply_public_service_filters(qs, params)
         page = self.paginate_queryset(qs)
         ser = self.get_serializer(page, many=True)
         return self.get_paginated_response(ser.data)
@@ -346,7 +616,10 @@ class ServiceImageViewSet(viewsets.ModelViewSet):
 # ---- Booking ----
 class BookingViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
     queryset = (
-        Booking.objects.select_related("client", "handyman", "service", "service__category")
+        # service__handyman__handyman_profile : champ `artisan` de service_detail sans N+1.
+        Booking.objects.select_related("client", "handyman", "service", "service__category",
+                                       "service__handyman__handyman_profile")
+        .prefetch_related("service__images")
         .all()
     )
     permission_classes = [permissions.IsAuthenticated]
@@ -385,7 +658,7 @@ class BookingViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
         """
         booking = self.get_object()
         qs = suggest_alternatives_qs(booking)
-        ser = ServiceSerializer(qs, many=True)
+        ser = ServiceSerializer(qs, many=True, context={"request": request})
         return Response(ser.data)
 
     @action(detail=True, methods=["post"])
@@ -448,13 +721,14 @@ class BookingViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
     def replacements(self, request, pk=None):
         """Suggestions de remplacement (générées à la volée si aucune)."""
         booking = self.get_object()
-        sugg = booking.replacement_suggestions.select_related(
-            "suggested_service", "suggested_service__handyman")
+        related = ("suggested_service", "suggested_service__category",
+                   "suggested_service__handyman__handyman_profile")
+        sugg = booking.replacement_suggestions.select_related(*related)
         if not sugg.exists():
             booking.generate_replacement_suggestions()
-            sugg = booking.replacement_suggestions.select_related(
-                "suggested_service", "suggested_service__handyman")
-        return Response(ReplacementSuggestionSerializer(sugg, many=True).data)
+            sugg = booking.replacement_suggestions.select_related(*related)
+        return Response(ReplacementSuggestionSerializer(
+            sugg, many=True, context={"request": request}).data)
 
     @action(detail=True, methods=["post"], url_path="accept-replacement")
     def accept_replacement(self, request, pk=None):
@@ -470,7 +744,10 @@ class BookingViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
 
 # ---- Paiements ----
 class PaymentViewSet(OwnerScopedQuerysetMixin, viewsets.ReadOnlyModelViewSet):
-    queryset = Payment.objects.select_related("booking", "booking__client", "booking__handyman").all()
+    queryset = Payment.objects.select_related(
+        "booking", "booking__client", "booking__handyman",
+        "booking__service__category", "booking__service__handyman__handyman_profile",
+    ).all()
     serializer_class = PaymentSerializer
     permission_classes = [permissions.IsAuthenticated]
     owner_lookups = ("booking__client", "booking__handyman")
@@ -586,18 +863,80 @@ class TimeOffViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
 
 # ---- Avis / Chat / Notifications / Docs / Reports / Devices ----
 class ReviewViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
-    queryset = Review.objects.select_related("booking", "booking__client", "booking__handyman").all()
+    queryset = Review.objects.select_related(
+        "booking", "booking__client", "booking__handyman",
+        "booking__service__category", "booking__service__handyman__handyman_profile",
+    ).all()
     serializer_class = ReviewSerializer
     permission_classes = [permissions.IsAuthenticated]
     owner_lookups = ("booking__client", "booking__handyman")
     ordering = ["-created_at"]
     pagination_class = DefaultPageNumberPagination
 
+    def get_object(self):
+        # L'artisan noté peut LIRE l'avis (queryset cloisonné), jamais le réécrire
+        # ni le supprimer : seul l'auteur (client de la réservation) ou le staff.
+        review = super().get_object()
+        user = self.request.user
+        if (self.action in ("update", "partial_update", "destroy")
+                and not user.is_staff and review.booking.client_id != user.id):
+            raise PermissionDenied("Seul l'auteur de l'avis peut le modifier ou le supprimer.")
+        return review
+
     def perform_create(self, serializer):
-        booking = serializer.validated_data.get("booking")
-        if booking and booking.client != self.request.user and not self.request.user.is_staff:
-            raise PermissionDenied("Vous ne pouvez noter que vos propres réservations.")
+        booking = serializer.validated_data["booking"]
+        user = self.request.user
+        if not user.is_staff:
+            if booking.client_id != user.id:
+                raise PermissionDenied("Vous ne pouvez noter que vos propres réservations.")
+            # Auto-évaluation impossible : client != artisan (contrainte bk_client_not_handyman).
+            if booking.status != "completed":
+                raise drf_serializers.ValidationError(
+                    {"booking": "Seule une mission terminée peut être notée."})
+        if Review.objects.filter(booking=booking).exists():
+            # Un avis par mission (OneToOne) : 400 explicite plutôt qu'une IntegrityError (500).
+            raise drf_serializers.ValidationError({"booking": "Cette mission a déjà été notée."})
         serializer.save()
+
+    @extend_schema(
+        tags=["Public"],
+        summary="Derniers avis clients publiés (public)",
+        description=(
+            "Uniquement les avis de missions terminées. count/average "
+            "portent sur tous ces avis ; results = les derniers avec commentaire, du plus "
+            "récent au plus ancien. Auteur et artisan affichés « Prénom N. », jamais d'email."
+        ),
+        parameters=[
+            OpenApiParameter("limit", OpenApiTypes.INT, description="Nombre d'avis (1-20, défaut 6)."),
+        ],
+        responses=inline_serializer(
+            name="PublicReviewsResponse",
+            fields={
+                "count": drf_serializers.IntegerField(),
+                "average": drf_serializers.FloatField(allow_null=True),
+                "results": PublicReviewSerializer(many=True),
+            },
+        ),
+    )
+    @action(detail=False, methods=["get"], url_path="public",
+            permission_classes=[AllowAny], authentication_classes=[],
+            filter_backends=[], pagination_class=None)
+    def public(self, request):
+        """GET /reviews/public/?limit=6 — n'utilise PAS le queryset cloisonné du viewset."""
+        limit = _bounded_int(request.query_params.get("limit"), default=6, lo=1, hi=20)
+        published = published_reviews()
+        agg = published.aggregate(count=Count("id"), average=Avg("rating"))
+        latest = (published
+                  .select_related("booking__client", "booking__handyman", "booking__service__category")
+                  .exclude(comment__isnull=True)
+                  .annotate(comment_trimmed=Trim("comment"))
+                  .exclude(comment_trimmed="")
+                  .order_by("-created_at", "-id")[:limit])
+        return Response({
+            "count": agg["count"] or 0,
+            "average": _round2(agg["average"]),
+            "results": PublicReviewSerializer(latest, many=True, context={"request": request}).data,
+        })
 
 
 class ConversationViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
@@ -886,6 +1225,60 @@ def company_profile(request):
     return Response(ser.data, status=status.HTTP_200_OK if acc else status.HTTP_201_CREATED)
 
 
+# ---- Chiffres publics (landing) ----
+def compute_public_stats() -> dict:
+    """Chiffres RÉELS de la plateforme (aucune valeur inventée ni arrondie « marketing »)."""
+    approved = HandymanProfile.objects.filter(is_approved=True, user__is_active=True)
+    reviews = published_reviews().aggregate(count=Count("id"), average=Avg("rating"))
+    return {
+        "categories": ServiceCategory.objects.filter(is_active=True).count(),
+        "services": Service.objects.filter(is_active=True).count(),
+        "artisans_verified": approved.count(),
+        "artisans_online": approved.filter(online=True).count(),
+        "missions_completed": Booking.objects.filter(status="completed").count(),
+        "reviews_count": reviews["count"] or 0,
+        "rating_average": _round2(reviews["average"]),
+    }
+
+
+@extend_schema(
+    tags=["Public"],
+    summary="Chiffres publics de la plateforme",
+    description="Compteurs réels (catégories actives, services actifs, artisans vérifiés / en ligne, "
+                "missions terminées, avis de missions terminées et leur note moyenne). "
+                "Mis en cache 60 s.",
+    responses=inline_serializer(
+        name="PublicStats",
+        fields={
+            "categories": drf_serializers.IntegerField(),
+            "services": drf_serializers.IntegerField(),
+            "artisans_verified": drf_serializers.IntegerField(),
+            "artisans_online": drf_serializers.IntegerField(),
+            "missions_completed": drf_serializers.IntegerField(),
+            "reviews_count": drf_serializers.IntegerField(),
+            "rating_average": drf_serializers.FloatField(allow_null=True),
+        },
+    ),
+)
+@api_view(["GET"])
+@authentication_classes([])
+@permission_classes([permissions.AllowAny])
+def public_stats(request):
+    """GET /public/stats/ — sans authentification (un jeton invalide est ignoré)."""
+    try:
+        data = cache.get(PUBLIC_STATS_CACHE_KEY)
+    except Exception:  # cache indisponible : on sert des chiffres frais
+        logger.warning("Cache indisponible pour %s", PUBLIC_STATS_CACHE_KEY, exc_info=True)
+        data = None
+    if data is None:
+        data = compute_public_stats()
+        try:
+            cache.set(PUBLIC_STATS_CACHE_KEY, data, PUBLIC_STATS_TTL)
+        except Exception:
+            logger.warning("Écriture cache impossible pour %s", PUBLIC_STATS_CACHE_KEY, exc_info=True)
+    return Response(data)
+
+
 # ---- Abonnements / B2B ----
 class SubscriptionPlanViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = SubscriptionPlanSerializer
@@ -1036,54 +1429,61 @@ class HeroSlideViewSet(viewsets.ReadOnlyModelViewSet):
         auto = self._auto_generate_slides()
         return Response(auto)
 
+    # Images de repli (Unsplash) : chaque URL a été vérifiée (HTTP 200, image/jpeg).
+    FALLBACK_IMAGES = {
+        "trust": "https://images.unsplash.com/photo-1581578731548-c64695cc6952?w=1200&q=70&auto=format&fit=crop",
+        "category": "https://images.unsplash.com/photo-1504148455328-c376907d081c?w=1200&q=70&auto=format&fit=crop",
+        "verified": "https://images.unsplash.com/photo-1621905251189-08b45d6a269e?w=1200&q=70&auto=format&fit=crop",
+    }
+
     def _auto_generate_slides(self):
         """
-        Construit 2-3 slides dynamiques quand il n'y a aucun slide configuré :
-        - Promo générique
-        - Top catégorie (par volume de services)
-        - Artisans certifiés (générique)
+        Construit 2-3 slides quand aucun slide n'est configuré (consommé par l'app mobile).
+        Contenu HONNÊTE uniquement : aucune promo, remise ou chiffre inventé.
+        - Proposition de valeur (artisans de confiance)
+        - Catégorie la plus fournie (nombre RÉEL de services actifs, seulement si > 0)
+        - Artisans vérifiés (KYC : identité et documents contrôlés)
         """
-        # Top category par nombre de services actifs
         top_cat = (ServiceCategory.objects
                    .filter(is_active=True)
                    .annotate(svc_count=Count('services', filter=models.Q(services__is_active=True)))
-                   .order_by('-svc_count')
+                   .filter(svc_count__gt=0)
+                   .order_by('-svc_count', 'name')
                    .first())
 
-        slides = []
-
-        slides.append({
-            "title": "Jusqu'à -20% aujourd'hui",
-            "subtitle": "Interventions rapides et garanties",
-            "image": "https://images.unsplash.com/photo-1581578731548-c64695cc6952?q=80&w=1200&auto=format&fit=crop",
-            "gradient": ["#0BA360", "#3CBA92"],
+        slides = [{
+            "title": "Des artisans de confiance",
+            "subtitle": "Réservez en quelques minutes, en toute sérénité",
+            "image": self.FALLBACK_IMAGES["trust"],
+            "gradient": ["#2e8b57", "#1f6a41"],
             "cta_label": "Je réserve",
             "cta_action": "open_services",
             "ctaParams": {},
-            "ordering": 1
-        })
+            "ordering": 1,
+        }]
 
         if top_cat:
+            n = top_cat.svc_count
             slides.append({
                 "title": top_cat.name,
-                "subtitle": "Experts disponibles près de chez vous",
-                "image": "https://images.unsplash.com/photo-1581579188871-cfe9b0b2ce6c?q=80&w=1200&auto=format&fit=crop",
-                "gradient": ["#FFC107", "#FFD54F"],
+                "subtitle": f"{n} service{'s' if n > 1 else ''} proposé{'s' if n > 1 else ''} sur Tratra",
+                "image": self.FALLBACK_IMAGES["category"],
+                "gradient": ["#F6C90E", "#d4aa00"],
                 "cta_label": "Voir +",
                 "cta_action": "open_category",
                 "ctaParams": {"category_id": top_cat.id},
-                "ordering": 2
+                "ordering": 2,
             })
 
         slides.append({
-            "title": "Artisans certifiés",
-            "subtitle": "Qualité, ponctualité, garanties",
-            "image": "https://images.unsplash.com/photo-1621905251918-3850a8f4257b?q=80&w=1200&auto=format&fit=crop",
-            "gradient": ["#00B14F", "#00D25F"],
+            "title": "Artisans vérifiés",
+            "subtitle": "Identité et documents contrôlés",
+            "image": self.FALLBACK_IMAGES["verified"],
+            "gradient": ["#15201b", "#2e8b57"],
             "cta_label": "Découvrir",
             "cta_action": "open_artisans",
             "ctaParams": {},
-            "ordering": 3
+            "ordering": 3,
         })
 
         return slides
