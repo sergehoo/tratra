@@ -3,12 +3,33 @@
 from .base import *
 
 import os
+import sys
+from pathlib import Path
 ALLOWED_HOSTS = ['*']
 
-GDAL_LIBRARY_PATH = os.getenv('GDAL_LIBRARY_PATH', '/opt/homebrew/opt/gdal/lib/libgdal.dylib')
-GEOS_LIBRARY_PATH = os.getenv('GEOS_LIBRARY_PATH', '/opt/homebrew/opt/geos/lib/libgeos_c.dylib')
+# Do not force macOS Homebrew paths in Linux CI/containers.  On a local macOS
+# development machine, use the Homebrew path only when it actually exists;
+# other environments retain Django's normal auto-discovery.
+if os.getenv('GDAL_LIBRARY_PATH'):
+    GDAL_LIBRARY_PATH = os.environ['GDAL_LIBRARY_PATH']
+elif sys.platform == 'darwin':
+    _gdal_homebrew = Path('/opt/homebrew/opt/gdal/lib/libgdal.dylib')
+    if _gdal_homebrew.exists():
+        GDAL_LIBRARY_PATH = str(_gdal_homebrew)
+if os.getenv('GEOS_LIBRARY_PATH'):
+    GEOS_LIBRARY_PATH = os.environ['GEOS_LIBRARY_PATH']
+elif sys.platform == 'darwin':
+    _geos_homebrew = Path('/opt/homebrew/opt/geos/lib/libgeos_c.dylib')
+    if _geos_homebrew.exists():
+        GEOS_LIBRARY_PATH = str(_geos_homebrew)
 
 DEBUG = True
+
+# En dev/test : stockage statique simple (pas de manifeste hashé prod).
+# {% static %} renvoie /static/... sans exiger un collectstatic préalable.
+STORAGES["staticfiles"] = {
+    "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
+}
 
 DATABASES = {
     'default': {

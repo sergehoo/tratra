@@ -7,6 +7,8 @@ local_settings.py
 db.sqlite3
 db.sqlite3-journal
 media
+staticfiles/
+.DS_Store
 
 # If your build process includes running collectstatic, then you probably don't need or want to include staticfiles/
 # in your Git repository. Update and uncomment the following line accordingly.
@@ -29,8 +31,8 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
+/lib/
+/lib64/
 parts/
 sdist/
 var/
@@ -176,3 +178,9 @@ cython_debug/
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 
+# Flutter/Dart metadata belongs to the separate mobile repository, not this API
+# repository.  Ignore stale generated copies if they are present locally.
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.metadata

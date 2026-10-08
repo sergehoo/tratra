@@ -11,11 +11,13 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/4.2/ref/settings/
 """
 import os
+from datetime import timedelta
 from pathlib import Path
 
 import channels
 import environ
 from decouple import config
+from django.core.exceptions import ImproperlyConfigured
 import sentry_sdk
 from sentry_sdk.integrations.django import DjangoIntegration
 from sentry_sdk.integrations.celery import CeleryIntegration
@@ -23,12 +25,39 @@ from sentry_sdk.integrations.redis import RedisIntegration
 
 from tratra.settings import env
 
+
+def env_bool(name, default=False):
+    """Read a boolean environment setting without accepting a truthy string."""
+    value = config(name, default=str(default))
+    return str(value).strip().lower() in ("1", "true", "yes", "on")
+
+
+def env_list(name, default=""):
+    return [item.strip() for item in config(name, default=default).split(",") if item.strip()]
+
+
+def required_env(name):
+    value = config(name, default="").strip()
+    if not value:
+        raise ImproperlyConfigured(f"{name} must be configured when object storage is enabled.")
+    return value
+
+
 # env = environ.Env()
 # environ.Env.read_env()
-DEBUG = os.getenv("DEBUG", "False").lower() in ("1", "true", "yes")
+DEBUG = env_bool("DEBUG", False)
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
-SECRET_KEY = config('SECRET_KEY')
+# A local-only fallback keeps isolated tests bootable.  prod.py rejects it.
+SECRET_KEY = config('SECRET_KEY', default='django-insecure-local-development-key-change-me')
+
+# Allow developers and non-standard production images to point Django GIS at
+# their installed libraries.  When absent, Django performs its normal
+# auto-discovery (the container and CI image install the system packages).
+if os.getenv('GDAL_LIBRARY_PATH'):
+    GDAL_LIBRARY_PATH = os.environ['GDAL_LIBRARY_PATH']
+if os.getenv('GEOS_LIBRARY_PATH'):
+    GEOS_LIBRARY_PATH = os.environ['GEOS_LIBRARY_PATH']
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/4.2/howto/deployment/checklist/
@@ -38,15 +67,10 @@ SECRET_KEY = config('SECRET_KEY')
 
 # SECURITY WARNING: don't run with debug turned on in production!
 
-ALLOWED_HOSTS = [
-    "tratra.net",
-    "www.tratra.net",
-    "tratra.ci",
-    "www.tratra.ci",
-    "127.0.0.1",
-    "localhost",
-    "tratraweb",  # nom de service docker (utile pour tests internes)
-]
+ALLOWED_HOSTS = env_list(
+    "ALLOWED_HOSTS",
+    "tratra.net,www.tratra.net,tratra.ci,www.tratra.ci,127.0.0.1,localhost,tratraweb",
+)
 
 # Pendant l’accès provisoire en HTTP sur :1934, ne force pas HTTPS
 
@@ -87,6 +111,7 @@ INSTALLED_APPS = [
     'rest_framework',
     'rest_framework_simplejwt',
     'rest_framework_simplejwt.token_blacklist',
+    'drf_spectacular',
     'tailwind',
     'theme',
     'grappelli',
@@ -100,10 +125,14 @@ INSTALLED_APPS = [
 ]
 INSTALLED_APPS += ["corsheaders"]
 
-# CORS_ALLOWED_ORIGINS = [
-#     "http://localhost:3000",  # React dev
-# ]
-CORS_ALLOW_ALL_ORIGINS = True
+# CORS : whitelist d'origines, pilotée par env. `*` désactivé par défaut.
+CORS_ALLOW_ALL_ORIGINS = env_bool("CORS_ALLOW_ALL_ORIGINS", False)
+CORS_ALLOWED_ORIGINS = env_list(
+    "CORS_ALLOWED_ORIGINS",
+    "https://tratra.net,https://www.tratra.net,https://tratra.ci,https://www.tratra.ci,"
+    "http://localhost:3000,http://127.0.0.1:3000",
+)
+CORS_ALLOW_CREDENTIALS = True
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
@@ -157,21 +186,53 @@ AUTHENTICATION_BACKENDS = (
 LOGIN_REDIRECT_URL = 'handydash'
 ACCOUNT_LOGOUT_REDIRECT_URL = '/'
 # ACCOUNT_USERNAME_REQUIRED = False  # Ne pas exiger le champ username
-# ACCOUNT_AUTHENTICATION_METHOD = 'email'  # Auth via email uniquement
-# ACCOUNT_LOGIN_METHODS = {"email"}  # ou {"email","username"} selon ton besoin
-ACCOUNT_AUTHENTICATION_METHOD = "username_email"
+# django-allauth 65+ uses ACCOUNT_LOGIN_METHODS.  Keep both username and email
+# accepted without relying on the deprecated ACCOUNT_AUTHENTICATION_METHOD.
+ACCOUNT_LOGIN_METHODS = {"username", "email"}
 ACCOUNT_SIGNUP_FIELDS = ["email*", "password1*", "password2*"]
 ACCOUNT_UNIQUE_EMAIL = True  # Empêche les doublons
 
 REST_FRAMEWORK = {
-    # Use Django's standard `django.contrib.auth` permissions,
-    # or allow read-only access for unauthenticated users.
     'DEFAULT_AUTHENTICATION_CLASSES': (
         'rest_framework_simplejwt.authentication.JWTAuthentication',  # ✅ plus de SessionAuthentication
     ),
+    # Sécurisé par défaut : il faut être authentifié. Les endpoints publics
+    # (inscription, /nearby, /price-estimate, /slides) déclarent AllowAny explicitement.
     'DEFAULT_PERMISSION_CLASSES': [
-        'rest_framework.permissions.DjangoModelPermissionsOrAnonReadOnly'
-    ]
+        'rest_framework.permissions.IsAuthenticated',
+    ],
+    'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
+    'DEFAULT_THROTTLE_CLASSES': [
+        'rest_framework.throttling.AnonRateThrottle',
+        'rest_framework.throttling.UserRateThrottle',
+        'rest_framework.throttling.ScopedRateThrottle',
+    ],
+    'DEFAULT_THROTTLE_RATES': {
+        'anon': config('THROTTLE_ANON', default='60/min'),
+        'user': config('THROTTLE_USER', default='1000/hour'),
+        'login': config('THROTTLE_LOGIN', default='10/min'),
+        'webhook': config('THROTTLE_WEBHOOK', default='120/min'),
+    },
+}
+
+# === OpenAPI / Swagger (drf-spectacular) — découplage SPA ===
+SPECTACULAR_SETTINGS = {
+    'TITLE': 'Tratra API',
+    'DESCRIPTION': "API de la marketplace de services à domicile Tratra (clients, artisans, entreprises).",
+    'VERSION': '1.0.0',
+    'SERVE_INCLUDE_SCHEMA': False,
+    # Doc consultable pour le dev frontend ; restreindre en prod si besoin.
+    'SERVE_PERMISSIONS': ['rest_framework.permissions.AllowAny'],
+    'SCHEMA_PATH_PREFIX': r'/handy',
+}
+
+# === JWT (durci) ===
+SIMPLE_JWT = {
+    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=30),
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
+    'ROTATE_REFRESH_TOKENS': True,
+    'BLACKLIST_AFTER_ROTATION': True,
+    'UPDATE_LAST_LOGIN': True,
 }
 # Password validation
 # https://docs.djangoproject.com/en/4.2/ref/settings/#auth-password-validators
@@ -225,47 +286,81 @@ if DEBUG:
     urlpatterns = [] + static(STATIC_URL, document_root=STATIC_ROOT)
     urlpatterns += static(MEDIA_URL, document_root=MEDIA_ROOT)
 
-# === MINIO CONFIGURATION ===
-MINIO_ENABLED = config('MINIO_ENABLED', default='1').lower() in ('1', 'true', 'yes')
+# === PRIVATE OBJECT STORAGE ===
+# Object storage is opt-in.  In particular, a fresh environment must never
+# silently connect to a MinIO instance with known default credentials.
+MINIO_ENABLED = env_bool('MINIO_ENABLED', False)
+KYC_MAX_UPLOAD_BYTES = int(config('KYC_MAX_UPLOAD_BYTES', default='10485760'))
+KYC_ALLOWED_CONTENT_TYPES = tuple(env_list(
+    'KYC_ALLOWED_CONTENT_TYPES',
+    'application/pdf,image/jpeg,image/png',
+))
+KYC_SIGNED_URL_TTL_SECONDS = int(config('KYC_SIGNED_URL_TTL_SECONDS', default='300'))
+if KYC_MAX_UPLOAD_BYTES <= 0:
+    raise ImproperlyConfigured('KYC_MAX_UPLOAD_BYTES must be greater than zero.')
+if not KYC_ALLOWED_CONTENT_TYPES:
+    raise ImproperlyConfigured('KYC_ALLOWED_CONTENT_TYPES must contain at least one content type.')
+if not 60 <= KYC_SIGNED_URL_TTL_SECONDS <= 3600:
+    raise ImproperlyConfigured('KYC_SIGNED_URL_TTL_SECONDS must be between 60 and 3600 seconds.')
 
 if MINIO_ENABLED:
+    KYC_STORAGE_BUCKET_NAME = required_env('KYC_STORAGE_BUCKET_NAME')
     STORAGES = {
         "default": {"BACKEND": "storages.backends.s3boto3.S3Boto3Storage"},
+        "private_kyc": {
+            "BACKEND": "handy.storage.PrivateKycS3Storage",
+            "OPTIONS": {
+                "bucket_name": KYC_STORAGE_BUCKET_NAME,
+                "querystring_auth": True,
+                "querystring_expire": KYC_SIGNED_URL_TTL_SECONDS,
+                "default_acl": None,
+                "file_overwrite": False,
+                "object_parameters": {"CacheControl": "private, no-store, max-age=0"},
+            },
+        },
         "staticfiles": {"BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"},
     }
 
-    # Credentials
-    AWS_ACCESS_KEY_ID = config('AWS_ACCESS_KEY_ID', default=config('MINIO_ROOT_USER', default='minioadmin'))
-    AWS_SECRET_ACCESS_KEY = config('AWS_SECRET_ACCESS_KEY', default=config('MINIO_ROOT_PASSWORD', default='minioadmin'))
+    # No MinIO/AWS credentials, bucket, or endpoint has an insecure fallback.
+    AWS_ACCESS_KEY_ID = required_env('AWS_ACCESS_KEY_ID')
+    AWS_SECRET_ACCESS_KEY = required_env('AWS_SECRET_ACCESS_KEY')
 
-    # MinIO configuration
-    AWS_STORAGE_BUCKET_NAME = config('AWS_STORAGE_BUCKET_NAME', default='tratra-media')
-    AWS_S3_ENDPOINT_URL = config('AWS_S3_ENDPOINT_URL', default='http://minio:9000')
+    # MinIO / S3 configuration
+    AWS_STORAGE_BUCKET_NAME = required_env('AWS_STORAGE_BUCKET_NAME')
+    AWS_S3_ENDPOINT_URL = required_env('AWS_S3_ENDPOINT_URL')
     AWS_S3_REGION_NAME = config('AWS_S3_REGION_NAME', default='us-east-1')
-
-    # Important: Use the public domain for URLs
-    AWS_S3_CUSTOM_DOMAIN = config('AWS_S3_CUSTOM_DOMAIN', default='minio.tratra.net')
 
     # URL settings
     AWS_S3_ADDRESSING_STYLE = 'path'
     AWS_S3_SIGNATURE_VERSION = 's3v4'
-    AWS_S3_VERIFY = config('AWS_S3_VERIFY', default='0').lower() in ('1', 'true', 'yes')
+    AWS_S3_VERIFY = env_bool('AWS_S3_VERIFY', True)
 
-    # Make URLs public (no signing required)
-    AWS_QUERYSTRING_AUTH = config('AWS_QUERYSTRING_AUTH', default='0').lower() in ('1', 'true', 'yes')
-    AWS_DEFAULT_ACL = 'public-read'  # Important pour que les fichiers soient accessibles publiquement
+    # Keep all user uploads private by default.  A custom S3 domain bypasses
+    # django-storages' presigning path, so it is deliberately unset here.
+    AWS_S3_CUSTOM_DOMAIN = None
+    AWS_QUERYSTRING_AUTH = True
+    AWS_QUERYSTRING_EXPIRE = KYC_SIGNED_URL_TTL_SECONDS
+    AWS_DEFAULT_ACL = None
+    AWS_S3_FILE_OVERWRITE = False
     AWS_S3_OBJECT_PARAMETERS = {
-        'CacheControl': 'max-age=86400',
+        'CacheControl': 'private, max-age=300',
     }
 
 else:
     STORAGES = {
         "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+        "private_kyc": {
+            "BACKEND": "handy.storage.PrivateKycFileSystemStorage",
+            "OPTIONS": {"location": BASE_DIR / "private_kyc"},
+        },
         "staticfiles": {"BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"},
     }
 
 WHITENOISE_AUTOREFRESH = DEBUG
 WHITENOISE_MAX_AGE = 60 * 60 * 24 * 365
+# Tolère un manifeste statique incomplet (tests/dev sans collectstatic récent) :
+# {% static %} renvoie le chemin brut au lieu de lever une erreur.
+WHITENOISE_MANIFEST_STRICT = False
 # Default primary key field type
 # https://docs.djangoproject.com/en/4.2/ref/settings/#default-auto-field
 
@@ -292,25 +387,39 @@ CELERY_RESULT_BACKEND = CELERY_BROKER_URL
 CELERY_BEAT_SCHEDULE = {}
 
 # === DJSTRIPE ===
-DJSTRIPE_WEBHOOK_SECRET = config('STRIPE_WEBHOOK_SECRET')
+DJSTRIPE_WEBHOOK_SECRET = config('STRIPE_WEBHOOK_SECRET', default='')
 DJSTRIPE_FOREIGN_KEY_TO_FIELD = 'id'
+
+# Ancien secret partagé, accepté seulement en développement/test pour faciliter
+# la transition. En production, configurez un secret par fournisseur ci-dessous.
+PAYMENT_WEBHOOK_SECRET = config('PAYMENT_WEBHOOK_SECRET', default='')
+# Secrets par fournisseur, requis pour leurs webhooks de production.
+PAYMENT_OM_WEBHOOK_SECRET = config('PAYMENT_OM_WEBHOOK_SECRET', default='')
+PAYMENT_MTN_WEBHOOK_SECRET = config('PAYMENT_MTN_WEBHOOK_SECRET', default='')
+PAYMENT_CARD_WEBHOOK_SECRET = config('PAYMENT_CARD_WEBHOOK_SECRET', default='')
 
 # === SENTRY ===
 import sentry_sdk
 from sentry_sdk.integrations.django import DjangoIntegration
 
-try:
-    sentry_sdk.init(
-        dsn=config('SENTRY_DSN', default=''),
-        integrations=[DjangoIntegration(), CeleryIntegration(), RedisIntegration()],
-        traces_sample_rate=1.0,
-        send_default_pii=True,
-        auto_enabling_integrations=False,
-    )
-except Exception as e:
-    import logging
+SENTRY_DSN = config('SENTRY_DSN', default='')
+if SENTRY_DSN:
+    try:
+        sentry_sdk.init(
+            dsn=SENTRY_DSN,
+            integrations=[DjangoIntegration(), CeleryIntegration(), RedisIntegration()],
+            traces_sample_rate=float(config('SENTRY_TRACES_SAMPLE_RATE', default='0.1')),
+            send_default_pii=env_bool('SENTRY_SEND_PII', False),
+            auto_enabling_integrations=False,
+            environment=config(
+                'SENTRY_ENVIRONMENT',
+                default='production' if os.getenv('DJANGO_ENV') == 'prod' else 'development',
+            ),
+        )
+    except Exception as e:
+        import logging
 
-    logging.getLogger(__name__).warning("Sentry disabled: %s", e)
+        logging.getLogger(__name__).warning("Sentry disabled: %s", e)
 
 # === EMAIL ===
 # EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
@@ -319,14 +428,14 @@ except Exception as e:
 # EMAIL_USE_TLS = True
 # EMAIL_HOST_USER = config('EMAIL_HOST_USER')
 # EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD')
-EMAIL_BACKEND = config("EMAIL_BACKEND")
-EMAIL_HOST = config("EMAIL_HOST")
-EMAIL_PORT = int(config("EMAIL_PORT"))
-EMAIL_USE_TLS = config("EMAIL_USE_TLS")
+EMAIL_BACKEND = config("EMAIL_BACKEND", default='django.core.mail.backends.console.EmailBackend')
+EMAIL_HOST = config("EMAIL_HOST", default='')
+EMAIL_PORT = int(config("EMAIL_PORT", default='587'))
+EMAIL_USE_TLS = env_bool("EMAIL_USE_TLS", True)
 # EMAIL_USE_SSL = config("EMAIL_USE_SSL")
-EMAIL_HOST_USER = config("EMAIL_HOST_USER")
-EMAIL_HOST_PASSWORD = config("EMAIL_HOST_PASSWORD")
-DEFAULT_FROM_EMAIL = config("DEFAULT_FROM_EMAIL")
+EMAIL_HOST_USER = config("EMAIL_HOST_USER", default='')
+EMAIL_HOST_PASSWORD = config("EMAIL_HOST_PASSWORD", default='')
+DEFAULT_FROM_EMAIL = config("DEFAULT_FROM_EMAIL", default='no-reply@tratra.invalid')
 
 # === AXES ===
 AXES_FAILURE_LIMIT = 5
@@ -362,6 +471,6 @@ LOGGING = {
     },
     'root': {
         'handlers': ['console'],
-        'level': 'DEBUG',
+        'level': config('LOG_LEVEL', default='DEBUG' if DEBUG else 'INFO').upper(),
     },
 }

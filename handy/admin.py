@@ -4,6 +4,7 @@ from .models import (
 )
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
+from django.urls import reverse
 from .models import User, HandymanProfile, HandymanDocument
 from django.utils.html import format_html
 
@@ -86,7 +87,7 @@ class HandymanDocumentInline(admin.TabularInline):
         if obj.file:
             return format_html(
                 '<a href="{}" target="_blank">Voir le document</a>',
-                obj.file.url
+                reverse('handyman-docs-download', kwargs={'pk': obj.pk})
             )
         return "-"
 
@@ -172,7 +173,7 @@ class HandymanDocumentAdmin(admin.ModelAdmin):
         if obj.file:
             return format_html(
                 '<a href="{}" target="_blank">Télécharger</a>',
-                obj.file.url
+                reverse('handyman-docs-download', kwargs={'pk': obj.pk})
             )
         return "-"
 
@@ -182,7 +183,7 @@ class HandymanDocumentAdmin(admin.ModelAdmin):
         if obj.file:
             return format_html(
                 '<a href="{}" target="_blank">Voir le document</a>',
-                obj.file.url
+                reverse('handyman-docs-download', kwargs={'pk': obj.pk})
             )
         return "-"
 

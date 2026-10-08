@@ -2,7 +2,12 @@ from django.test import TestCase
 
 # Create your tests here.
 # tests/test_api_endpoints.py
+import hashlib
+import hmac
+import json
+
 import pytest
+from django.test import override_settings
 from django.urls import reverse
 from django.utils import timezone
 from django.contrib.gis.geos import Point
@@ -49,13 +54,16 @@ def category(db):
 
 @pytest.fixture
 def handyman_profile(db, user_handyman, category):
-    hp = HandymanProfile.objects.create(
+    # Le profil est déjà auto-créé par signal lors du create_user -> update_or_create.
+    hp, _ = HandymanProfile.objects.update_or_create(
         user=user_handyman,
-        is_approved=True,
-        rating=4.5,
-        completed_jobs=10,
-        online=True,
-        location=Point(-4.017, 5.345, srid=4326),  # Abidjan (ex.)
+        defaults=dict(
+            is_approved=True,
+            rating=4.5,
+            completed_jobs=10,
+            online=True,
+            location=Point(-4.017, 5.345, srid=4326),  # Abidjan (ex.)
+        ),
     )
     hp.skills.add(category)
     return hp
@@ -135,7 +143,8 @@ def test_booking_create_and_timeline(auth_client, user_handyman, service):
 
 
 @pytest.mark.django_db
-def test_payment_initiate_and_webhook(auth_client, user_handyman, service):
+@override_settings(PAYMENT_OM_WEBHOOK_SECRET="testsecret")
+def test_payment_provider_unavailable_and_signed_webhook(api_client, auth_client, user_handyman, service):
     # 1) créer une réservation
     create_url = reverse("bookings-list")
     start = timezone.now() + timezone.timedelta(hours=1)
@@ -157,28 +166,38 @@ def test_payment_initiate_and_webhook(auth_client, user_handyman, service):
     assert res.status_code == 201, res.content
     booking_id = res.json()["id"]
 
-    # 2) initier un paiement (OM)
+    # 2) OM is not wired yet: fail explicitly, without a fake pending row.
     pay_init_url = reverse("payment-initiate")
     pay_payload = {"booking_id": booking_id, "method": "om", "minutes": 60, "category_id": service.category_id}
     pay_res = auth_client.post(pay_init_url, pay_payload, format="json")
-    assert pay_res.status_code == 201, pay_res.content
-    data = pay_res.json()
-    assert "payment_id" in data
-    assert "provider_ref" in data
-    provider_ref = data["provider_ref"]
+    assert pay_res.status_code == 503, pay_res.content
+    assert pay_res.json()["code"] == "payment_provider_unavailable"
+    assert not Payment.objects.filter(booking_id=booking_id).exists()
 
-    # 3) vérifier objet Payment créé
-    p = Payment.objects.get(id=data["payment_id"])
-    assert p.booking_id == booking_id
-    assert p.transaction_id == provider_ref
-    assert p.status == "pending"
+    # 3) A genuine provider callback remains signed and transitions only its
+    # matching payment method to escrow.
+    provider_ref = "provider-ref-1"
+    p = Payment.objects.create(
+        booking_id=booking_id, amount=7000, platform_fee=770,
+        method="om", status="pending", transaction_id=provider_ref,
+    )
 
-    # 4) webhook -> completed
+    # 4) webhook -> completed (authentifié par signature HMAC du corps brut)
     webhook_url = reverse("payment-webhook", kwargs={"provider": "om"})
     webhook_payload = {"provider_ref": provider_ref, "status": "completed"}
-    w_res = api_client.post(webhook_url, webhook_payload, format="json")  # webhook sans auth
+    raw = json.dumps(webhook_payload).encode("utf-8")
+    signature = hmac.new(b"testsecret", raw, hashlib.sha256).hexdigest()
+    w_res = api_client.post(
+        webhook_url, raw, content_type="application/json",
+        HTTP_X_WEBHOOK_SIGNATURE=signature,
+    )
     assert w_res.status_code == 200, w_res.content
 
-    # 5) recharger depuis DB et valider
+    # 4bis) une requête NON signée doit être rejetée (régression sécurité)
+    bad = api_client.post(webhook_url, webhook_payload, format="json")
+    assert bad.status_code == 401
+
+    # 5) recharger depuis DB et valider : la confirmation fournisseur place en séquestre
     p.refresh_from_db()
-    assert p.status == "completed"
+    assert p.status == "held"
+    assert p.is_paid is True

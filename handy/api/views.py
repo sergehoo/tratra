@@ -1,31 +1,46 @@
 # handy/api/views.py
+import hashlib
+import hmac
 from decimal import Decimal
 from math import radians, cos, sqrt, sin, asin
+from pathlib import Path
+
+from django.conf import settings
 
 from django.contrib.gis.db.models.functions import Distance
 from django.contrib.gis.geos import Point
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction, models
-from django.db.models import Count
+from django.db.models import Count, Q
+from django.http import FileResponse
 from django.utils import timezone
 
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import viewsets, permissions, status, mixins
+from rest_framework.authentication import SessionAuthentication
 from rest_framework.decorators import action, api_view, permission_classes
+from drf_spectacular.utils import extend_schema, OpenApiResponse
+from drf_spectacular.types import OpenApiTypes
 from rest_framework.filters import OrderingFilter, SearchFilter
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework.exceptions import PermissionDenied
+from django.shortcuts import get_object_or_404
 
 from rest_framework.pagination import PageNumberPagination
 
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenObtainPairView
+from rest_framework_simplejwt.authentication import JWTAuthentication
 
 from handy.models import (
     User, HandymanProfile, ServiceCategory, Service, ServiceImage, Booking,
     Payment, PaymentLog, Review, Conversation, Message, Notification,
-    HandymanDocument, Report, Device,
+    HandymanDocument, Report, Device, Payout, Dispute, TimeOff, ReplacementSuggestion,
+    Coupon, OTPCode, PayoutAccount, SubscriptionPlan, Subscription, CompanyProfile,
+    artisan_available_earnings,
     # ↓ suivants : assure-toi de les avoir dans tes models (cf. reco précédentes)
     BookingRoute, JobTracking, HeroSlide,  # tracking & ETA
     # Optionnel si tu as ajouté ces modèles :
@@ -36,6 +51,56 @@ from handy.models import (
 # ---- Permissions simples ----
 class IsAuthenticatedOrReadOnly(permissions.IsAuthenticatedOrReadOnly):
     pass
+
+
+class IsOwnerOrAdmin(permissions.BasePermission):
+    """Object-level : lecture pour tout utilisateur authentifié, écriture
+    (PUT/PATCH/DELETE) réservée au propriétaire de l'objet ou au staff.
+
+    La vue indique le chemin vers le propriétaire via `owner_lookup`
+    (ex: "user", "handyman", "booking__client"). Plusieurs chemins possibles
+    avec `owner_lookups` (tuple) : OR logique.
+    """
+
+    def has_object_permission(self, request, view, obj):
+        if request.method in permissions.SAFE_METHODS:
+            return True
+        user = request.user
+        if not (user and user.is_authenticated):
+            return False
+        if user.is_staff:
+            return True
+        lookups = getattr(view, "owner_lookups", None) or (getattr(view, "owner_lookup", "user"),)
+        for lookup in lookups:
+            owner = obj
+            for part in lookup.split("__"):
+                owner = getattr(owner, part, None)
+            if owner == user:
+                return True
+        return False
+
+
+class OwnerScopedQuerysetMixin:
+    """Restreint le queryset aux objets appartenant à `request.user`.
+
+    `owner_lookups` liste les filtres ORM rattachant un objet à l'utilisateur
+    (OR logique). Le staff voit tout. Empêche l'IDOR en lecture ET en écriture
+    (get_object part de ce queryset filtré → 404 pour les objets d'autrui).
+    """
+
+    owner_lookups = ("user",)
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        user = self.request.user
+        if not (user and user.is_authenticated):
+            return qs.none()
+        if user.is_staff:
+            return qs
+        q = Q()
+        for lookup in self.owner_lookups:
+            q |= Q(**{lookup: user})
+        return qs.filter(q).distinct()
 
 
 # ---- Helpers géo / suggestions ----
@@ -116,11 +181,14 @@ from .serializers import (
     ConversationSerializer, MessageSerializer, NotificationSerializer,
     HandymanDocumentSerializer, ReportSerializer, DeviceSerializer,
     MatchRequestSerializer, MatchResponseSerializer, PriceEstimateSerializer, PaymentInitSerializer,
-    EmailOrUsernameTokenObtainPairSerializer, HeroSlideSerializer
+    EmailOrUsernameTokenObtainPairSerializer, HeroSlideSerializer, PayoutSerializer, DisputeSerializer,
+    TimeOffSerializer, ReplacementSuggestionSerializer,
+    PayoutAccountSerializer, SubscriptionPlanSerializer, SubscriptionSerializer, CompanyProfileSerializer
 )
 
 class EmailOrUsernameTokenObtainPairView(TokenObtainPairView):
     serializer_class = EmailOrUsernameTokenObtainPairSerializer
+    throttle_scope = "login"  # limite anti-bruteforce (cf. DEFAULT_THROTTLE_RATES)
 # ---- Users ----
 class UserViewSet(viewsets.ModelViewSet):
     queryset = User.objects.all().only("id", "email", "first_name", "last_name", "user_type", "is_verified")
@@ -130,6 +198,14 @@ class UserViewSet(viewsets.ModelViewSet):
     search_fields = ["email", "first_name", "last_name"]
     ordering = ["-id"]
     pagination_class = DefaultPageNumberPagination
+
+    def get_queryset(self):
+        # Un utilisateur non-staff ne voit/modifie que son propre compte (anti-IDOR).
+        qs = super().get_queryset()
+        user = self.request.user
+        if user and user.is_authenticated and not user.is_staff:
+            return qs.filter(pk=user.pk)
+        return qs
 
     def get_permissions(self):
         if self.action in ['create']:  # inscription
@@ -170,12 +246,37 @@ class HandymanProfileViewSet(viewsets.ModelViewSet):
         .all()
     )
     serializer_class = HandymanProfileSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsOwnerOrAdmin]
+    owner_lookup = "user"
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ["is_approved", "online", "commune"]
     search_fields = ["user__first_name", "user__last_name", "commune", "quartier"]
     ordering = ["-rating", "-completed_jobs"]
     pagination_class = DefaultPageNumberPagination
+
+    @action(detail=False, methods=["post"], url_path="presence")
+    def presence(self, request):
+        """
+        POST { "online": true|false } — bascule la présence (dispo temps réel)
+        de l'artisan courant. Sans ce flag, /match/ ne renvoie aucun artisan.
+        """
+        profile = HandymanProfile.objects.filter(user=request.user).first()
+        if not profile:
+            return Response({"detail": "Profil artisan introuvable."},
+                            status=status.HTTP_404_NOT_FOUND)
+        online = request.data.get("online")
+        if online is None:
+            return Response({"detail": "online (booléen) requis."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        # Conformité : un profil non vérifié ne peut pas se rendre disponible.
+        if bool(online) and not profile.is_approved:
+            return Response(
+                {"detail": "Profil non vérifié : impossible de passer en ligne."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        profile.online = bool(online)
+        profile.save(update_fields=["online"])
+        return Response({"online": profile.online})
 
 
 # ---- Catégories ----
@@ -197,7 +298,8 @@ class ServiceViewSet(viewsets.ModelViewSet):
         .all()
     )
     serializer_class = ServiceSerializer
-    permission_classes = [IsAuthenticatedOrReadOnly]
+    permission_classes = [IsAuthenticatedOrReadOnly, IsOwnerOrAdmin]
+    owner_lookup = "handyman"
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ["category", "is_active", "price_type"]
     search_fields = ["title", "description", "handyman__first_name", "handyman__last_name"]
@@ -242,12 +344,13 @@ class ServiceImageViewSet(viewsets.ModelViewSet):
 
 
 # ---- Booking ----
-class BookingViewSet(viewsets.ModelViewSet):
+class BookingViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
     queryset = (
         Booking.objects.select_related("client", "handyman", "service", "service__category")
         .all()
     )
     permission_classes = [permissions.IsAuthenticated]
+    owner_lookups = ("client", "handyman")
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     # ⚠️ "type" n'existe pas dans Booking -> supprimé
     filterset_fields = ["status", "client", "handyman", "service", "booking_date"]
@@ -323,85 +426,316 @@ class BookingViewSet(viewsets.ModelViewSet):
             # "polyline": route.polyline.geojson if route.polyline else None,  # si besoin
         })
 
+    @action(detail=True, methods=["post"])
+    def transition(self, request, pk=None):
+        """
+        POST { "status": "confirmed|in_progress|completed|cancelled" }
+        Change le statut via la machine à états (transition validée + timeline).
+        Le queryset est déjà cloisonné par propriétaire (anti-IDOR).
+        """
+        booking = self.get_object()
+        new_status = request.data.get("status")
+        if not new_status:
+            return Response({"detail": "status requis."}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            booking.transition_to(new_status, actor=request.user)
+        except DjangoValidationError as e:
+            msg = e.messages[0] if getattr(e, "messages", None) else str(e)
+            return Response({"detail": msg}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(BookingSerializer(booking).data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["get"])
+    def replacements(self, request, pk=None):
+        """Suggestions de remplacement (générées à la volée si aucune)."""
+        booking = self.get_object()
+        sugg = booking.replacement_suggestions.select_related(
+            "suggested_service", "suggested_service__handyman")
+        if not sugg.exists():
+            booking.generate_replacement_suggestions()
+            sugg = booking.replacement_suggestions.select_related(
+                "suggested_service", "suggested_service__handyman")
+        return Response(ReplacementSuggestionSerializer(sugg, many=True).data)
+
+    @action(detail=True, methods=["post"], url_path="accept-replacement")
+    def accept_replacement(self, request, pk=None):
+        """POST { "suggestion_id": N } -> réassigne la mission à l'artisan suggéré."""
+        booking = self.get_object()
+        sugg = booking.replacement_suggestions.filter(pk=request.data.get("suggestion_id")).first()
+        if not sugg:
+            return Response({"detail": "Suggestion introuvable."}, status=status.HTTP_404_NOT_FOUND)
+        sugg.accept()
+        booking.refresh_from_db()
+        return Response(BookingSerializer(booking).data)
+
 
 # ---- Paiements ----
-class PaymentViewSet(viewsets.ModelViewSet):
+class PaymentViewSet(OwnerScopedQuerysetMixin, viewsets.ReadOnlyModelViewSet):
     queryset = Payment.objects.select_related("booking", "booking__client", "booking__handyman").all()
     serializer_class = PaymentSerializer
     permission_classes = [permissions.IsAuthenticated]
+    owner_lookups = ("booking__client", "booking__handyman")
     filter_backends = [DjangoFilterBackend, OrderingFilter]
     filterset_fields = ["status", "method"]
     ordering = ["-created_at"]
     pagination_class = DefaultPageNumberPagination
 
 
-class PaymentLogViewSet(viewsets.ModelViewSet):
+class PaymentLogViewSet(OwnerScopedQuerysetMixin, viewsets.ReadOnlyModelViewSet):
     queryset = PaymentLog.objects.select_related("payment", "payment__booking").all()
     serializer_class = PaymentLogSerializer
     permission_classes = [permissions.IsAuthenticated]
+    owner_lookups = ("payment__booking__client", "payment__booking__handyman")
     ordering = ["-changed_at"]
     pagination_class = DefaultPageNumberPagination
 
 
+# ---- Retraits artisan (payout) ----
+class PayoutViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
+    """L'artisan consulte ses retraits et en demande de nouveaux.
+    Le montant est contrôlé contre les gains disponibles, SOUS VERROU."""
+    queryset = Payout.objects.select_related("handyman").order_by("-requested_at")
+    serializer_class = PayoutSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    owner_lookups = ("handyman",)
+    http_method_names = ["get", "post", "head", "options"]
+    ordering = ["-requested_at"]
+    pagination_class = DefaultPageNumberPagination
+
+    def create(self, request, *args, **kwargs):
+        amount = Decimal(str(request.data.get("amount") or "0"))
+        if amount <= 0:
+            return Response({"detail": "Montant invalide."}, status=status.HTTP_400_BAD_REQUEST)
+        with transaction.atomic():
+            # verrou sur le compte artisan -> sérialise les demandes concurrentes
+            User.objects.select_for_update().get(pk=request.user.pk)
+            available = artisan_available_earnings(request.user)
+            if amount > available:
+                return Response(
+                    {"detail": f"Gains insuffisants. Disponible: {available}."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            payout = Payout.objects.create(handyman=request.user, amount=amount, status="pending")
+        return Response(PayoutSerializer(payout).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=["get"])
+    def available(self, request):
+        """GET /payouts/available/ -> gains disponibles au retrait."""
+        return Response({"available": str(artisan_available_earnings(request.user))})
+
+
+# ---- Litiges ----
+class DisputeViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
+    """Ouverture/consultation de litiges par les parties d'une réservation ;
+    résolution réservée au staff (déclenche refund/release de l'escrow)."""
+    queryset = Dispute.objects.select_related(
+        "booking", "booking__client", "booking__handyman", "reporter"
+    ).all()
+    serializer_class = DisputeSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    owner_lookups = ("reporter", "booking__client", "booking__handyman")
+    http_method_names = ["get", "post", "head", "options"]
+    ordering = ["-created_at"]
+    pagination_class = DefaultPageNumberPagination
+
+    def perform_create(self, serializer):
+        booking = serializer.validated_data.get("booking")
+        user = self.request.user
+        if not user.is_staff and booking.client_id != user.id and booking.handyman_id != user.id:
+            raise PermissionDenied("Vous n'êtes pas partie à cette réservation.")
+        serializer.save(reporter=user, status="open")
+
+    @action(detail=True, methods=["post"], permission_classes=[permissions.IsAdminUser])
+    def resolve(self, request, pk=None):
+        """POST { "action": "refund_client|release_artisan|none|reject", "resolution": "..." }"""
+        dispute = self.get_object()
+        action_type = request.data.get("action")
+        resolution = request.data.get("resolution", "")
+        try:
+            if action_type == "reject":
+                dispute.reject(by=request.user, resolution=resolution)
+            else:
+                dispute.resolve(action_type, by=request.user, resolution=resolution)
+        except DjangoValidationError as e:
+            msg = e.messages[0] if getattr(e, "messages", None) else str(e)
+            return Response({"detail": msg}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(DisputeSerializer(dispute).data)
+
+
+# ---- Absences artisan (TimeOff) ----
+class TimeOffViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
+    """Déclaration d'absences par l'artisan. À la création, génère des
+    suggestions de remplacement pour les missions impactées."""
+    queryset = TimeOff.objects.select_related("handyman", "handyman__user").order_by("-start")
+    serializer_class = TimeOffSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    owner_lookups = ("handyman__user",)
+    pagination_class = DefaultPageNumberPagination
+
+    def perform_create(self, serializer):
+        profile = HandymanProfile.objects.filter(user=self.request.user).first()
+        if profile is None:
+            raise PermissionDenied("Profil artisan requis pour déclarer une absence.")
+        timeoff = serializer.save(handyman=profile)
+        impacted = Booking.objects.filter(
+            handyman=profile.user, status__in=['pending', 'confirmed'],
+            booking_date__gte=timeoff.start, booking_date__lte=timeoff.end,
+        )
+        for b in impacted:
+            b.generate_replacement_suggestions()
+
+
 # ---- Avis / Chat / Notifications / Docs / Reports / Devices ----
-class ReviewViewSet(viewsets.ModelViewSet):
+class ReviewViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
     queryset = Review.objects.select_related("booking", "booking__client", "booking__handyman").all()
     serializer_class = ReviewSerializer
     permission_classes = [permissions.IsAuthenticated]
+    owner_lookups = ("booking__client", "booking__handyman")
     ordering = ["-created_at"]
     pagination_class = DefaultPageNumberPagination
 
+    def perform_create(self, serializer):
+        booking = serializer.validated_data.get("booking")
+        if booking and booking.client != self.request.user and not self.request.user.is_staff:
+            raise PermissionDenied("Vous ne pouvez noter que vos propres réservations.")
+        serializer.save()
 
-class ConversationViewSet(viewsets.ModelViewSet):
+
+class ConversationViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
     queryset = Conversation.objects.select_related("booking").prefetch_related("participants").all()
     serializer_class = ConversationSerializer
     permission_classes = [permissions.IsAuthenticated]
+    owner_lookups = ("participants",)
     ordering = ["-updated_at"]
     pagination_class = DefaultPageNumberPagination
 
+    def perform_create(self, serializer):
+        obj = serializer.save()
+        # le créateur est toujours participant de sa conversation
+        obj.participants.add(self.request.user)
 
-class MessageViewSet(viewsets.ModelViewSet):
+
+class MessageViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
     queryset = Message.objects.select_related("conversation", "sender").all()
     serializer_class = MessageSerializer
     permission_classes = [permissions.IsAuthenticated]
+    owner_lookups = ("conversation__participants",)
     ordering = ["-created_at"]
     pagination_class = DefaultPageNumberPagination
 
+    def perform_create(self, serializer):
+        conv = serializer.validated_data.get("conversation")
+        if (conv and not self.request.user.is_staff
+                and not conv.participants.filter(pk=self.request.user.pk).exists()):
+            raise PermissionDenied("Vous ne participez pas à cette conversation.")
+        serializer.save(sender=self.request.user)
 
-class NotificationViewSet(viewsets.ModelViewSet):
+
+class NotificationViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
     queryset = Notification.objects.select_related("user").all()
     serializer_class = NotificationSerializer
     permission_classes = [permissions.IsAuthenticated]
+    owner_lookups = ("user",)
     ordering = ["-created_at"]
     pagination_class = DefaultPageNumberPagination
 
+    def perform_create(self, serializer):
+        serializer.save(user=self.request.user)
 
-class HandymanDocumentViewSet(viewsets.ModelViewSet):
+
+class HandymanDocumentViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
     queryset = HandymanDocument.objects.select_related("handyman", "handyman__user").all()
     serializer_class = HandymanDocumentSerializer
     permission_classes = [permissions.IsAuthenticated]
+    owner_lookups = ("handyman__user",)
     ordering = ["-uploaded_at"]
     pagination_class = DefaultPageNumberPagination
+    http_method_names = ["get", "post", "delete", "head", "options"]
+    # The API normally uses JWT.  Session auth keeps the Django admin's
+    # guarded download link usable without making KYC files public.
+    authentication_classes = [JWTAuthentication, SessionAuthentication]
+
+    def perform_create(self, serializer):
+        # L'artisan ne peut téléverser que sur SON propre profil (KYC).
+        profile = HandymanProfile.objects.filter(user=self.request.user).first()
+        if profile is None:
+            raise PermissionDenied("Seul un artisan disposant d'un profil peut téléverser des documents.")
+        serializer.save(handyman=profile, status="pending")
+
+    def perform_destroy(self, instance):
+        if instance.status != "pending" and not self.request.user.is_staff:
+            raise PermissionDenied("Un document déjà traité ne peut pas être supprimé.")
+        instance.delete()
+
+    @action(detail=True, methods=["get"])
+    def download(self, request, pk=None):
+        """Authorize the requester, then stream a private KYC document.
+
+        Streaming keeps the object-store URL out of the browser.  The backing
+        storage remains private and can still use signed S3 access internally.
+        """
+        document = self.get_object()
+        if not document.file:
+            return Response({"detail": "Fichier introuvable."}, status=status.HTTP_404_NOT_FOUND)
+
+        try:
+            opened_file = document.file.open("rb")
+        except (FileNotFoundError, ValueError):
+            return Response({"detail": "Fichier introuvable."}, status=status.HTTP_404_NOT_FOUND)
+
+        response = FileResponse(
+            opened_file,
+            as_attachment=True,
+            filename=Path(document.file.name).name,
+        )
+
+        response["Cache-Control"] = "private, no-store, max-age=0"
+        response["Referrer-Policy"] = "no-referrer"
+        response["X-Content-Type-Options"] = "nosniff"
+        return response
+
+    @action(detail=True, methods=["post"], permission_classes=[permissions.IsAdminUser])
+    def review(self, request, pk=None):
+        """POST { "action": "approve|reject", "reason": "..." } — revue KYC (admin)."""
+        doc = self.get_object()
+        action_type = request.data.get("action")
+        if action_type == "approve":
+            doc.approve(by=request.user)
+        elif action_type == "reject":
+            doc.reject(by=request.user, reason=request.data.get("reason", ""))
+        else:
+            return Response({"detail": "action invalide (approve|reject)."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        return Response(HandymanDocumentSerializer(doc).data)
 
 
-class ReportViewSet(viewsets.ModelViewSet):
+class ReportViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
     queryset = Report.objects.select_related("reporter", "review", "message").all()
     serializer_class = ReportSerializer
     permission_classes = [permissions.IsAuthenticated]
+    owner_lookups = ("reporter",)
     ordering = ["-created_at"]
     pagination_class = DefaultPageNumberPagination
 
+    def perform_create(self, serializer):
+        serializer.save(reporter=self.request.user)
 
-class DeviceViewSet(viewsets.ModelViewSet):
+
+class DeviceViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
     queryset = Device.objects.select_related("user").all()
     serializer_class = DeviceSerializer
     permission_classes = [permissions.IsAuthenticated]
+    owner_lookups = ("user",)
     ordering = ["-last_active"]
     pagination_class = DefaultPageNumberPagination
+
+    def perform_create(self, serializer):
+        serializer.save(user=self.request.user)
 
 
 # ---- Endpoints “métier” complémentaires ----
 
+@extend_schema(request=PriceEstimateSerializer, responses=PriceEstimateSerializer,
+               tags=["Tarification"], summary="Estimer le prix d'une prestation")
 @api_view(["POST"])
 @permission_classes([permissions.AllowAny])
 def price_estimate(request):
@@ -413,19 +747,34 @@ def price_estimate(request):
     return Response(ser.data, status=status.HTTP_200_OK)
 
 
+@extend_schema(request=PaymentInitSerializer, responses=OpenApiTypes.OBJECT,
+               tags=["Paiements"], summary="Initier un paiement (escrow)")
 @api_view(["POST"])
 @permission_classes([permissions.IsAuthenticated])
 def payment_initiate(request):
     """
     Body: { "booking_id": 1, "method": "om"|"mtn"|"card"|"cash", "category_id": 3, "minutes": 60 }
     Return: { payment_id, provider, provider_ref, redirect_url|client_secret }
+
+    A method without a configured live provider returns 503; no placeholder
+    transaction or predictable provider reference is created.
     """
+    from handy.services.gateway import PaymentProviderUnavailable
+
     ser = PaymentInitSerializer(data=request.data, context={"request": request})
     ser.is_valid(raise_exception=True)
-    payload = ser.save()
+    try:
+        payload = ser.save()
+    except PaymentProviderUnavailable as exc:
+        return Response(
+            {"code": exc.code, "detail": str(exc), "method": exc.method},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
     return Response(payload, status=status.HTTP_201_CREATED)
 
 
+@extend_schema(request=MatchRequestSerializer, responses=MatchResponseSerializer(many=True),
+               tags=["Matching"], summary="Trouver des artisans proches par catégorie")
 @api_view(["POST"])
 @permission_classes([permissions.IsAuthenticated])
 def match(request):
@@ -450,16 +799,181 @@ def match(request):
     return Response(data, status=status.HTTP_200_OK)
 
 
-# ---- Webhook Paiement (idempotent) ----
-class PaymentWebhook(APIView):
-    authentication_classes = []  # à remplacer par une vérif HMAC (headers/signature)
-    permission_classes = []
+# ---- OTP (vérification de compte) ----
+@extend_schema(request=None, responses=OpenApiTypes.OBJECT,
+               tags=["OTP"], summary="Envoyer un code OTP de vérification")
+@api_view(["POST"])
+@permission_classes([permissions.IsAuthenticated])
+def otp_request(request):
+    """Génère un code OTP pour l'utilisateur courant et l'envoie (SMS best-effort)."""
+    otp = OTPCode.issue(request.user, purpose="signup")
+    from handy.tasks import _send_sms, _resolve_msisdn
+    _send_sms(_resolve_msisdn(request.user.id), f"Votre code de vérification Tratra : {otp.code}")
+    payload = {"sent": True}
+    if settings.DEBUG:
+        payload["code"] = otp.code  # exposé uniquement en dev
+    return Response(payload, status=status.HTTP_201_CREATED)
 
+
+@extend_schema(request=OpenApiTypes.OBJECT, responses=OpenApiTypes.OBJECT,
+               tags=["OTP"], summary="Vérifier un code OTP")
+@api_view(["POST"])
+@permission_classes([permissions.IsAuthenticated])
+def otp_verify(request):
+    """Vérifie le code OTP -> marque le compte comme vérifié."""
+    code = str(request.data.get("code") or "")
+    otp = (OTPCode.objects.filter(user=request.user, code=code, used=False)
+           .order_by("-created_at").first())
+    if not otp or not otp.is_valid():
+        return Response({"detail": "Code invalide ou expiré."}, status=status.HTTP_400_BAD_REQUEST)
+    otp.used = True
+    otp.save(update_fields=["used"])
+    request.user.is_verified = True
+    request.user.save(update_fields=["is_verified"])
+    return Response({"verified": True})
+
+
+# ---- Coupons ----
+@extend_schema(request=OpenApiTypes.OBJECT, responses=OpenApiTypes.OBJECT,
+               tags=["Coupons"], summary="Valider un coupon et calculer la réduction")
+@api_view(["POST"])
+@permission_classes([permissions.IsAuthenticated])
+def coupon_validate(request):
+    """POST { "code": "...", "amount": 10000 } -> validité + réduction/net."""
+    code = str(request.data.get("code") or "").strip()
+    amount = Decimal(str(request.data.get("amount") or "0"))
+    coupon = Coupon.objects.filter(code=code).first()
+    if not coupon or not coupon.is_valid():
+        return Response({"valid": False}, status=status.HTTP_200_OK)
+    return Response({
+        "valid": True,
+        "discount": str(coupon.discount_for(amount)),
+        "net": str(coupon.apply(amount)),
+    }, status=status.HTTP_200_OK)
+
+
+# ---- Compte de versement artisan ----
+@extend_schema(request=PayoutAccountSerializer,
+               responses=OpenApiResponse(PayoutAccountSerializer),
+               tags=["Versements"], summary="Compte de versement de l'artisan (GET/upsert)")
+@api_view(["GET", "POST"])
+@permission_classes([permissions.IsAuthenticated])
+def payout_account(request):
+    """GET: compte de versement courant. POST: créer/mettre à jour (repasse non vérifié)."""
+    acc = PayoutAccount.objects.filter(handyman=request.user).first()
+    if request.method == "GET":
+        return Response(PayoutAccountSerializer(acc).data if acc else {})
+    ser = PayoutAccountSerializer(acc, data=request.data, partial=bool(acc))
+    ser.is_valid(raise_exception=True)
+    ser.save(handyman=request.user, verified=False)
+    return Response(ser.data, status=status.HTTP_200_OK if acc else status.HTTP_201_CREATED)
+
+
+# ---- Profil Entreprise (B2B) ----
+@extend_schema(request=CompanyProfileSerializer,
+               responses=OpenApiResponse(CompanyProfileSerializer),
+               tags=["Entreprise (B2B)"], summary="Profil entreprise courant (GET/upsert)")
+@api_view(["GET", "POST"])
+@permission_classes([permissions.IsAuthenticated])
+def company_profile(request):
+    """GET: profil entreprise courant. POST: créer/mettre à jour (verified posé par l'admin)."""
+    acc = CompanyProfile.objects.filter(user=request.user).first()
+    if request.method == "GET":
+        return Response(CompanyProfileSerializer(acc).data if acc else {})
+    ser = CompanyProfileSerializer(acc, data=request.data, partial=bool(acc))
+    ser.is_valid(raise_exception=True)
+    ser.save(user=request.user)
+    return Response(ser.data, status=status.HTTP_200_OK if acc else status.HTTP_201_CREATED)
+
+
+# ---- Abonnements / B2B ----
+class SubscriptionPlanViewSet(viewsets.ReadOnlyModelViewSet):
+    serializer_class = SubscriptionPlanSerializer
+    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+    pagination_class = DefaultPageNumberPagination
+
+    def get_queryset(self):
+        qs = SubscriptionPlan.objects.filter(active=True).order_by('price')
+        audience = self.request.query_params.get('audience')
+        return qs.filter(audience=audience) if audience else qs
+
+
+class SubscriptionViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
+    queryset = Subscription.objects.select_related('plan', 'user').order_by('-started_at')
+    serializer_class = SubscriptionSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    owner_lookups = ("user",)
+    http_method_names = ["get", "post", "head", "options"]
+    pagination_class = DefaultPageNumberPagination
+
+    def create(self, request, *args, **kwargs):
+        plan = SubscriptionPlan.objects.filter(pk=request.data.get("plan"), active=True).first()
+        if not plan:
+            return Response({"detail": "Plan introuvable ou inactif."}, status=status.HTTP_400_BAD_REQUEST)
+        sub = Subscription.subscribe(request.user, plan)
+        return Response(SubscriptionSerializer(sub).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=["get"])
+    def current(self, request):
+        sub = (Subscription.objects.filter(user=request.user, status="active")
+               .order_by("-started_at").first())
+        if not sub or not sub.is_active():
+            return Response({"active": False})
+        return Response(SubscriptionSerializer(sub).data)
+
+    @action(detail=True, methods=["post"])
+    def cancel(self, request, pk=None):
+        sub = self.get_object()
+        sub.cancel()
+        return Response(SubscriptionSerializer(sub).data)
+
+
+# ---- Webhook Paiement (idempotent + signé) ----
+class PaymentWebhook(APIView):
+    authentication_classes = []
+    permission_classes = []  # pas d'auth utilisateur : on authentifie via signature HMAC
+    throttle_scope = "webhook"
+
+    # En-tête portant la signature HMAC-SHA256 hex du corps brut.
+    SIGNATURE_HEADER = "HTTP_X_WEBHOOK_SIGNATURE"
+
+    PROVIDER_METHODS = {"om", "mtn", "card"}
+    PROVIDER_STATUSES = {"completed", "failed", "refunded"}
+
+    def _signature_ok(self, request, provider) -> bool:
+        # Production requires separate secrets: a compromise at one provider
+        # must not permit callbacks for another.  The old shared secret is
+        # retained only for local development/test compatibility.
+        secret = getattr(settings, f"PAYMENT_{provider.upper()}_WEBHOOK_SECRET", "") or ""
+        if not secret and settings.DEBUG:
+            secret = getattr(settings, "PAYMENT_WEBHOOK_SECRET", "") or ""
+        if not secret:
+            # fail-closed : pas de secret configuré => on refuse tout.
+            return False
+        provided = request.META.get(self.SIGNATURE_HEADER, "")
+        if not provided:
+            return False
+        expected = hmac.new(
+            secret.encode("utf-8"), request.body, hashlib.sha256
+        ).hexdigest()
+        return hmac.compare_digest(expected, provided)
+
+    @extend_schema(request=OpenApiTypes.OBJECT, responses=OpenApiTypes.OBJECT,
+                   tags=["Paiements"], summary="Webhook de paiement (signé HMAC)")
     def post(self, request, provider):
         """
-        Provider path: 'om' | 'mtn' | 'card' | 'moov'...
+        Provider path: 'om' | 'mtn' | 'card'
+        Header: X-Webhook-Signature: <hex HMAC-SHA256(raw_body, PAYMENT_WEBHOOK_SECRET)>
         Body: { "provider_ref": "...", "status": "completed|failed|refunded" }
         """
+        provider = provider.lower()
+        if provider not in self.PROVIDER_METHODS:
+            return Response({"detail": "prestataire invalide."}, status=status.HTTP_400_BAD_REQUEST)
+
+        if not self._signature_ok(request, provider):
+            return Response({"detail": "Signature invalide."},
+                            status=status.HTTP_401_UNAUTHORIZED)
+
         data = request.data
         provider_ref = data.get("provider_ref")
         new_status = data.get("status")
@@ -468,18 +982,34 @@ class PaymentWebhook(APIView):
             return Response({"detail": "provider_ref et status requis."},
                             status=status.HTTP_400_BAD_REQUEST)
 
-        # TODO: vérifier signature HMAC (sécurité)
-        with transaction.atomic():
-            p = Payment.objects.select_for_update().get(transaction_id=provider_ref)
-            old = p.status
-            if old != new_status:
-                p.status = new_status
-                p.save(update_fields=["status", "updated_at"])
-                PaymentLog.objects.create(
-                    payment=p, previous_status=old, new_status=new_status, notes=f"prov={provider}"
-                )
+        if new_status not in self.PROVIDER_STATUSES:
+            return Response({"detail": "status invalide."},
+                            status=status.HTTP_400_BAD_REQUEST)
 
-        return Response({"ok": True}, status=status.HTTP_200_OK)
+        with transaction.atomic():
+            p = get_object_or_404(
+                Payment.objects.select_for_update(), transaction_id=provider_ref
+            )
+            if p.method != provider:
+                return Response({"detail": "Référence de paiement incompatible avec ce prestataire."},
+                                status=status.HTTP_400_BAD_REQUEST)
+            try:
+                # Le fournisseur ne fait que confirmer l'encaissement ou un remboursement.
+                # La LIBÉRATION (held -> released) est interne (à la complétion de la mission).
+                if new_status == 'completed':
+                    if p.status == 'pending':
+                        p.mark_held(note=f"prov={provider}")
+                elif new_status == 'refunded':
+                    if p.status in ('pending', 'held', 'completed'):
+                        p.refund(note=f"prov={provider}")
+                elif new_status == 'failed':
+                    if p.status == 'pending':
+                        p._set_status('failed', note=f"prov={provider}")
+            except DjangoValidationError as e:
+                msg = e.messages[0] if getattr(e, "messages", None) else str(e)
+                return Response({"detail": msg}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response({"ok": True, "status": p.status}, status=status.HTTP_200_OK)
 
 class HeroSlideViewSet(viewsets.ReadOnlyModelViewSet):
     """

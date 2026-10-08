@@ -4,7 +4,7 @@ from django.db import models
 from django.db.models.signals import post_delete, post_save
 from django.dispatch import receiver
 
-from handy.models import ServiceImage, User, HandymanProfile, Review, Booking
+from handy.models import ServiceImage, User, HandymanProfile, Review, Booking, CompanyProfile
 from handy.tasks import notify_booking_status
 logger = logging.getLogger(__name__)
 
@@ -13,6 +13,15 @@ def create_handyman_profile(sender, instance, created, **kwargs):
     if created and instance.user_type == 'handyman':
         # Vérifie qu'il n'existe pas déjà un profil
         HandymanProfile.objects.get_or_create(user=instance)
+
+
+@receiver(post_save, sender=User)
+def create_company_profile(sender, instance, created, **kwargs):
+    if created and instance.user_type == 'entreprise':
+        CompanyProfile.objects.get_or_create(
+            user=instance,
+            defaults={'company_name': instance.get_full_name() or instance.username},
+        )
 
 
 @receiver(post_delete, sender=ServiceImage)
@@ -28,13 +37,13 @@ def update_rating_on_review(sender, instance: Review, created, **kwargs):
     qs = Review.objects.filter(booking__handyman=handyman)
     avg = qs.aggregate(avg=models.Avg('rating'))['avg'] or 0
     HandymanProfile.objects.filter(user=handyman).update(rating=avg)
+    profile = HandymanProfile.objects.filter(user=handyman).first()
+    if profile:
+        profile.refresh_quality_score()
 
-@receiver(post_save, sender=Booking)
-def increment_completed_jobs(sender, instance: Booking, **kwargs):
-    if instance.status == 'completed':
-        HandymanProfile.objects.filter(user=instance.handyman).update(
-            completed_jobs=models.F('completed_jobs') + 1
-        )
+# NB: l'incrément de completed_jobs est désormais géré de façon IDEMPOTENTE
+# dans Booking.transition_to() (uniquement à l'entrée dans 'completed').
+# L'ancien signal post_save incrémentait à CHAQUE sauvegarde -> double comptage. Supprimé.
 
 
 @receiver(post_save, sender=Booking)
@@ -45,7 +54,7 @@ def on_booking_status_change(sender, instance: Booking, created: bool, **kwargs)
 
     if notify_booking_status:
         try:
-            notify_booking_status.delay(instance.client_id, instance.id, instance.status)
+            notify_booking_status.delay(instance.id, instance.status)
         except Exception:
             logger.exception("Échec d'envoi de la tâche Celery notify_booking_status")
     else:

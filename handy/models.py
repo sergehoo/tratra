@@ -1,4 +1,7 @@
+from datetime import timedelta
 from decimal import Decimal
+from pathlib import Path
+from uuid import uuid4
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import AbstractUser, Group, Permission
@@ -6,12 +9,14 @@ from django.contrib.contenttypes.fields import GenericForeignKey
 from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator, RegexValidator
-from django.db import models
+from django.db import models, transaction
 from django.db.models import Sum, UniqueConstraint, Q
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from django.contrib.gis.db import models as gis_models
 from django.contrib.postgres.indexes import GistIndex
+
+from handy.storage import KycPrivateStorage
 
 # Create your models here.
 
@@ -23,6 +28,7 @@ class User(AbstractUser):
         ('client', 'Client'),
         ('employeur', 'Employeur'),
         ('handyman', 'Artisan'),
+        ('entreprise', 'Entreprise'),
         ('admin', 'Administrateur'),
     )
     user_type = models.CharField(max_length=20, choices=USER_TYPES, blank=True, null=True, default='client')
@@ -87,6 +93,7 @@ class HandymanProfile(models.Model):
     is_approved = models.BooleanField(default=False, db_index=True)
     rating = models.FloatField(default=0)
     completed_jobs = models.PositiveIntegerField(default=0)
+    quality_score = models.PositiveSmallIntegerField(default=0, db_index=True)  # score composite 0-100
     photo = models.ImageField(upload_to='profile_pics/', blank=True, null=True)
 
     # Localisation précise (si dispo)
@@ -115,15 +122,19 @@ class HandymanProfile(models.Model):
         )['total'] or Decimal('0.00')
         return total
 
-    def has_sufficient_deposit(self, service_amount: Decimal) -> bool:
-        required = Decimal(service_amount) * Decimal('0.11')
+    def has_sufficient_deposit(self, service_amount: Decimal, category_id=None) -> bool:
+        # Source unique de vérité : PricingRule via compute_platform_fee (fallback 11%).
+        from handy.services.fees import compute_platform_fee
+        required = compute_platform_fee(Decimal(service_amount), category_id=category_id)
         return self.deposit_balance >= required
 
-    def deduct_platform_fee(self, service_amount: Decimal) -> bool:
+    def deduct_platform_fee(self, service_amount: Decimal, category_id=None) -> bool:
         """
-        Déduit 11% en créant une transaction négative (DB-safe & traçable).
+        Déduit la commission plateforme (PricingRule, fallback 11%) en créant une
+        transaction négative (DB-safe & traçable). Retourne False si caution insuffisante.
         """
-        fee = (Decimal(service_amount) * Decimal('0.11')).quantize(Decimal('0.01'))
+        from handy.services.fees import compute_platform_fee
+        fee = compute_platform_fee(Decimal(service_amount), category_id=category_id)
         if self.deposit_balance >= fee:
             DepositTransaction.objects.create(
                 handyman=self.user, type='deduction', amount=-fee, status='completed',
@@ -150,8 +161,50 @@ class HandymanProfile(models.Model):
     def is_fully_completed(self) -> bool:
         return self.profile_completion() == 100
 
+    # Documents requis pour valider le KYC (au minimum une pièce d'identité approuvée)
+    REQUIRED_KYC_DOCS = {'id_card'}
+
+    def has_required_kyc(self) -> bool:
+        approved = set(
+            self.documents.filter(status='approved').values_list('document_type', flat=True)
+        )
+        return self.REQUIRED_KYC_DOCS.issubset(approved)
+
+    def is_on_timeoff(self, at=None) -> bool:
+        """L'artisan est-il en congé/absence à l'instant `at` (par défaut maintenant) ?"""
+        at = at or timezone.now()
+        return self.time_off.filter(start__lte=at, end__gte=at).exists()
+
+    def compute_quality_score(self) -> int:
+        """Score de confiance composite 0-100 :
+        note (50) + volume de missions (25, plafonné à 50) + KYC vérifié (15)
+        + complétude du profil (10)."""
+        rating_pts = (Decimal(str(self.rating or 0)) / Decimal('5')) * Decimal('50')
+        jobs = min(self.completed_jobs or 0, 50)
+        jobs_pts = (Decimal(jobs) / Decimal('50')) * Decimal('25')
+        kyc_pts = Decimal('15') if self.is_approved else Decimal('0')
+        completion_pts = (Decimal(self.profile_completion()) / Decimal('100')) * Decimal('10')
+        total = rating_pts + jobs_pts + kyc_pts + completion_pts
+        return int(max(Decimal('0'), min(total, Decimal('100'))))
+
+    def refresh_quality_score(self) -> int:
+        self.quality_score = self.compute_quality_score()
+        self.save(update_fields=['quality_score'])
+        return self.quality_score
+
     def __str__(self):
         return f"Profil de {self.user.get_full_name() or self.user.username}"
+
+
+def private_kyc_upload_path(instance, filename):
+    """Place KYC uploads under an opaque, per-profile private key.
+
+    Original filenames often contain personally identifying information.  They
+    must not become part of a public object URL or a guessable object key.
+    """
+    suffix = Path(filename).suffix.lower()
+    profile_id = instance.handyman_id or "unassigned"
+    return f"kyc/{profile_id}/{uuid4().hex}{suffix}"
 
 
 class HandymanDocument(models.Model):
@@ -164,14 +217,37 @@ class HandymanDocument(models.Model):
         ('other', 'Autre'),
     ]
 
+    STATUS_CHOICES = [('pending', 'En attente'), ('approved', 'Approuvé'), ('rejected', 'Rejeté')]
+
     handyman = models.ForeignKey('HandymanProfile', on_delete=models.CASCADE, related_name='documents')
     document_type = models.CharField(max_length=50, choices=DOCUMENT_TYPES)
-    file = models.FileField(upload_to='handyman_documents/')
+    file = models.FileField(upload_to=private_kyc_upload_path, storage=KycPrivateStorage())
     description = models.TextField(blank=True, null=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending', db_index=True)
+    reviewed_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True,
+                                    related_name='documents_reviewed')
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    rejection_reason = models.TextField(blank=True, null=True)
     uploaded_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
         return f"{self.handyman.user.get_full_name()} - {self.get_document_type_display()}"
+
+    def approve(self, *, by):
+        self.status = 'approved'
+        self.reviewed_by = by
+        self.reviewed_at = timezone.now()
+        self.rejection_reason = ''
+        self.save(update_fields=['status', 'reviewed_by', 'reviewed_at', 'rejection_reason'])
+        return self
+
+    def reject(self, *, by, reason=''):
+        self.status = 'rejected'
+        self.reviewed_by = by
+        self.reviewed_at = timezone.now()
+        self.rejection_reason = reason
+        self.save(update_fields=['status', 'reviewed_by', 'reviewed_at', 'rejection_reason'])
+        return self
 
 
 # ---- WALLET / CAUTION ----
@@ -218,11 +294,18 @@ class DepositTransaction(models.Model):
             raise ValidationError("Le montant doit être négatif pour un retrait ou une déduction.")
 
     def save(self, *args, **kwargs):
+        # Débits (retrait/déduction) : contrôle de solde SOUS VERROU pour éviter
+        # les race conditions (deux opérations concurrentes lisant le même solde).
         if self.type in ['withdrawal', 'deduction'] and self.status == 'completed':
-            balance = DepositTransaction.get_balance(self.handyman)
-            if abs(self.amount) > balance:
-                raise ValidationError("Solde insuffisant pour effectuer cette opération.")
-        super().save(*args, **kwargs)
+            with transaction.atomic():
+                # verrou pessimiste sur le wallet de l'artisan -> sérialise les débits
+                User.objects.select_for_update().get(pk=self.handyman_id)
+                balance = DepositTransaction.get_balance(self.handyman)
+                if abs(self.amount) > balance:
+                    raise ValidationError("Solde insuffisant pour effectuer cette opération.")
+                super().save(*args, **kwargs)
+        else:
+            super().save(*args, **kwargs)
 
 
 # ---- CATALOGUE ----
@@ -319,7 +402,25 @@ class ReplacementSuggestion(models.Model):
     original_service = models.ForeignKey(Service, on_delete=models.SET_NULL, null=True, related_name='+')
     suggested_service = models.ForeignKey(Service, on_delete=models.CASCADE, related_name='+')
     score = models.FloatField(default=0)
+    accepted = models.BooleanField(default=False, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['booking', 'suggested_service'],
+                                    name='uniq_replacement_per_service'),
+        ]
+
+    @transaction.atomic
+    def accept(self):
+        """Réassigne la réservation à l'artisan/service suggéré."""
+        booking = self.booking
+        booking.handyman = self.suggested_service.handyman
+        booking.service = self.suggested_service
+        booking.save(update_fields=['handyman', 'service', 'updated_at'])
+        self.accepted = True
+        self.save(update_fields=['accepted'])
+        return booking
 
 
 class TimeOff(models.Model):
@@ -352,7 +453,11 @@ class Booking(models.Model):
     requested_start = models.DateTimeField(null=True, blank=True, db_index=True)
     requested_end = models.DateTimeField(null=True, blank=True, db_index=True)
     total_price = models.DecimalField(max_digits=10, decimal_places=2, blank=True, null=True)
+    cancellation_fee = models.DecimalField(max_digits=10, decimal_places=2, default=0)  # pénalité d'annulation appliquée
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending', db_index=True)
+    booking_type = models.CharField(
+        max_length=20, choices=[('instant', 'Instantané'), ('scheduled', 'Planifié')],
+        default='scheduled', db_index=True)
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -370,6 +475,116 @@ class Booking(models.Model):
 
     def __str__(self):
         return f"Réservation #{self.id} - {self.client} / {self.handyman}"
+
+    @property
+    def is_immediate(self) -> bool:
+        return self.booking_type == 'instant'
+
+    def generate_replacement_suggestions(self, limit=5):
+        """Propose des services de remplacement (même catégorie, autre artisan,
+        approuvé) — utilisé quand l'artisan devient indisponible (absence)."""
+        if not self.service or not self.service.category_id:
+            return []
+        candidates = (Service.objects
+                      .filter(category_id=self.service.category_id, is_active=True,
+                              handyman__handyman_profile__is_approved=True)
+                      .exclude(handyman_id=self.handyman_id)
+                      .select_related('handyman__handyman_profile')
+                      .order_by('-handyman__handyman_profile__rating')[:limit])
+        out = []
+        for svc in candidates:
+            sugg, _ = ReplacementSuggestion.objects.get_or_create(
+                booking=self, suggested_service=svc,
+                defaults=dict(
+                    original_service=self.service,
+                    score=float(getattr(svc.handyman.handyman_profile, 'rating', 0) or 0),
+                ),
+            )
+            out.append(sugg)
+        return out
+
+    # ----- Machine à états -----
+    # Transitions autorisées : source -> {destinations}
+    TRANSITIONS = {
+        'pending': {'confirmed', 'cancelled'},
+        'confirmed': {'in_progress', 'cancelled'},
+        'in_progress': {'completed', 'cancelled'},
+        'completed': set(),
+        'cancelled': set(),
+    }
+
+    def can_transition_to(self, new_status: str) -> bool:
+        return new_status in self.TRANSITIONS.get(self.status, set())
+
+    def compute_cancellation_fee(self) -> Decimal:
+        """Pénalité d'annulation selon la CancellationPolicy active et le délai
+        avant la mission. Gratuit si l'on annule plus de `free_until_minutes`
+        avant le début prévu ; sinon `fee_percent` % du montant."""
+        policy = CancellationPolicy.objects.filter(active=True).order_by('id').first()
+        if not policy:
+            return Decimal('0.00')
+        payment = getattr(self, 'payment', None)
+        base = (payment.amount if payment is not None else None) or self.total_price or Decimal('0')
+        if base <= 0:
+            return Decimal('0.00')
+        if self.booking_date and timezone.now() <= self.booking_date - timedelta(minutes=policy.free_until_minutes):
+            return Decimal('0.00')  # dans la fenêtre d'annulation gratuite
+        return (Decimal(base) * policy.fee_percent / Decimal('100')).quantize(Decimal('1.'))
+
+    @transaction.atomic
+    def transition_to(self, new_status: str, *, actor=None, save: bool = True):
+        """Change le statut en validant la transition, horodate dans
+        BookingTimeline, et incrémente completed_jobs UNE seule fois à la
+        complétion. Lève ValidationError si la transition est interdite.
+
+        `actor` (User) est accepté pour traçabilité/contrôles éventuels.
+        """
+        if new_status == self.status:
+            return self
+        if not self.can_transition_to(new_status):
+            raise ValidationError(
+                f"Transition invalide: {self.status} -> {new_status}."
+            )
+
+        previous = self.status
+        self.status = new_status
+        update_fields = ['status', 'updated_at']
+        if new_status == 'completed' and not self.end_date:
+            self.end_date = timezone.now()
+            update_fields.append('end_date')
+        if new_status == 'cancelled':
+            self.cancellation_fee = self.compute_cancellation_fee()
+            update_fields.append('cancellation_fee')
+
+        if save:
+            # PK existant -> update ciblé; sinon save complet
+            self.save(update_fields=update_fields if self.pk else None)
+
+        # Horodatage du nouveau statut
+        BookingTimeline.objects.create(booking=self, status=new_status)
+
+        # Incrément idempotent : seulement à l'ENTRÉE dans 'completed'
+        if new_status == 'completed' and previous != 'completed':
+            HandymanProfile.objects.filter(user=self.handyman).update(
+                completed_jobs=models.F('completed_jobs') + 1
+            )
+            prof = HandymanProfile.objects.filter(user=self.handyman).first()
+            if prof:
+                prof.refresh_quality_score()
+
+        # Escrow : libère (mission terminée) ou rembourse (annulation) le séquestre.
+        # getattr fonctionne car le reverse O2O 'payment' lève une DoesNotExist
+        # qui hérite d'AttributeError quand aucun paiement n'existe.
+        payment = getattr(self, 'payment', None)
+        if payment is not None:
+            if new_status == 'completed' and payment.status in ('held', 'completed'):
+                payment.release(note=f"booking #{self.pk} completed")
+            elif new_status == 'cancelled' and payment.status in ('pending', 'held'):
+                # remboursement NET de la pénalité d'annulation (le reste est retenu)
+                refund_amount = max(payment.amount - (self.cancellation_fee or Decimal('0')), Decimal('0'))
+                payment.refund(amount=refund_amount,
+                               note=f"booking #{self.pk} cancelled (pénalité={self.cancellation_fee})")
+        return self
 
 
 class Quotation(models.Model):
@@ -395,10 +610,27 @@ class Quotation(models.Model):
 class Payment(models.Model):
     PAYMENT_METHODS = [
         ('card', 'Carte'), ('transfer', 'Virement'), ('cash', 'Espèces'), ('check', 'Chèque'),
-        # étendre plus tard: ('om','OrangeMoney'), ('mtn','MTN'), ('moov','Moov')
+        ('om', 'Orange Money'), ('mtn', 'MTN MoMo'), ('moov', 'Moov Money'), ('wave', 'Wave'),
     ]
-    PAYMENT_STATUS = [('pending', 'En attente'), ('completed', 'Complété'), ('failed', 'Échoué'),
-                      ('refunded', 'Remboursé')]
+    PAYMENT_STATUS = [
+        ('pending', 'En attente'),
+        ('held', 'Sous séquestre (escrow)'),
+        ('released', "Versé à l'artisan"),
+        ('completed', 'Complété'),  # legacy / compat
+        ('failed', 'Échoué'),
+        ('refunded', 'Remboursé'),
+    ]
+    # États où l'argent du client a effectivement été reçu par la plateforme.
+    PAID_STATUSES = ('held', 'released', 'completed')
+    # Machine à états de l'escrow : source -> {destinations}
+    ESCROW_TRANSITIONS = {
+        'pending': {'held', 'failed', 'refunded'},
+        'held': {'released', 'refunded'},
+        'completed': {'released', 'refunded'},  # tolère l'ancien flux 'completed'
+        'released': set(),
+        'refunded': set(),
+        'failed': set(),
+    }
 
     booking = models.OneToOneField('Booking', on_delete=models.CASCADE, related_name='payment')
     amount = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(0)])
@@ -410,6 +642,9 @@ class Payment(models.Model):
     transaction_id = models.CharField(max_length=100, blank=True, null=True, unique=True, db_index=True)
     is_paid = models.BooleanField(default=False, db_index=True)  # garde pour compat; synchro dans save()
     currency = models.CharField(max_length=8, default='XOF')
+    refunded_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)  # montant remboursé (partiel possible)
+    coupon = models.ForeignKey('Coupon', on_delete=models.SET_NULL, null=True, blank=True, related_name='payments')
+    discount = models.DecimalField(max_digits=10, decimal_places=2, default=0)  # réduction appliquée
 
     payment_date = models.DateTimeField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
@@ -421,12 +656,66 @@ class Payment(models.Model):
         ]
 
     def save(self, *args, **kwargs):
-        # garder is_paid en phase avec status
-        self.is_paid = (self.status == 'completed')
+        # garder is_paid en phase avec status (escrow : held/released/completed = payé)
+        self.is_paid = (self.status in self.PAID_STATUSES)
         super().save(*args, **kwargs)
 
     def __str__(self):
         return f"Paiement #{self.id} - {self.amount} {self.currency}"
+
+    # ----- Escrow / séquestre -----
+    def _set_status(self, new_status: str, note: str = ""):
+        old = self.status
+        self.status = new_status
+        if new_status in self.PAID_STATUSES and not self.payment_date:
+            self.payment_date = timezone.now()
+        self.save(update_fields=["status", "is_paid", "payment_date", "updated_at"])
+        PaymentLog.objects.create(
+            payment=self, previous_status=old, new_status=new_status, notes=note
+        )
+
+    def _check(self, new_status: str):
+        if new_status not in self.ESCROW_TRANSITIONS.get(self.status, set()):
+            raise ValidationError(
+                f"Transition paiement invalide: {self.status} -> {new_status}."
+            )
+
+    @transaction.atomic
+    def mark_held(self, note: str = "provider confirmed"):
+        """Encaissement confirmé par le fournisseur -> fonds placés en séquestre."""
+        self._check('held')
+        self._set_status('held', note)
+        return self
+
+    @transaction.atomic
+    def release(self, note: str = "job completed"):
+        """Libère les fonds vers l'artisan (mission terminée) + génère la facture."""
+        self._check('released')
+        self._set_status('released', note)
+        Invoice.objects.get_or_create(
+            booking=self.booking,
+            defaults=dict(
+                number=f"INV-{self.booking_id}-{int(timezone.now().timestamp())}",
+                amount=self.amount,
+                fee=self.platform_fee,
+                total=self.amount,
+            ),
+        )
+        return self
+
+    @transaction.atomic
+    def refund(self, amount=None, note: str = "refund"):
+        """Rembourse le client (annulation / litige). `amount` partiel possible :
+        le solde non remboursé correspond à la pénalité retenue."""
+        self._check('refunded')
+        self.refunded_amount = self.amount if amount is None else min(Decimal(str(amount)), self.amount)
+        old = self.status
+        self.status = 'refunded'
+        self.save(update_fields=["status", "is_paid", "refunded_amount", "updated_at"])
+        PaymentLog.objects.create(
+            payment=self, previous_status=old, new_status='refunded', notes=note
+        )
+        return self
 
 
 class PaymentLog(models.Model):
@@ -448,13 +737,80 @@ class Payout(models.Model):
     notes = models.TextField(blank=True, null=True)
 
 
+def artisan_available_earnings(handyman) -> Decimal:
+    """Gains disponibles d'un artisan = somme des paiements LIBÉRÉS (net de commission)
+    moins les retraits déjà demandés/envoyés (pending|sent)."""
+    earned = Payment.objects.filter(
+        booking__handyman=handyman, status='released'
+    ).aggregate(
+        net=Sum(models.F('amount') - models.F('platform_fee'))
+    )['net'] or Decimal('0.00')
+    withdrawn = Payout.objects.filter(
+        handyman=handyman, status__in=['pending', 'sent']
+    ).aggregate(t=Sum('amount'))['t'] or Decimal('0.00')
+    return earned - withdrawn
+
+
 class Dispute(models.Model):
+    STATUS_CHOICES = [
+        ('open', 'Ouvert'),
+        ('under_review', 'En examen'),
+        ('resolved', 'Résolu'),
+        ('rejected', 'Rejeté'),
+    ]
+    RESOLUTION_ACTIONS = [
+        ('refund_client', 'Remboursement client'),
+        ('release_artisan', "Versement à l'artisan"),
+        ('none', 'Aucune action'),
+    ]
     booking = models.ForeignKey(Booking, on_delete=models.CASCADE, related_name='disputes')
     reporter = models.ForeignKey(User, on_delete=models.CASCADE, related_name='disputes_made')
     reason = models.TextField()
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open', db_index=True)
     resolution = models.TextField(blank=True, null=True)
+    resolution_action = models.CharField(max_length=20, choices=RESOLUTION_ACTIONS, blank=True, default='')
+    resolved_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True,
+                                    related_name='disputes_resolved')
+    resolved_at = models.DateTimeField(null=True, blank=True)
     is_resolved = models.BooleanField(default=False)
-    created_at = models.DateTimeField(auto_now_add=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Litige #{self.id} - réservation #{self.booking_id} ({self.status})"
+
+    @transaction.atomic
+    def resolve(self, action: str, *, by, resolution: str = ''):
+        """Résout le litige et applique l'effet sur l'escrow :
+        refund_client -> remboursement du séquestre ; release_artisan -> versement."""
+        if action not in dict(self.RESOLUTION_ACTIONS):
+            raise ValidationError("Action de résolution invalide.")
+        self.status = 'resolved'
+        self.resolution_action = action
+        self.resolution = resolution
+        self.resolved_by = by
+        self.resolved_at = timezone.now()
+        self.is_resolved = True
+        self.save(update_fields=['status', 'resolution_action', 'resolution',
+                                 'resolved_by', 'resolved_at', 'is_resolved', 'updated_at'])
+        payment = getattr(self.booking, 'payment', None)
+        if payment is not None:
+            if action == 'refund_client' and payment.status in ('pending', 'held'):
+                payment.refund(note=f"dispute #{self.pk}: remboursement client")
+            elif action == 'release_artisan' and payment.status in ('held', 'completed'):
+                payment.release(note=f"dispute #{self.pk}: versement artisan")
+        return self
+
+    @transaction.atomic
+    def reject(self, *, by, resolution: str = ''):
+        self.status = 'rejected'
+        self.resolution = resolution
+        self.resolved_by = by
+        self.resolved_at = timezone.now()
+        self.is_resolved = True
+        self.save(update_fields=['status', 'resolution', 'resolved_by',
+                                 'resolved_at', 'is_resolved', 'updated_at'])
+        return self
 
 
 class FavoriteHandyman(models.Model):
@@ -613,6 +969,121 @@ class Coupon(models.Model):
     valid_from = models.DateTimeField()
     valid_to = models.DateTimeField()
     active = models.BooleanField(default=True)
+
+    def __str__(self):
+        return self.code
+
+    def is_valid(self, at=None) -> bool:
+        at = at or timezone.now()
+        return bool(self.active and self.valid_from <= at <= self.valid_to)
+
+    def discount_for(self, amount) -> Decimal:
+        amount = Decimal(amount)
+        if self.percent_off:
+            d = amount * (Decimal(self.percent_off) / Decimal('100'))
+        elif self.amount_off:
+            d = Decimal(self.amount_off)
+        else:
+            d = Decimal('0')
+        return min(d, amount).quantize(Decimal('1.'))
+
+    def apply(self, amount) -> Decimal:
+        """Montant net après réduction (plancher 0)."""
+        return (Decimal(amount) - self.discount_for(amount)).quantize(Decimal('1.'))
+
+
+class OTPCode(models.Model):
+    PURPOSES = [('signup', 'Inscription'), ('login', 'Connexion'), ('phone', 'Vérification téléphone')]
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='otp_codes')
+    code = models.CharField(max_length=6, db_index=True)
+    purpose = models.CharField(max_length=20, choices=PURPOSES, default='signup')
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    expires_at = models.DateTimeField()
+    used = models.BooleanField(default=False)
+
+    class Meta:
+        indexes = [models.Index(fields=['user', 'used', '-created_at'])]
+
+    def is_valid(self) -> bool:
+        return (not self.used) and timezone.now() <= self.expires_at
+
+    @classmethod
+    def issue(cls, user, purpose='signup', ttl_minutes=10):
+        import secrets
+        code = f"{secrets.randbelow(1000000):06d}"
+        return cls.objects.create(
+            user=user, code=code, purpose=purpose,
+            expires_at=timezone.now() + timedelta(minutes=ttl_minutes),
+        )
+
+
+class SubscriptionPlan(models.Model):
+    AUDIENCES = [('client', 'Client'), ('handyman', 'Artisan'), ('business', 'Entreprise (B2B)')]
+    INTERVALS = [('monthly', 'Mensuel'), ('yearly', 'Annuel')]
+    name = models.CharField(max_length=80)
+    slug = models.SlugField(unique=True)
+    audience = models.CharField(max_length=20, choices=AUDIENCES, default='client', db_index=True)
+    price = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    interval = models.CharField(max_length=20, choices=INTERVALS, default='monthly')
+    features = models.JSONField(default=list, blank=True)
+    active = models.BooleanField(default=True, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.name} ({self.get_interval_display()})"
+
+
+class Subscription(models.Model):
+    STATUS_CHOICES = [('active', 'Actif'), ('cancelled', 'Annulé'), ('expired', 'Expiré')]
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='subscriptions', db_index=True)
+    plan = models.ForeignKey(SubscriptionPlan, on_delete=models.PROTECT, related_name='subscriptions')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='active', db_index=True)
+    started_at = models.DateTimeField(auto_now_add=True)
+    current_period_end = models.DateTimeField()
+    cancelled_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        indexes = [models.Index(fields=['user', 'status'])]
+
+    def is_active(self, at=None) -> bool:
+        at = at or timezone.now()
+        return self.status == 'active' and at <= self.current_period_end
+
+    @classmethod
+    def subscribe(cls, user, plan):
+        """Souscrit/renouvelle un abonnement actif (annule le précédent actif)."""
+        cls.objects.filter(user=user, status='active').update(
+            status='cancelled', cancelled_at=timezone.now())
+        days = 365 if plan.interval == 'yearly' else 30
+        return cls.objects.create(
+            user=user, plan=plan, status='active',
+            current_period_end=timezone.now() + timedelta(days=days),
+        )
+
+    def cancel(self):
+        self.status = 'cancelled'
+        self.cancelled_at = timezone.now()
+        self.save(update_fields=['status', 'cancelled_at'])
+        return self
+
+
+class CompanyProfile(models.Model):
+    """Profil ENTREPRISE (B2B) — un compte qui mandate des missions au nom d'une société."""
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='company_profile')
+    company_name = models.CharField(max_length=150)
+    registration_number = models.CharField(max_length=50, blank=True, null=True)  # RCCM / SIRET
+    industry = models.CharField(max_length=100, blank=True, null=True)
+    address = models.TextField(blank=True, null=True)
+    city = models.CharField(max_length=100, blank=True, null=True)
+    contact_person = models.CharField(max_length=120, blank=True, null=True)
+    phone = models.CharField(max_length=20, blank=True, null=True)
+    website = models.URLField(blank=True, null=True)
+    verified = models.BooleanField(default=False, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return self.company_name or f"Entreprise #{self.user_id}"
 
 class Invoice(models.Model):
     booking = models.OneToOneField(Booking, on_delete=models.CASCADE, related_name='invoice')

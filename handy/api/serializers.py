@@ -1,17 +1,23 @@
 # handy/api/serializers.py
 from decimal import Decimal
+from pathlib import Path
 from typing import Optional
 
+from django.conf import settings
 from django.contrib.auth import authenticate
 from django.contrib.gis.geos import Point
 from django.utils import timezone
 from rest_framework import serializers
+from rest_framework.reverse import reverse
+from drf_spectacular.utils import extend_schema_field
+from drf_spectacular.types import OpenApiTypes
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 from handy.models import (
     User, HandymanProfile, ServiceCategory, ServiceImage, Service, Booking,
     Payment, PaymentLog, Review, Conversation, Message, Notification,
-    HandymanDocument, Report, Device, HeroSlide
+    HandymanDocument, Report, Device, HeroSlide, Payout, Dispute, TimeOff, ReplacementSuggestion,
+    PayoutAccount, SubscriptionPlan, Subscription, CompanyProfile
 )
 from handy.services.pricing import estimate_price
 from handy.services.fees import compute_platform_fee
@@ -46,9 +52,27 @@ class UserSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['id',"date_joined", "last_login", "is_verified"]
 
+    # Rôles que l'on autorise à l'auto-inscription publique (jamais 'admin').
+    SELF_SIGNUP_ROLES = {"client", "employeur", "handyman", "entreprise"}
+
+    def validate_user_type(self, value):
+        """Empêche l'escalade de privilège : un compte créé via l'API publique
+        ne peut pas se déclarer 'admin' (ni un rôle hors liste blanche)."""
+        # En modification par un staff/admin authentifié, on laisse passer.
+        request = self.context.get("request")
+        is_admin = bool(request and request.user and request.user.is_staff)
+        if not is_admin and value not in self.SELF_SIGNUP_ROLES:
+            raise serializers.ValidationError(
+                "Type de compte non autorisé à l'inscription."
+            )
+        return value
+
     def create(self, validated_data):
         password = validated_data.pop('password')
         user = User(**validated_data)
+        # garde-fou : aucune création publique ne peut octroyer de privilèges Django
+        user.is_staff = False
+        user.is_superuser = False
         user.set_password(password)
         user.save()
         return user
@@ -113,6 +137,7 @@ class HandymanProfileSerializer(serializers.ModelSerializer):
             "latitude", "longitude", "location",
         ]
 
+    @extend_schema_field(OpenApiTypes.OBJECT)
     def get_location(self, obj):
         if getattr(obj, "location", None):
             return {"lat": obj.location.y, "lng": obj.location.x}
@@ -180,10 +205,12 @@ class BookingCreateSerializer(serializers.ModelSerializer):
     # écriture: IDs + infos pratiques
     service = serializers.PrimaryKeyRelatedField(queryset=Service.objects.all(), required=False, allow_null=True)
     handyman = serializers.PrimaryKeyRelatedField(queryset=User.objects.all(), required=False, allow_null=True)
-    type = serializers.ChoiceField(choices=[('instant', 'Instantané'), ('scheduled', 'Planifié')], default='scheduled')
+    type = serializers.ChoiceField(source='booking_type',
+                                   choices=[('instant', 'Instantané'), ('scheduled', 'Planifié')],
+                                   required=False, default='scheduled')
     is_immediate = serializers.BooleanField(read_only=True)
 
-    # champs annexes côté pricing/matching (non stockés)
+    # champs annexes côté pricing/matching (NON stockés sur Booking, retirés avant create)
     category_id = serializers.IntegerField(write_only=True, required=False)
     minutes = serializers.IntegerField(write_only=True, required=False, default=60)
 
@@ -194,12 +221,11 @@ class BookingCreateSerializer(serializers.ModelSerializer):
             "booking_date", "end_date",
             "address", "city", "postal_code",
             "description", "proposed_price", "handyman_comment",
-            "response_date", "status",
-            "type", "is_immediate",
-            # auxiliaires
+            "response_date", "status", "type", "is_immediate",
+            # auxiliaires (write_only)
             "category_id", "minutes",
         ]
-        read_only_fields = ["client", "status", "is_immediate", "response_date"]
+        read_only_fields = ["client", "status", "response_date", "is_immediate"]
 
     def validate(self, attrs):
         start = attrs.get("booking_date")
@@ -210,9 +236,11 @@ class BookingCreateSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         request = self.context.get("request")
+        # retirer les champs auxiliaires non persistés sur Booking
+        validated_data.pop("category_id", None)
+        validated_data.pop("minutes", None)
         validated_data["client"] = request.user
-        validated_data["is_immediate"] = validated_data.get("type") == "instant"
-        # on ne touche pas à la tarification ici; c’est géré par /payments/initiate/
+        # tarification non gérée ici : c'est le rôle de /payments/initiate/
         return super().create(validated_data)
 
 
@@ -220,6 +248,8 @@ class BookingSerializer(serializers.ModelSerializer):
     client_detail = UserMiniSerializer(source="client", read_only=True)
     handyman_detail = UserMiniSerializer(source="handyman", read_only=True)
     service_detail = ServiceSerializer(source="service", read_only=True)
+    type = serializers.CharField(source="booking_type", read_only=True)
+    is_immediate = serializers.BooleanField(read_only=True)
 
     class Meta:
         model = Booking
@@ -230,11 +260,11 @@ class BookingSerializer(serializers.ModelSerializer):
             "booking_date", "end_date",
             "address", "city", "postal_code",
             "description", "proposed_price", "handyman_comment",
-            "response_date", "status",
+            "response_date", "status", "type", "is_immediate",
             "created_at", "updated_at",
-            "type", "is_immediate",
         ]
-        read_only_fields = ["created_at", "updated_at"]
+        # 'status' n'est PAS modifiable via PATCH : passer par /bookings/{id}/transition/.
+        read_only_fields = ["created_at", "updated_at", "status"]
 
 
 # ========= PAYMENTS =========
@@ -251,6 +281,80 @@ class PaymentSerializer(serializers.ModelSerializer):
             "payment_date", "created_at", "updated_at",
         ]
         read_only_fields = ["is_paid", "created_at", "updated_at"]
+
+
+class TimeOffSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TimeOff
+        fields = ["id", "handyman", "start", "end", "reason"]
+        read_only_fields = ["handyman"]  # posé serveur = profil du requérant
+
+    def validate(self, attrs):
+        start, end = attrs.get("start"), attrs.get("end")
+        if start and end and end < start:
+            raise serializers.ValidationError("end doit être >= start.")
+        return attrs
+
+
+class ReplacementSuggestionSerializer(serializers.ModelSerializer):
+    suggested_service_detail = ServiceSerializer(source="suggested_service", read_only=True)
+
+    class Meta:
+        model = ReplacementSuggestion
+        fields = ["id", "booking", "original_service", "suggested_service",
+                  "suggested_service_detail", "score", "accepted", "created_at"]
+        read_only_fields = fields
+
+
+class DisputeSerializer(serializers.ModelSerializer):
+    reporter_detail = UserMiniSerializer(source="reporter", read_only=True)
+
+    class Meta:
+        model = Dispute
+        fields = ["id", "booking", "reporter", "reporter_detail", "reason", "status",
+                  "resolution", "resolution_action", "resolved_at", "created_at"]
+        # le client/artisan ne fournit que booking + reason ; le reste est serveur/admin.
+        read_only_fields = ["reporter", "status", "resolution", "resolution_action",
+                            "resolved_at", "created_at"]
+
+
+class PayoutSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Payout
+        fields = ["id", "handyman", "amount", "status", "requested_at", "processed_at", "notes"]
+        # handyman & statut posés côté serveur (l'artisan ne fait que demander un montant)
+        read_only_fields = ["handyman", "status", "requested_at", "processed_at", "notes"]
+
+
+class CompanyProfileSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CompanyProfile
+        fields = ["id", "user", "company_name", "registration_number", "industry",
+                  "address", "city", "contact_person", "phone", "website", "verified", "created_at"]
+        read_only_fields = ["user", "verified", "created_at"]  # user serveur ; verified par admin
+
+
+class PayoutAccountSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PayoutAccount
+        fields = ["id", "provider", "account_ref", "verified", "created_at"]
+        read_only_fields = ["verified", "created_at"]  # la vérification est faite côté admin
+
+
+class SubscriptionPlanSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SubscriptionPlan
+        fields = ["id", "name", "slug", "audience", "price", "interval", "features", "active"]
+
+
+class SubscriptionSerializer(serializers.ModelSerializer):
+    plan_detail = SubscriptionPlanSerializer(source="plan", read_only=True)
+
+    class Meta:
+        model = Subscription
+        fields = ["id", "user", "plan", "plan_detail", "status",
+                  "started_at", "current_period_end", "cancelled_at"]
+        read_only_fields = ["user", "status", "started_at", "current_period_end", "cancelled_at"]
 
 
 class PaymentLogSerializer(serializers.ModelSerializer):
@@ -323,15 +427,47 @@ class NotificationSerializer(serializers.ModelSerializer):
 
 
 class HandymanDocumentSerializer(serializers.ModelSerializer):
-    # écriture
-    handyman = serializers.PrimaryKeyRelatedField(queryset=HandymanProfile.objects.all())
-    # lecture
+    # lecture détail (le 'handyman' est posé côté serveur = profil du requérant)
     handyman_detail = HandymanProfileSerializer(source="handyman", read_only=True)
+    # Do not serialize the storage URL.  The guarded action issues an expiring
+    # signed URL only after it has checked document ownership/staff access.
+    file = serializers.FileField(write_only=True, required=True, allow_empty_file=False)
+    download_url = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = HandymanDocument
-        fields = ["id", "handyman", "handyman_detail", "document_type", "file", "description", "uploaded_at"]
-        read_only_fields = ["uploaded_at"]
+        fields = ["id", "handyman", "handyman_detail", "document_type", "file", "download_url", "description",
+                  "status", "reviewed_at", "rejection_reason", "uploaded_at"]
+        # statut & revue posés par l'admin ; handyman par le serveur (anti-usurpation)
+        read_only_fields = ["handyman", "status", "reviewed_at", "rejection_reason", "uploaded_at"]
+
+    def validate_file(self, uploaded_file):
+        max_size = settings.KYC_MAX_UPLOAD_BYTES
+        if uploaded_file.size > max_size:
+            raise serializers.ValidationError(
+                f"Le document ne doit pas dépasser {max_size // (1024 * 1024)} Mo."
+            )
+
+        content_type = (getattr(uploaded_file, "content_type", "") or "").lower()
+        allowed_extensions = {
+            "application/pdf": {".pdf"},
+            "image/jpeg": {".jpg", ".jpeg"},
+            "image/png": {".png"},
+        }
+        extension = Path(uploaded_file.name).suffix.lower()
+        if (
+            content_type not in settings.KYC_ALLOWED_CONTENT_TYPES
+            or extension not in allowed_extensions.get(content_type, set())
+        ):
+            raise serializers.ValidationError(
+                "Formats autorisés : PDF, JPEG et PNG."
+            )
+        return uploaded_file
+
+    @extend_schema_field(OpenApiTypes.URI)
+    def get_download_url(self, obj) -> str:
+        request = self.context.get("request")
+        return reverse("handyman-docs-download", kwargs={"pk": obj.pk}, request=request)
 
 
 class ReportSerializer(serializers.ModelSerializer):
@@ -362,11 +498,19 @@ class MatchRequestSerializer(serializers.Serializer):
 
 class MatchResponseSerializer(serializers.ModelSerializer):
     full_name = serializers.CharField(source="user.get_full_name")
-    distance_m = serializers.FloatField()
+    distance_m = serializers.SerializerMethodField()
 
     class Meta:
         model = HandymanProfile
         fields = ["id", "full_name", "rating", "completed_jobs", "distance_m"]
+
+    @extend_schema_field(OpenApiTypes.FLOAT)
+    def get_distance_m(self, obj):
+        # L'annotation Distance() renvoie un objet mesure GeoDjango, pas un float.
+        d = getattr(obj, "distance_m", None)
+        if d is None:
+            return None
+        return float(d.m) if hasattr(d, "m") else float(d)
 
 
 class PriceEstimateSerializer(serializers.Serializer):
@@ -384,43 +528,113 @@ class PaymentInitSerializer(serializers.Serializer):
     method = serializers.ChoiceField(choices=Payment.PAYMENT_METHODS)
     category_id = serializers.IntegerField(required=False)
     minutes = serializers.IntegerField(min_value=1)
+    coupon_code = serializers.CharField(required=False, allow_blank=True)
+
+    def validate(self, attrs):
+        try:
+            booking = (Booking.objects.select_related("service", "service__category", "client")
+                       .get(pk=attrs["booking_id"]))
+        except Booking.DoesNotExist:
+            raise serializers.ValidationError({"booking_id": "Réservation introuvable."})
+
+        user = self.context["request"].user
+        if not user.is_staff and booking.client_id != user.id:
+            raise serializers.ValidationError({"booking_id": "Vous ne pouvez payer que vos propres réservations."})
+        if booking.status == "cancelled":
+            raise serializers.ValidationError({"booking_id": "Une réservation annulée ne peut pas être payée."})
+
+        if attrs.get("category_id") and booking.service_id:
+            if attrs["category_id"] != booking.service.category_id:
+                raise serializers.ValidationError({"category_id": "La catégorie ne correspond pas à la réservation."})
+
+        attrs["booking"] = booking
+        return attrs
 
     def create(self, validated):
         """
-        Crée/complète un Payment en 'pending' et retourne les infos provider.
-        """
-        from handy.services.gateway import OrangeMoney, MTNMoney, StripeCard
+        Initialise un paiement uniquement lorsqu'un vrai fournisseur existe.
 
-        booking = Booking.objects.select_related("service", "service__category").get(pk=validated["booking_id"])
+        Les méthodes non intégrées échouent explicitement sans créer de faux
+        Payment pending ni de référence prédictible.
+        """
+        from handy.services.gateway import PaymentProviderUnavailable, provider_for_method
+
+        booking = validated["booking"]
         svc = booking.service
         category_id = validated.get("category_id") or (svc.category_id if svc else None)
         category_slug = svc.category.slug if svc and svc.category else "menage"
         minutes = validated["minutes"]
 
-        # pricing + frais
-        amount = estimate_price(category_slug, minutes)
-        fee = compute_platform_fee(Decimal(amount), category_id=category_id)
+        # pricing
+        amount = Decimal(estimate_price(category_slug, minutes))
 
-        payment, _ = Payment.objects.get_or_create(
+        # coupon éventuel (ignoré silencieusement si invalide)
+        coupon, discount = None, Decimal('0')
+        code = (validated.get("coupon_code") or "").strip()
+        if code:
+            from handy.models import Coupon
+            c = Coupon.objects.filter(code=code).first()
+            if c and c.is_valid():
+                discount = c.discount_for(amount)
+                amount = c.apply(amount)
+                coupon = c
+
+        # frais plateforme sur le montant NET
+        fee = compute_platform_fee(amount, category_id=category_id)
+
+        method = validated["method"]
+        provider = provider_for_method(method)
+        if not provider.is_available:
+            raise PaymentProviderUnavailable(method)
+
+        # An existing payment must never be silently rebound to a different
+        # provider reference or amount.  It is safe to return the manual cash
+        # record because it does not claim that funds were received.
+        existing = Payment.objects.filter(booking=booking).first()
+        if existing:
+            if existing.method != method:
+                raise serializers.ValidationError(
+                    {"method": "Un paiement existe déjà pour cette réservation avec une autre méthode."}
+                )
+            if existing.status != "pending":
+                raise serializers.ValidationError({"booking_id": "Ce paiement n'est plus réinitialisable."})
+            if method == "cash":
+                return {
+                    "payment_id": existing.id,
+                    "provider": "cash",
+                    "status": existing.status,
+                    "requires_customer_action": True,
+                    "instructions": "Paiement en espèces à confirmer manuellement après la prestation.",
+                }
+            if existing.transaction_id:
+                return {
+                    "payment_id": existing.id,
+                    "provider": existing.method,
+                    "provider_ref": existing.transaction_id,
+                    "status": existing.status,
+                    "already_initiated": True,
+                }
+            raise serializers.ValidationError({"booking_id": "Une tentative de paiement est déjà en cours."})
+
+        # This call fails closed for the placeholder adapters.  It happens
+        # before a Payment row is created so the UI cannot mistake a stub for
+        # an actionable payment flow.
+        res = provider.create(booking, int(amount))
+        provider_ref = res.get("provider_ref")
+        if method != "cash" and not provider_ref:
+            raise serializers.ValidationError({"method": "Le prestataire n'a pas retourné de référence de transaction."})
+
+        payment = Payment.objects.create(
             booking=booking,
-            defaults=dict(
-                amount=amount, platform_fee=fee, method=validated["method"], status="pending", currency="XOF"
-            ),
+            amount=amount,
+            platform_fee=fee,
+            method=method,
+            status="pending",
+            currency="XOF",
+            coupon=coupon,
+            discount=discount,
+            transaction_id=provider_ref,
         )
-
-        # Initialisation provider
-        if validated["method"] == "om":
-            res = OrangeMoney().create(booking, int(amount))
-        elif validated["method"] == "mtn":
-            res = MTNMoney().create(booking, int(amount))
-        elif validated["method"] == "card":
-            res = StripeCard().create(booking, int(amount))
-        else:
-            # cash / fallback
-            res = {"provider": "cash", "provider_ref": f"CASH{booking.id}"}
-
-        payment.transaction_id = res.get("provider_ref")
-        payment.save(update_fields=["transaction_id"])
         return {"payment_id": payment.id, **res}
 
 class HeroSlideSerializer(serializers.ModelSerializer):
@@ -445,9 +659,11 @@ class HeroSlideSerializer(serializers.ModelSerializer):
     def get_image(self, obj: HeroSlide) -> str:
         return obj.image_src
 
+    @extend_schema_field(serializers.ListField(child=serializers.CharField()))
     def get_gradient(self, obj: HeroSlide):
         return [obj.gradient_start, obj.gradient_end]
 
+    @extend_schema_field(OpenApiTypes.OBJECT)
     def get_ctaParams(self, obj: HeroSlide):
         if obj.cta_action == 'open_category' and obj.category_id:
             return {'category_id': obj.category_id}
