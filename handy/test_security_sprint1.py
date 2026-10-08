@@ -72,7 +72,7 @@ def _payment(transaction_id="ref-abc"):
     b = _booking(c, h)
     return Payment.objects.create(
         booking=b, amount=5000, platform_fee=550,
-        method="cash", status="pending", transaction_id=transaction_id,
+        method="om", status="pending", transaction_id=transaction_id,
     )
 
 
@@ -88,7 +88,7 @@ def test_webhook_non_signe_rejete(api_client):
 
 
 @pytest.mark.django_db
-@override_settings(PAYMENT_WEBHOOK_SECRET="testsecret")
+@override_settings(PAYMENT_OM_WEBHOOK_SECRET="testsecret")
 def test_webhook_signe_accepte(api_client):
     p = _payment()
     url = reverse("payment-webhook", kwargs={"provider": "om"})
@@ -109,6 +109,54 @@ def test_webhook_mauvaise_signature_rejete(api_client):
     body = json.dumps({"provider_ref": p.transaction_id, "status": "completed"}).encode()
     res = api_client.post(url, body, content_type="application/json", HTTP_X_WEBHOOK_SIGNATURE="deadbeef")
     assert res.status_code == 401
+
+
+@pytest.mark.django_db
+@override_settings(
+    DEBUG=False,
+    ALLOWED_HOSTS=["testserver"],
+    PAYMENT_WEBHOOK_SECRET="legacy-secret",
+    PAYMENT_OM_WEBHOOK_SECRET="",
+)
+def test_production_webhook_rejects_legacy_shared_secret(api_client):
+    p = _payment()
+    url = reverse("payment-webhook", kwargs={"provider": "om"})
+    body = json.dumps({"provider_ref": p.transaction_id, "status": "completed"}).encode()
+    sig = hmac.new(b"legacy-secret", body, hashlib.sha256).hexdigest()
+    res = api_client.post(url, body, content_type="application/json", HTTP_X_WEBHOOK_SIGNATURE=sig)
+    assert res.status_code == 401
+    p.refresh_from_db()
+    assert p.status == "pending"
+
+
+@pytest.mark.django_db
+@override_settings(PAYMENT_MTN_WEBHOOK_SECRET="testsecret")
+def test_webhook_rejects_provider_mismatch(api_client):
+    p = _payment()
+    url = reverse("payment-webhook", kwargs={"provider": "mtn"})
+    body = json.dumps({"provider_ref": p.transaction_id, "status": "completed"}).encode()
+    sig = hmac.new(b"testsecret", body, hashlib.sha256).hexdigest()
+    res = api_client.post(url, body, content_type="application/json", HTTP_X_WEBHOOK_SIGNATURE=sig)
+    assert res.status_code == 400
+    p.refresh_from_db()
+    assert p.status == "pending"
+
+
+@pytest.mark.django_db
+def test_payment_viewset_cannot_forge_payment(api_client):
+    client, handyman = _user("payment_client"), _user("payment_handyman", "handyman")
+    booking = _booking(client, handyman)
+    api_client.force_authenticate(user=client)
+    res = api_client.post(reverse("payments-list"), {
+        "booking": booking.id,
+        "amount": "5000",
+        "platform_fee": "550",
+        "method": "om",
+        "status": "held",
+        "transaction_id": "forged",
+    }, format="json")
+    assert res.status_code == 405
+    assert not Payment.objects.filter(booking=booking).exists()
 
 
 # ---------- Anti-IDOR sur les réservations ----------

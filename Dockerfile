@@ -20,8 +20,6 @@ WORKDIR /app
 COPY requirements.txt /app/
 
 RUN pip install --no-cache-dir --upgrade pip \
- && pip uninstall -y django-channels || true \
- && pip uninstall -y channels-redis channels_redis channels daphne || true \
  && pip install --no-cache-dir -r requirements.txt
 
 

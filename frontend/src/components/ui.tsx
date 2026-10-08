@@ -6,7 +6,7 @@ export function Button({
   ...props
 }: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: "primary" | "ghost" | "accent" }) {
   const base =
-    "inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 font-semibold transition disabled:opacity-60";
+    "inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60";
   const styles = {
     primary: "bg-primary text-white hover:bg-primaryDark shadow-soft",
     accent: "bg-accent text-ink hover:brightness-95",
@@ -18,7 +18,7 @@ export function Button({
 export function Input({ className = "", ...props }: InputHTMLAttributes<HTMLInputElement>) {
   return (
     <input
-      className={`w-full rounded-xl border border-slate-200 px-4 py-2.5 outline-none focus:ring-2 focus:ring-accent ${className}`}
+      className={`w-full rounded-xl border border-slate-200 px-4 py-2.5 outline-none focus-visible:ring-2 focus-visible:ring-accent ${className}`}
       {...props}
     />
   );

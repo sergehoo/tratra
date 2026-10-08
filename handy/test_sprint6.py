@@ -143,7 +143,7 @@ def test_payment_initiate_applique_le_coupon(api_client):
 
     api_client.force_authenticate(user=c)
     r = api_client.post(reverse("payment-initiate"), {
-        "booking_id": b.id, "method": "om", "minutes": 60,
+        "booking_id": b.id, "method": "cash", "minutes": 60,
         "category_id": cat.id, "coupon_code": "P50",
     }, format="json")
     assert r.status_code == 201, r.content

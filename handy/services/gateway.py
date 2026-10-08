@@ -2,6 +2,16 @@
 from abc import ABC, abstractmethod
 
 
+class PaymentProviderUnavailable(RuntimeError):
+    """Raised when a payment method has no real, configured provider adapter."""
+
+    code = "payment_provider_unavailable"
+
+    def __init__(self, method, message=None):
+        self.method = method
+        super().__init__(message or f"Le prestataire de paiement « {method} » n'est pas configuré.")
+
+
 class Provider(ABC):
     """Interface des fournisseurs de paiement.
 
@@ -10,6 +20,8 @@ class Provider(ABC):
     qu'un provider puisse être instancié même s'il ne les gère pas encore
     (évite `TypeError: Can't instantiate abstract class`).
     """
+
+    is_available = False
 
     @abstractmethod
     def create(self, booking, amount_xof: int) -> dict: ...
@@ -23,17 +35,44 @@ class Provider(ABC):
 
 class OrangeMoney(Provider):
     def create(self, booking, amount_xof):
-        # TODO(S3): brancher l'API Orange Money réelle (retourne redirect_url / otp_ref)
-        return {"provider": "om", "provider_ref": f"om_tx_{booking.id}", "status": "pending"}
+        # A predictable local reference is not a payment.  Do not create a
+        # pending transaction until an actual Orange Money adapter is wired.
+        raise PaymentProviderUnavailable("om")
 
 
 class MTNMoney(Provider):
     def create(self, booking, amount_xof):
-        # TODO(S3): brancher l'API MTN MoMo réelle
-        return {"provider": "mtn", "provider_ref": f"mtn_tx_{booking.id}", "status": "pending"}
+        raise PaymentProviderUnavailable("mtn")
 
 
 class StripeCard(Provider):
     def create(self, booking, amount_xof):
-        # TODO(S3): créer un PaymentIntent Stripe et retourner le client_secret
-        return {"provider": "card", "provider_ref": f"card_tx_{booking.id}", "status": "pending"}
+        raise PaymentProviderUnavailable("card")
+
+
+class CashOnService(Provider):
+    """A manual method: it stays unpaid until staff record a real receipt."""
+
+    is_available = True
+
+    def create(self, booking, amount_xof):
+        return {
+            "provider": "cash",
+            "status": "pending",
+            "requires_customer_action": True,
+            "instructions": "Paiement en espèces à confirmer manuellement après la prestation.",
+        }
+
+
+def provider_for_method(method):
+    """Return the adapter for a method, failing closed for unsupported flows."""
+    providers = {
+        "om": OrangeMoney,
+        "mtn": MTNMoney,
+        "card": StripeCard,
+        "cash": CashOnService,
+    }
+    provider_class = providers.get(method)
+    if provider_class is None:
+        raise PaymentProviderUnavailable(method)
+    return provider_class()

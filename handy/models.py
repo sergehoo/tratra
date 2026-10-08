@@ -1,5 +1,7 @@
 from datetime import timedelta
 from decimal import Decimal
+from pathlib import Path
+from uuid import uuid4
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import AbstractUser, Group, Permission
@@ -13,6 +15,8 @@ from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from django.contrib.gis.db import models as gis_models
 from django.contrib.postgres.indexes import GistIndex
+
+from handy.storage import KycPrivateStorage
 
 # Create your models here.
 
@@ -192,6 +196,17 @@ class HandymanProfile(models.Model):
         return f"Profil de {self.user.get_full_name() or self.user.username}"
 
 
+def private_kyc_upload_path(instance, filename):
+    """Place KYC uploads under an opaque, per-profile private key.
+
+    Original filenames often contain personally identifying information.  They
+    must not become part of a public object URL or a guessable object key.
+    """
+    suffix = Path(filename).suffix.lower()
+    profile_id = instance.handyman_id or "unassigned"
+    return f"kyc/{profile_id}/{uuid4().hex}{suffix}"
+
+
 class HandymanDocument(models.Model):
     DOCUMENT_TYPES = [
         ('id_card', 'Carte d\'identité'),
@@ -206,7 +221,7 @@ class HandymanDocument(models.Model):
 
     handyman = models.ForeignKey('HandymanProfile', on_delete=models.CASCADE, related_name='documents')
     document_type = models.CharField(max_length=50, choices=DOCUMENT_TYPES)
-    file = models.FileField(upload_to='handyman_documents/')
+    file = models.FileField(upload_to=private_kyc_upload_path, storage=KycPrivateStorage())
     description = models.TextField(blank=True, null=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending', db_index=True)
     reviewed_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True,

@@ -1,11 +1,14 @@
 # handy/api/serializers.py
 from decimal import Decimal
+from pathlib import Path
 from typing import Optional
 
+from django.conf import settings
 from django.contrib.auth import authenticate
 from django.contrib.gis.geos import Point
 from django.utils import timezone
 from rest_framework import serializers
+from rest_framework.reverse import reverse
 from drf_spectacular.utils import extend_schema_field
 from drf_spectacular.types import OpenApiTypes
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
@@ -426,13 +429,45 @@ class NotificationSerializer(serializers.ModelSerializer):
 class HandymanDocumentSerializer(serializers.ModelSerializer):
     # lecture détail (le 'handyman' est posé côté serveur = profil du requérant)
     handyman_detail = HandymanProfileSerializer(source="handyman", read_only=True)
+    # Do not serialize the storage URL.  The guarded action issues an expiring
+    # signed URL only after it has checked document ownership/staff access.
+    file = serializers.FileField(write_only=True, required=True, allow_empty_file=False)
+    download_url = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = HandymanDocument
-        fields = ["id", "handyman", "handyman_detail", "document_type", "file", "description",
+        fields = ["id", "handyman", "handyman_detail", "document_type", "file", "download_url", "description",
                   "status", "reviewed_at", "rejection_reason", "uploaded_at"]
         # statut & revue posés par l'admin ; handyman par le serveur (anti-usurpation)
         read_only_fields = ["handyman", "status", "reviewed_at", "rejection_reason", "uploaded_at"]
+
+    def validate_file(self, uploaded_file):
+        max_size = settings.KYC_MAX_UPLOAD_BYTES
+        if uploaded_file.size > max_size:
+            raise serializers.ValidationError(
+                f"Le document ne doit pas dépasser {max_size // (1024 * 1024)} Mo."
+            )
+
+        content_type = (getattr(uploaded_file, "content_type", "") or "").lower()
+        allowed_extensions = {
+            "application/pdf": {".pdf"},
+            "image/jpeg": {".jpg", ".jpeg"},
+            "image/png": {".png"},
+        }
+        extension = Path(uploaded_file.name).suffix.lower()
+        if (
+            content_type not in settings.KYC_ALLOWED_CONTENT_TYPES
+            or extension not in allowed_extensions.get(content_type, set())
+        ):
+            raise serializers.ValidationError(
+                "Formats autorisés : PDF, JPEG et PNG."
+            )
+        return uploaded_file
+
+    @extend_schema_field(OpenApiTypes.URI)
+    def get_download_url(self, obj) -> str:
+        request = self.context.get("request")
+        return reverse("handyman-docs-download", kwargs={"pk": obj.pk}, request=request)
 
 
 class ReportSerializer(serializers.ModelSerializer):
@@ -495,13 +530,36 @@ class PaymentInitSerializer(serializers.Serializer):
     minutes = serializers.IntegerField(min_value=1)
     coupon_code = serializers.CharField(required=False, allow_blank=True)
 
+    def validate(self, attrs):
+        try:
+            booking = (Booking.objects.select_related("service", "service__category", "client")
+                       .get(pk=attrs["booking_id"]))
+        except Booking.DoesNotExist:
+            raise serializers.ValidationError({"booking_id": "Réservation introuvable."})
+
+        user = self.context["request"].user
+        if not user.is_staff and booking.client_id != user.id:
+            raise serializers.ValidationError({"booking_id": "Vous ne pouvez payer que vos propres réservations."})
+        if booking.status == "cancelled":
+            raise serializers.ValidationError({"booking_id": "Une réservation annulée ne peut pas être payée."})
+
+        if attrs.get("category_id") and booking.service_id:
+            if attrs["category_id"] != booking.service.category_id:
+                raise serializers.ValidationError({"category_id": "La catégorie ne correspond pas à la réservation."})
+
+        attrs["booking"] = booking
+        return attrs
+
     def create(self, validated):
         """
-        Crée/complète un Payment en 'pending' et retourne les infos provider.
-        """
-        from handy.services.gateway import OrangeMoney, MTNMoney, StripeCard
+        Initialise un paiement uniquement lorsqu'un vrai fournisseur existe.
 
-        booking = Booking.objects.select_related("service", "service__category").get(pk=validated["booking_id"])
+        Les méthodes non intégrées échouent explicitement sans créer de faux
+        Payment pending ni de référence prédictible.
+        """
+        from handy.services.gateway import PaymentProviderUnavailable, provider_for_method
+
+        booking = validated["booking"]
         svc = booking.service
         category_id = validated.get("category_id") or (svc.category_id if svc else None)
         category_slug = svc.category.slug if svc and svc.category else "menage"
@@ -524,27 +582,59 @@ class PaymentInitSerializer(serializers.Serializer):
         # frais plateforme sur le montant NET
         fee = compute_platform_fee(amount, category_id=category_id)
 
-        payment, _ = Payment.objects.get_or_create(
+        method = validated["method"]
+        provider = provider_for_method(method)
+        if not provider.is_available:
+            raise PaymentProviderUnavailable(method)
+
+        # An existing payment must never be silently rebound to a different
+        # provider reference or amount.  It is safe to return the manual cash
+        # record because it does not claim that funds were received.
+        existing = Payment.objects.filter(booking=booking).first()
+        if existing:
+            if existing.method != method:
+                raise serializers.ValidationError(
+                    {"method": "Un paiement existe déjà pour cette réservation avec une autre méthode."}
+                )
+            if existing.status != "pending":
+                raise serializers.ValidationError({"booking_id": "Ce paiement n'est plus réinitialisable."})
+            if method == "cash":
+                return {
+                    "payment_id": existing.id,
+                    "provider": "cash",
+                    "status": existing.status,
+                    "requires_customer_action": True,
+                    "instructions": "Paiement en espèces à confirmer manuellement après la prestation.",
+                }
+            if existing.transaction_id:
+                return {
+                    "payment_id": existing.id,
+                    "provider": existing.method,
+                    "provider_ref": existing.transaction_id,
+                    "status": existing.status,
+                    "already_initiated": True,
+                }
+            raise serializers.ValidationError({"booking_id": "Une tentative de paiement est déjà en cours."})
+
+        # This call fails closed for the placeholder adapters.  It happens
+        # before a Payment row is created so the UI cannot mistake a stub for
+        # an actionable payment flow.
+        res = provider.create(booking, int(amount))
+        provider_ref = res.get("provider_ref")
+        if method != "cash" and not provider_ref:
+            raise serializers.ValidationError({"method": "Le prestataire n'a pas retourné de référence de transaction."})
+
+        payment = Payment.objects.create(
             booking=booking,
-            defaults=dict(
-                amount=amount, platform_fee=fee, method=validated["method"],
-                status="pending", currency="XOF", coupon=coupon, discount=discount,
-            ),
+            amount=amount,
+            platform_fee=fee,
+            method=method,
+            status="pending",
+            currency="XOF",
+            coupon=coupon,
+            discount=discount,
+            transaction_id=provider_ref,
         )
-
-        # Initialisation provider
-        if validated["method"] == "om":
-            res = OrangeMoney().create(booking, int(amount))
-        elif validated["method"] == "mtn":
-            res = MTNMoney().create(booking, int(amount))
-        elif validated["method"] == "card":
-            res = StripeCard().create(booking, int(amount))
-        else:
-            # cash / fallback
-            res = {"provider": "cash", "provider_ref": f"CASH{booking.id}"}
-
-        payment.transaction_id = res.get("provider_ref")
-        payment.save(update_fields=["transaction_id"])
         return {"payment_id": payment.id, **res}
 
 class HeroSlideSerializer(serializers.ModelSerializer):

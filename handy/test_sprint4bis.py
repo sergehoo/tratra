@@ -65,6 +65,52 @@ def test_artisan_televerse_sur_son_profil(api_client):
 
 @pytest.mark.django_db
 @override_settings(STORAGES=INMEM_STORAGES)
+def test_kyc_file_url_is_guarded_and_not_serialized(api_client):
+    owner = _user("h_k_private", "handyman")
+    intruder = _user("intruder_k_private")
+    api_client.force_authenticate(user=owner)
+    response = api_client.post(
+        reverse("handyman-docs-list"),
+        {
+            "document_type": "id_card",
+            "file": SimpleUploadedFile("identity.pdf", b"%PDF-1.4 fake", content_type="application/pdf"),
+        },
+        format="multipart",
+    )
+    assert response.status_code == 201, response.content
+    payload = response.json()
+    assert "file" not in payload
+    assert payload["download_url"].endswith(f"/handyman-docs/{payload['id']}/download/")
+
+    api_client.force_authenticate(user=intruder)
+    denied = api_client.get(reverse("handyman-docs-download", kwargs={"pk": payload["id"]}))
+    assert denied.status_code == 404
+
+    api_client.force_authenticate(user=owner)
+    allowed = api_client.get(reverse("handyman-docs-download", kwargs={"pk": payload["id"]}))
+    assert allowed.status_code in (200, 302)
+    assert allowed["Cache-Control"] == "private, no-store, max-age=0"
+
+
+@pytest.mark.django_db
+@override_settings(STORAGES=INMEM_STORAGES)
+def test_kyc_rejects_unsafe_file_type(api_client):
+    h = _user("h_k_unsafe", "handyman")
+    api_client.force_authenticate(user=h)
+    response = api_client.post(
+        reverse("handyman-docs-list"),
+        {
+            "document_type": "id_card",
+            "file": SimpleUploadedFile("identity.exe", b"not a document", content_type="application/octet-stream"),
+        },
+        format="multipart",
+    )
+    assert response.status_code == 400
+    assert "file" in response.json()
+
+
+@pytest.mark.django_db
+@override_settings(STORAGES=INMEM_STORAGES)
 def test_admin_approuve_document_valide_kyc(api_client):
     h, admin = _user("h_k2", "handyman"), _admin("adm_k2")
     prof = HandymanProfile.objects.get(user=h)

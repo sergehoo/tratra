@@ -63,6 +63,30 @@ services:
       - traefik.http.services.minio-console.loadbalancer.server.port=9001
 #      - traefik.http.middlewares.minio-compress.compress=true
 
+  # Creates the public-media and private-KYC buckets before Django starts.
+  # No anonymous policy is granted: application code produces short-lived
+  # signed URLs only when an authorised user needs an object.
+  minio-init:
+    image: minio/mc:RELEASE.2025-02-21T16-00-46Z
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      AWS_STORAGE_BUCKET_NAME: ${AWS_STORAGE_BUCKET_NAME}
+      KYC_STORAGE_BUCKET_NAME: ${KYC_STORAGE_BUCKET_NAME}
+    depends_on:
+      minio:
+        condition: service_started
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        until mc alias set local http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}"; do sleep 2; done
+        mc mb --ignore-existing "local/$${AWS_STORAGE_BUCKET_NAME}"
+        mc mb --ignore-existing "local/$${KYC_STORAGE_BUCKET_NAME}"
+        mc anonymous set none "local/$${AWS_STORAGE_BUCKET_NAME}"
+        mc anonymous set none "local/$${KYC_STORAGE_BUCKET_NAME}"
+    networks: [web]
+
 
   # --- Redis (broker Celery + cache + Channels) ---
   redis:
@@ -89,8 +113,10 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
     healthcheck:
-      test: [ "CMD-SHELL", "wget -qO- http://127.0.0.1:8000/healthz || exit 1" ]
+      test: [ "CMD-SHELL", "wget -qO- http://127.0.0.1:8000/readyz || exit 1" ]
       interval: 10s
       timeout: 5s
       retries: 20
@@ -130,6 +156,34 @@ services:
       - proxy   # exposé à Traefik
     restart: unless-stopped
 
+  # --- Frontend Next.js ---
+  tratrafrontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        # NEXT_PUBLIC_* is embedded at build time by Next.js.
+        NEXT_PUBLIC_API_BASE: ${NEXT_PUBLIC_API_BASE}
+        NEXT_PUBLIC_PAYMENT_METHODS: ${NEXT_PUBLIC_PAYMENT_METHODS:-cash}
+    depends_on:
+      tratraweb:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))\""]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=proxy
+      - traefik.http.routers.tratrafrontend.rule=Host(`${FRONTEND_HOST}`)
+      - traefik.http.routers.tratrafrontend.entrypoints=websecure
+      - traefik.http.routers.tratrafrontend.tls.certresolver=lets
+      - traefik.http.services.tratrafrontend.loadbalancer.server.port=3000
+    networks:
+      - proxy
+    restart: unless-stopped
+
   # --- Celery Worker ---
   worker:
     build:
@@ -142,6 +196,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
     networks: [web]
     restart: unless-stopped
 
@@ -157,6 +213,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
     networks: [web]
     restart: unless-stopped
 

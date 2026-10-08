@@ -3,6 +3,7 @@ import hashlib
 import hmac
 from decimal import Decimal
 from math import radians, cos, sqrt, sin, asin
+from pathlib import Path
 
 from django.conf import settings
 
@@ -11,10 +12,12 @@ from django.contrib.gis.geos import Point
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction, models
 from django.db.models import Count, Q
+from django.http import FileResponse
 from django.utils import timezone
 
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import viewsets, permissions, status, mixins
+from rest_framework.authentication import SessionAuthentication
 from rest_framework.decorators import action, api_view, permission_classes
 from drf_spectacular.utils import extend_schema, OpenApiResponse
 from drf_spectacular.types import OpenApiTypes
@@ -30,6 +33,7 @@ from rest_framework.pagination import PageNumberPagination
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenObtainPairView
+from rest_framework_simplejwt.authentication import JWTAuthentication
 
 from handy.models import (
     User, HandymanProfile, ServiceCategory, Service, ServiceImage, Booking,
@@ -465,7 +469,7 @@ class BookingViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
 
 
 # ---- Paiements ----
-class PaymentViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
+class PaymentViewSet(OwnerScopedQuerysetMixin, viewsets.ReadOnlyModelViewSet):
     queryset = Payment.objects.select_related("booking", "booking__client", "booking__handyman").all()
     serializer_class = PaymentSerializer
     permission_classes = [permissions.IsAuthenticated]
@@ -476,7 +480,7 @@ class PaymentViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
     pagination_class = DefaultPageNumberPagination
 
 
-class PaymentLogViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
+class PaymentLogViewSet(OwnerScopedQuerysetMixin, viewsets.ReadOnlyModelViewSet):
     queryset = PaymentLog.objects.select_related("payment", "payment__booking").all()
     serializer_class = PaymentLogSerializer
     permission_classes = [permissions.IsAuthenticated]
@@ -645,6 +649,10 @@ class HandymanDocumentViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
     owner_lookups = ("handyman__user",)
     ordering = ["-uploaded_at"]
     pagination_class = DefaultPageNumberPagination
+    http_method_names = ["get", "post", "delete", "head", "options"]
+    # The API normally uses JWT.  Session auth keeps the Django admin's
+    # guarded download link usable without making KYC files public.
+    authentication_classes = [JWTAuthentication, SessionAuthentication]
 
     def perform_create(self, serializer):
         # L'artisan ne peut téléverser que sur SON propre profil (KYC).
@@ -652,6 +660,38 @@ class HandymanDocumentViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
         if profile is None:
             raise PermissionDenied("Seul un artisan disposant d'un profil peut téléverser des documents.")
         serializer.save(handyman=profile, status="pending")
+
+    def perform_destroy(self, instance):
+        if instance.status != "pending" and not self.request.user.is_staff:
+            raise PermissionDenied("Un document déjà traité ne peut pas être supprimé.")
+        instance.delete()
+
+    @action(detail=True, methods=["get"])
+    def download(self, request, pk=None):
+        """Authorize the requester, then stream a private KYC document.
+
+        Streaming keeps the object-store URL out of the browser.  The backing
+        storage remains private and can still use signed S3 access internally.
+        """
+        document = self.get_object()
+        if not document.file:
+            return Response({"detail": "Fichier introuvable."}, status=status.HTTP_404_NOT_FOUND)
+
+        try:
+            opened_file = document.file.open("rb")
+        except (FileNotFoundError, ValueError):
+            return Response({"detail": "Fichier introuvable."}, status=status.HTTP_404_NOT_FOUND)
+
+        response = FileResponse(
+            opened_file,
+            as_attachment=True,
+            filename=Path(document.file.name).name,
+        )
+
+        response["Cache-Control"] = "private, no-store, max-age=0"
+        response["Referrer-Policy"] = "no-referrer"
+        response["X-Content-Type-Options"] = "nosniff"
+        return response
 
     @action(detail=True, methods=["post"], permission_classes=[permissions.IsAdminUser])
     def review(self, request, pk=None):
@@ -715,10 +755,21 @@ def payment_initiate(request):
     """
     Body: { "booking_id": 1, "method": "om"|"mtn"|"card"|"cash", "category_id": 3, "minutes": 60 }
     Return: { payment_id, provider, provider_ref, redirect_url|client_secret }
+
+    A method without a configured live provider returns 503; no placeholder
+    transaction or predictable provider reference is created.
     """
+    from handy.services.gateway import PaymentProviderUnavailable
+
     ser = PaymentInitSerializer(data=request.data, context={"request": request})
     ser.is_valid(raise_exception=True)
-    payload = ser.save()
+    try:
+        payload = ser.save()
+    except PaymentProviderUnavailable as exc:
+        return Response(
+            {"code": exc.code, "detail": str(exc), "method": exc.method},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
     return Response(payload, status=status.HTTP_201_CREATED)
 
 
@@ -886,10 +937,16 @@ class PaymentWebhook(APIView):
     # En-tête portant la signature HMAC-SHA256 hex du corps brut.
     SIGNATURE_HEADER = "HTTP_X_WEBHOOK_SIGNATURE"
 
-    VALID_STATUSES = {s for s, _ in Payment.PAYMENT_STATUS}
+    PROVIDER_METHODS = {"om", "mtn", "card"}
+    PROVIDER_STATUSES = {"completed", "failed", "refunded"}
 
-    def _signature_ok(self, request) -> bool:
-        secret = getattr(settings, "PAYMENT_WEBHOOK_SECRET", "") or ""
+    def _signature_ok(self, request, provider) -> bool:
+        # Production requires separate secrets: a compromise at one provider
+        # must not permit callbacks for another.  The old shared secret is
+        # retained only for local development/test compatibility.
+        secret = getattr(settings, f"PAYMENT_{provider.upper()}_WEBHOOK_SECRET", "") or ""
+        if not secret and settings.DEBUG:
+            secret = getattr(settings, "PAYMENT_WEBHOOK_SECRET", "") or ""
         if not secret:
             # fail-closed : pas de secret configuré => on refuse tout.
             return False
@@ -905,11 +962,15 @@ class PaymentWebhook(APIView):
                    tags=["Paiements"], summary="Webhook de paiement (signé HMAC)")
     def post(self, request, provider):
         """
-        Provider path: 'om' | 'mtn' | 'card' | 'moov'...
+        Provider path: 'om' | 'mtn' | 'card'
         Header: X-Webhook-Signature: <hex HMAC-SHA256(raw_body, PAYMENT_WEBHOOK_SECRET)>
         Body: { "provider_ref": "...", "status": "completed|failed|refunded" }
         """
-        if not self._signature_ok(request):
+        provider = provider.lower()
+        if provider not in self.PROVIDER_METHODS:
+            return Response({"detail": "prestataire invalide."}, status=status.HTTP_400_BAD_REQUEST)
+
+        if not self._signature_ok(request, provider):
             return Response({"detail": "Signature invalide."},
                             status=status.HTTP_401_UNAUTHORIZED)
 
@@ -921,7 +982,7 @@ class PaymentWebhook(APIView):
             return Response({"detail": "provider_ref et status requis."},
                             status=status.HTTP_400_BAD_REQUEST)
 
-        if new_status not in self.VALID_STATUSES:
+        if new_status not in self.PROVIDER_STATUSES:
             return Response({"detail": "status invalide."},
                             status=status.HTTP_400_BAD_REQUEST)
 
@@ -929,10 +990,13 @@ class PaymentWebhook(APIView):
             p = get_object_or_404(
                 Payment.objects.select_for_update(), transaction_id=provider_ref
             )
+            if p.method != provider:
+                return Response({"detail": "Référence de paiement incompatible avec ce prestataire."},
+                                status=status.HTTP_400_BAD_REQUEST)
             try:
                 # Le fournisseur ne fait que confirmer l'encaissement ou un remboursement.
                 # La LIBÉRATION (held -> released) est interne (à la complétion de la mission).
-                if new_status in ('completed', 'held'):
+                if new_status == 'completed':
                     if p.status == 'pending':
                         p.mark_held(note=f"prov={provider}")
                 elif new_status == 'refunded':

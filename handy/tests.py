@@ -143,8 +143,8 @@ def test_booking_create_and_timeline(auth_client, user_handyman, service):
 
 
 @pytest.mark.django_db
-@override_settings(PAYMENT_WEBHOOK_SECRET="testsecret")
-def test_payment_initiate_and_webhook(api_client, auth_client, user_handyman, service):
+@override_settings(PAYMENT_OM_WEBHOOK_SECRET="testsecret")
+def test_payment_provider_unavailable_and_signed_webhook(api_client, auth_client, user_handyman, service):
     # 1) créer une réservation
     create_url = reverse("bookings-list")
     start = timezone.now() + timezone.timedelta(hours=1)
@@ -166,21 +166,21 @@ def test_payment_initiate_and_webhook(api_client, auth_client, user_handyman, se
     assert res.status_code == 201, res.content
     booking_id = res.json()["id"]
 
-    # 2) initier un paiement (OM)
+    # 2) OM is not wired yet: fail explicitly, without a fake pending row.
     pay_init_url = reverse("payment-initiate")
     pay_payload = {"booking_id": booking_id, "method": "om", "minutes": 60, "category_id": service.category_id}
     pay_res = auth_client.post(pay_init_url, pay_payload, format="json")
-    assert pay_res.status_code == 201, pay_res.content
-    data = pay_res.json()
-    assert "payment_id" in data
-    assert "provider_ref" in data
-    provider_ref = data["provider_ref"]
+    assert pay_res.status_code == 503, pay_res.content
+    assert pay_res.json()["code"] == "payment_provider_unavailable"
+    assert not Payment.objects.filter(booking_id=booking_id).exists()
 
-    # 3) vérifier objet Payment créé
-    p = Payment.objects.get(id=data["payment_id"])
-    assert p.booking_id == booking_id
-    assert p.transaction_id == provider_ref
-    assert p.status == "pending"
+    # 3) A genuine provider callback remains signed and transitions only its
+    # matching payment method to escrow.
+    provider_ref = "provider-ref-1"
+    p = Payment.objects.create(
+        booking_id=booking_id, amount=7000, platform_fee=770,
+        method="om", status="pending", transaction_id=provider_ref,
+    )
 
     # 4) webhook -> completed (authentifié par signature HMAC du corps brut)
     webhook_url = reverse("payment-webhook", kwargs={"provider": "om"})
