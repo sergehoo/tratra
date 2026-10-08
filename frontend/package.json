@@ -8,7 +8,9 @@
     "start": "next start -p 3000",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
-    "verify": "npm run typecheck && npm run build"
+    "verify": "npm run ds:check && npm run typecheck && npm run build",
+    "ds:build": "node design-system/build.mjs",
+    "ds:check": "node design-system/build.mjs --check"
   },
   "dependencies": {
     "framer-motion": "^11.18.2",

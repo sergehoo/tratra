@@ -1,3 +1,4 @@
+@import "../styles/tokens.css";
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -15,6 +16,24 @@ body {
 html {
   scroll-behavior: smooth;
   -webkit-text-size-adjust: 100%;
+}
+
+body {
+  background: var(--tt-surface);
+  color: var(--tt-ink);
+  text-rendering: optimizeLegibility;
+}
+
+/* Sélection de texte aux couleurs de la marque. */
+::selection {
+  background: rgba(246, 201, 14, 0.45);
+  color: var(--tt-ink);
+}
+
+/* Cibles tactiles : pas de surbrillance grise sur mobile. */
+a,
+button {
+  -webkit-tap-highlight-color: transparent;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -35,12 +54,29 @@ html {
   .skip-link {
     @apply sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[100] focus:rounded-xl focus:bg-night focus:px-4 focus:py-2 focus:text-white;
   }
-  /* Bloc squelette de chargement. */
+
+  /* Bloc squelette de chargement (Design System : <Skeleton />). */
   .skeleton {
-    @apply relative overflow-hidden rounded-xl bg-slate-200/70;
+    @apply relative overflow-hidden rounded-xl bg-line/70;
   }
   .skeleton::after {
     content: "";
     @apply absolute inset-0 -translate-x-full animate-shimmer bg-gradient-to-r from-transparent via-white/60 to-transparent;
+  }
+
+  /* Marges de sécurité des appareils à encoche / barre de gestes. */
+  .safe-bottom {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .safe-top {
+    padding-top: env(safe-area-inset-top);
+  }
+
+  /* Défilement horizontal sans barre visible (onglets, chips). */
+  .scrollbar-none {
+    scrollbar-width: none;
+  }
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
   }
 }

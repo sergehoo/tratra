@@ -1,19 +1,20 @@
 "use client";
+import { LayoutDashboard, ShieldCheck } from "lucide-react";
 import { RoleGuard } from "@/components/RoleGuard";
-import { DashboardShell } from "@/components/DashboardShell";
+import { AppShell } from "@/components/ds";
 
 export default function WorkerLayout({ children }: { children: React.ReactNode }) {
   return (
     <RoleGuard roles={["handyman"]}>
-      <DashboardShell
-        title="Espace ouvrier"
+      <AppShell
+        title="Espace artisan"
         nav={[
-          { href: "/worker", label: "Tableau de bord" },
-          { href: "/worker/kyc", label: "Vérification (KYC)" },
+          { href: "/worker", label: "Tableau de bord", icon: LayoutDashboard },
+          { href: "/worker/kyc", label: "Vérification (KYC)", icon: ShieldCheck },
         ]}
       >
         {children}
-      </DashboardShell>
+      </AppShell>
     </RoleGuard>
   );
 }

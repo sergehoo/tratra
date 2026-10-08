@@ -45,6 +45,9 @@ const contentSecurityPolicy = [
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  // Dossier de build surchargeable (ex. NEXT_DIST_DIR=.next-verify) pour vérifier un build
+  // sans perturber un `next dev` en cours dans le même dossier.
+  distDir: process.env.NEXT_DIST_DIR || ".next",
   async headers() {
     return [
       {
