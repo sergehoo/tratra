@@ -2,8 +2,10 @@ export type UserType = "client" | "employeur" | "handyman" | "entreprise" | "adm
 
 export interface User {
   id: number;
+  /** Identifiant technique hérité (jamais saisi ni affiché : connexion par téléphone). */
   username: string;
-  email: string;
+  /** Facultatif : renseigné après connexion. */
+  email: string | null;
   first_name?: string;
   last_name?: string;
   user_type: UserType;

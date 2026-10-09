@@ -1,4 +1,5 @@
 "use client";
+import Link from "next/link";
 import { Suspense, useId, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { ArrowRight, CalendarCheck, LockKeyhole, Search } from "lucide-react";
@@ -35,7 +36,7 @@ function loginErrorMessage(err: unknown): string {
   if (err instanceof TypeError) {
     return "Impossible de joindre le service. Vérifiez votre connexion puis réessayez.";
   }
-  return "Identifiants invalides.";
+  return "Téléphone ou mot de passe incorrect.";
 }
 
 function LoginForm() {
@@ -69,6 +70,12 @@ function LoginForm() {
 
   return (
     <>
+      {params.get("reset") === "1" ? (
+        <Alert tone="success" title="Mot de passe mis à jour" className="mb-5">
+          Connectez-vous avec votre numéro et votre nouveau mot de passe.
+        </Alert>
+      ) : null}
+
       {isBooking ? (
         <Alert
           tone="brand"
@@ -94,22 +101,24 @@ function LoginForm() {
             </ButtonLink>
           }
         >
-          Vous êtes déjà connecté(e) en tant que <strong>{user.first_name || user.username}</strong>.
+          Vous êtes déjà connecté(e) en tant que <strong>{user.first_name || user.phone || "membre"}</strong>.
         </Alert>
       ) : null}
 
       <form onSubmit={submit} className="space-y-5">
-        <Field label="Email ou nom d’utilisateur">
+        <Field label="Téléphone" hint="Avec l’indicatif du pays (+225…). Ancien compte : identifiant ou e-mail.">
           {(c) => (
             <Input
               {...c}
               name="username"
               type="text"
+              inputMode="tel"
               required
               autoComplete="username"
               autoCapitalize="none"
               autoCorrect="off"
               spellCheck={false}
+              placeholder="+225 07 00 00 00 00"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               aria-invalid={error ? true : undefined}
@@ -132,6 +141,12 @@ function LoginForm() {
             />
           )}
         </Field>
+
+        <div className="-mt-2 text-right">
+          <Link href="/forgot-password" className="text-sm font-semibold text-primaryDark underline-offset-2 hover:underline">
+            Mot de passe oublié ?
+          </Link>
+        </div>
 
         {/* role="alert" (Alert danger) : l'erreur est annoncée dès son apparition. */}
         {error ? (

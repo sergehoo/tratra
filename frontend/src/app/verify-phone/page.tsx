@@ -1,5 +1,5 @@
 "use client";
-import { Suspense, useEffect, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { MessageSquareText } from "lucide-react";
 import { AuthFrame } from "@/components/auth/AuthFrame";
@@ -10,53 +10,77 @@ import { useAuth } from "@/lib/auth";
 import { homeFor, isSafeInternalPath } from "@/lib/links";
 import { maskPhone, OTP_LENGTH, OTP_RESEND_SECONDS, requestOtp, verifyOtp } from "@/lib/otp";
 
+/** 9 → « 0:09 », 600 → « 10:00 ». */
+function clock(seconds: number): string {
+  const s = Math.max(0, seconds);
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
+
+/** Compte à rebours en secondes, rafraîchi chaque seconde ; `start(n)` le (re)lance. */
+function useCountdown() {
+  const [left, setLeft] = useState(0);
+  const timer = useRef<number | null>(null);
+  useEffect(() => () => {
+    if (timer.current) window.clearInterval(timer.current);
+  }, []);
+  const start = useCallback((seconds: number) => {
+    if (timer.current) window.clearInterval(timer.current);
+    setLeft(seconds);
+    timer.current = window.setInterval(() => {
+      setLeft((c) => {
+        if (c <= 1 && timer.current) window.clearInterval(timer.current);
+        return Math.max(0, c - 1);
+      });
+    }, 1000);
+  }, []);
+  return [left, start] as const;
+}
+
 function VerifyPhone() {
   const { user, refreshUser } = useAuth();
   const router = useRouter();
   const params = useSearchParams();
   const rawNext = params.get("next");
   const next = isSafeInternalPath(rawNext) ? rawNext : homeFor(user?.user_type);
+  const auto = params.get("auto") === "1";
 
   const [sent, setSent] = useState(false);
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
   const [error, setError] = useState("");
-  const [cooldown, setCooldown] = useState(0);
-  const timer = useRef<number | null>(null);
-
-  useEffect(() => () => {
-    if (timer.current) window.clearInterval(timer.current);
-  }, []);
-
-  function startCooldown() {
-    if (timer.current) window.clearInterval(timer.current);
-    setCooldown(OTP_RESEND_SECONDS);
-    timer.current = window.setInterval(() => {
-      setCooldown((c) => {
-        if (c <= 1 && timer.current) window.clearInterval(timer.current);
-        return Math.max(0, c - 1);
-      });
-    }, 1000);
-  }
+  const [resendIn, startResend] = useCountdown();
+  const [expiresIn, startExpiry] = useCountdown();
+  const autoSent = useRef(false);
 
   async function send() {
     setBusy(true);
     setError("");
     try {
-      await requestOtp();
+      const r = await requestOtp();
       setSent(true);
       setCode("");
-      startCooldown();
+      startResend(r.resend_in ?? OTP_RESEND_SECONDS);
+      startExpiry(r.expires_in ?? 600);
     } catch (e) {
+      // 503 : SMS indisponible ; 502 : envoi refusé ; 429 : délai / quota — message de l'API, jamais un faux succès.
       setError(apiErrorMessage(e, "L’envoi du code a échoué. Réessayez dans un instant."));
     } finally {
       setBusy(false);
     }
   }
 
+  // Après l'inscription (?auto=1) : le code est envoyé une seule fois, à l'arrivée sur l'écran.
+  useEffect(() => {
+    if (auto && user?.phone && !user.is_verified && !autoSent.current) {
+      autoSent.current = true;
+      void send();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [auto, user?.phone, user?.is_verified]);
+
   async function verify(value = code) {
-    if (value.length !== OTP_LENGTH || busy) return;
+    if (value.length !== OTP_LENGTH || busy || expiresIn === 0) return;
     setBusy(true);
     setError("");
     try {
@@ -73,6 +97,7 @@ function VerifyPhone() {
 
   const phone = user?.phone;
   const verified = done || user?.is_verified === true;
+  const expired = sent && expiresIn === 0;
 
   return (
     <AuthFrame
@@ -116,42 +141,51 @@ function VerifyPhone() {
           </p>
 
           {sent ? (
-            <OtpInput
-              value={code}
-              onChange={(v) => {
-                setCode(v);
-                if (error) setError("");
-              }}
-              onComplete={(v) => void verify(v)}
-              disabled={busy}
-              invalid={Boolean(error)}
-              autoFocus
-              describedBy={error ? "otp-error" : undefined}
-            />
+            <>
+              <OtpInput
+                value={code}
+                onChange={(v) => {
+                  setCode(v);
+                  if (error) setError("");
+                }}
+                onComplete={(v) => void verify(v)}
+                disabled={busy || expired}
+                invalid={Boolean(error)}
+                autoFocus
+                describedBy={error ? "otp-error" : undefined}
+              />
+              <p className="text-center text-xs text-ash" aria-live="off">
+                {expired ? "Ce code a expiré." : `Le code expire dans ${clock(expiresIn)}.`}
+              </p>
+            </>
           ) : null}
 
           <div id="otp-error" aria-live="polite">
             {error ? <Alert tone="danger">{error}</Alert> : null}
+            {expired && !error ? <Alert tone="warning">Le code a expiré : demandez-en un nouveau.</Alert> : null}
           </div>
 
           {sent ? (
             <>
-              <Button type="submit" size="lg" block loading={busy} disabled={code.length !== OTP_LENGTH}>
+              <Button type="submit" size="lg" block loading={busy} disabled={code.length !== OTP_LENGTH || expired}>
                 Vérifier
               </Button>
-              <Button type="button" variant="ghost" block disabled={busy || cooldown > 0} onClick={() => void send()}>
-                {cooldown > 0 ? `Renvoyer le code (${cooldown} s)` : "Renvoyer le code"}
+              <Button type="button" variant="ghost" block disabled={busy || resendIn > 0} onClick={() => void send()}>
+                {resendIn > 0 ? `Renvoyer le code (${resendIn} s)` : "Renvoyer le code"}
               </Button>
             </>
           ) : (
             <Button type="submit" size="lg" block loading={busy} leftIcon={<MessageSquareText aria-hidden className="h-4 w-4" />}>
-              Recevoir le code
+              {error ? "Réessayer l’envoi" : "Recevoir le code"}
             </Button>
           )}
 
           <Button type="button" variant="ghost" block disabled={busy} onClick={() => router.push(next)}>
             Plus tard
           </Button>
+          <p className="text-center text-xs text-ash">
+            Tant que le code n’est pas validé, votre numéro n’est pas considéré comme vérifié.
+          </p>
         </form>
       )}
     </AuthFrame>

@@ -142,10 +142,59 @@ function ProForm({ profileId }: { profileId: number }) {
   );
 }
 
+/** E-mail FACULTATIF du compte (la connexion se fait par téléphone) : ajouté ou modifié après connexion. */
+function EmailForm() {
+  const { user, refreshUser } = useAuth();
+  const [email, setEmail] = useState(user?.email ?? "");
+  const [busy, setBusy] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [failure, setFailure] = useState("");
+
+  useEffect(() => setEmail(user?.email ?? ""), [user?.email]);
+
+  async function save(e: FormEvent) {
+    e.preventDefault();
+    if (!user) return;
+    setBusy(true);
+    setFailure("");
+    setSaved(false);
+    try {
+      await patch(`/users/${user.id}/`, { email: email.trim() || null });
+      await refreshUser();
+      setSaved(true);
+    } catch (err) {
+      setFailure(apiErrorMessage(err, "L’adresse e-mail n’a pas pu être enregistrée. Vérifiez-la puis réessayez."));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form onSubmit={save} className="mt-5 space-y-3" noValidate>
+      <TextField
+        label="Adresse e-mail"
+        optional
+        type="email"
+        name="email"
+        autoComplete="email"
+        inputMode="email"
+        value={email}
+        onChange={(e) => { setEmail(e.target.value); setSaved(false); }}
+        hint="Facultative : vous vous connectez avec votre numéro de téléphone."
+      />
+      {failure ? <Alert tone="danger">{failure}</Alert> : null}
+      {saved ? <Alert tone="success">Adresse e-mail enregistrée.</Alert> : null}
+      <Button type="submit" variant="outline" loading={busy} disabled={(user?.email ?? "") === email.trim()}>
+        Enregistrer l’e-mail
+      </Button>
+    </form>
+  );
+}
+
 export default function ProfilePage() {
   const { user } = useAuth();
   const { data, loading, error, reload } = useDashboard();
-  const name = [user?.first_name, user?.last_name].filter(Boolean).join(" ") || user?.username || "Mon compte";
+  const name = [user?.first_name, user?.last_name].filter(Boolean).join(" ") || user?.phone || "Mon compte";
   const provider = data?.provider ?? null;
   const kyc = provider ? KYC[provider.kyc.status] : null;
 
@@ -164,7 +213,7 @@ export default function ProfilePage() {
                 <Avatar name={name} size={64} />
                 <div className="min-w-0">
                   <p className="truncate font-display text-xl font-extrabold text-ink">{name}</p>
-                  {user?.email ? <p className="truncate text-sm text-ash">{user.email}</p> : null}
+                  {user?.email ? <p className="truncate text-sm text-ash">{user.email}</p> : user?.phone ? <p className="truncate text-sm text-ash">{user.phone}</p> : null}
                 </div>
               </div>
               <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-panel bg-canvas px-4 py-3">
@@ -180,6 +229,7 @@ export default function ProfilePage() {
                   )
                 ) : null}
               </div>
+              <EmailForm />
             </Card>
             {provider ? (
               <ProForm profileId={provider.profile_id} />

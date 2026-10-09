@@ -6,6 +6,7 @@ import {
   ArrowRight,
   BadgeCheck,
   Briefcase,
+  Building2,
   CalendarCheck,
   CalendarClock,
   CircleAlert,
@@ -227,6 +228,23 @@ function ProfileCard({ data }: { data: DashboardData }) {
 }
 
 /** Découverte : catégories qui ont des services réels, puis quelques services publiés. */
+/** Espace entreprise : une organisation liée au MÊME compte (aucun second compte). */
+function CompanyCard({ company }: { company: boolean }) {
+  return (
+    <Card variant="soft">
+      <CardHeader title="Espace entreprise" icon={<Building2 className="h-5 w-5" />} />
+      <p className="text-sm leading-relaxed text-inkSoft">
+        {company
+          ? "Gérez votre organisation et vos offres B2B depuis ce même compte."
+          : "Créez une organisation rattachée à votre compte pour gérer une entreprise et ses offres B2B, sans nouvelle inscription."}
+      </p>
+      <ButtonLink href={company ? "/company" : "/dashboard/company/new"} variant="outline" className="mt-4" rightIcon={<ArrowRight aria-hidden className="h-4 w-4" />}>
+        {company ? "Ouvrir l’espace entreprise" : "Créer un espace entreprise"}
+      </ButtonLink>
+    </Card>
+  );
+}
+
 function Discovery() {
   const cats = useData<Paginated<Category>>("/categories/?ordering=-services_count&page_size=8");
   const services = useData<Paginated<Service>>("/services/?page_size=3");
@@ -455,6 +473,7 @@ export default function DashboardHome() {
         <div className="min-w-0 space-y-6">
           <ActionsCard actions={data.actions} />
           <ProfileCard data={data} />
+          <CompanyCard company={data.capabilities.company} />
         </div>
       </div>
 

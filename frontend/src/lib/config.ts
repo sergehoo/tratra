@@ -56,6 +56,6 @@ export const HOME_BY_ROLE: Record<string, string> = {
   client: "/dashboard",
   employeur: "/dashboard",
   handyman: "/dashboard",
-  entreprise: "/company",
+  entreprise: "/dashboard",
   admin: "/admin",
 };

@@ -68,8 +68,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const me = await api.register(payload);
     setUser(me);
     const destination = safeNext(next, me.user_type);
-    // Un numéro a été enregistré : proposer sa vérification par code (« Plus tard » possible).
-    router.push(me.phone && !me.is_verified ? `/verify-phone?next=${encodeURIComponent(destination)}` : destination);
+    // Le numéro n'est pas vérifié : écran du code OTP (envoi automatique), puis destination.
+    router.push(
+      me.is_verified ? destination : `/verify-phone?auto=1&next=${encodeURIComponent(destination)}`,
+    );
     return me;
   }
 

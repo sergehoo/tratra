@@ -40,7 +40,11 @@ function Shell({ children }: { children: ReactNode }) {
       { href: "/dashboard/notifications", label: "Notifications", icon: Bell, badge: data?.unread.notifications },
       { href: "/dashboard/profile", label: "Mon profil et KYC", icon: ShieldCheck },
     );
-    if (company) items.push({ href: "/company", label: "Espace entreprise", icon: Building2 });
+    items.push(
+      company
+        ? { href: "/company", label: "Espace entreprise", icon: Building2 }
+        : { href: "/dashboard/company/new", label: "Créer un espace entreprise", icon: Building2 },
+    );
     return items;
   }, [provider, company, data?.unread.messages, data?.unread.notifications]);
 

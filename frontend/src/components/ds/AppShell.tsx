@@ -81,7 +81,7 @@ function UserMenu({ onLogout }: { onLogout: () => void }) {
   }, [open]);
 
   if (!user) return null;
-  const name = [user.first_name, user.last_name].filter(Boolean).join(" ") || user.username;
+  const name = [user.first_name, user.last_name].filter(Boolean).join(" ") || user.phone || user.username;
   const role = ROLE_LABEL[user.user_type] ?? user.user_type;
 
   return (
@@ -115,7 +115,7 @@ function UserMenu({ onLogout }: { onLogout: () => void }) {
             <Avatar name={name} size={44} />
             <div className="min-w-0">
               <p className="truncate text-sm font-semibold text-ink">{name}</p>
-              {user.email ? <p className="truncate text-xs text-ash">{user.email}</p> : null}
+              {user.email || user.phone ? <p className="truncate text-xs text-ash">{user.email || user.phone}</p> : null}
               <Badge tone="primary" className="mt-1.5">
                 {role}
               </Badge>

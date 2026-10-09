@@ -5,7 +5,8 @@ import type { User, UserType } from "./types";
 const AREA_ROLES: Record<string, UserType[]> = {
   // Espace utilisateur UNIFIÉ : un même compte peut réserver (client) ET proposer des services (artisan).
   "/dashboard": ["client", "employeur", "entreprise", "handyman"],
-  "/company": ["entreprise"],
+  // Espace entreprise = capacité du compte unique (organisation liée) : accessible à tout compte non admin.
+  "/company": ["client", "employeur", "entreprise", "handyman"],
   "/admin": ["admin"],
 };
 
@@ -51,10 +52,18 @@ export function loginHref(next?: string | null): string {
 
 export type SignupType = "client" | "handyman" | "entreprise";
 
+/** Après inscription, l'intention annoncée par le lien (devenir artisan, créer une entreprise) ouvre la
+ *  page correspondante du MÊME compte : aucun type de compte n'est choisi à l'inscription. */
+const INTENT_DESTINATION: Record<SignupType, string | null> = {
+  client: null,
+  handyman: "/dashboard/provide",
+  entreprise: "/dashboard/company/new",
+};
+
 export function registerHref(type?: SignupType, next?: string | null): string {
   const sp = new URLSearchParams();
-  if (type) sp.set("type", type);
-  if (isSafeInternalPath(next)) sp.set("next", next);
+  const destination = isSafeInternalPath(next) ? next : type ? INTENT_DESTINATION[type] : null;
+  if (destination) sp.set("next", destination);
   const s = sp.toString();
   return s ? `/register?${s}` : "/register";
 }

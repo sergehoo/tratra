@@ -248,10 +248,11 @@ export async function upload<T>(path: string, form: FormData, retry = true): Pro
 }
 
 // ---- Auth ----
-export async function login(username: string, password: string): Promise<User> {
+/** Connexion : `identifier` = téléphone (+225 par défaut), ou identifiant / e-mail d'un ancien compte. */
+export async function login(identifier: string, password: string): Promise<User> {
   const data = await apiJson<{ access: string; refresh: string; user?: User }>(
     "/auth/login/",
-    { method: "POST", body: JSON.stringify({ username, password }) },
+    { method: "POST", body: JSON.stringify({ username: identifier, password }) },
   );
   tokens.set(data.access, data.refresh);
   return data.user ?? (await me());
@@ -259,17 +260,18 @@ export async function login(username: string, password: string): Promise<User> {
 
 export const me = () => get<User>("/users/me/");
 
+/** Inscription du compte unique (POST /users/) puis connexion par téléphone. Le téléphone reste
+ *  NON vérifié tant qu'un code n'a pas été validé. */
 export async function register(payload: {
-  username: string;
-  email: string;
+  first_name: string;
+  last_name: string;
+  /** E.164 (voir lib/phone.ts). */
+  phone: string;
   password: string;
-  user_type: string;
-  first_name?: string;
-  last_name?: string;
-  phone?: string;
+  accept_terms: boolean;
 }): Promise<User> {
   await apiJson("/users/", { method: "POST", body: JSON.stringify(payload) });
-  return login(payload.username, payload.password);
+  return login(payload.phone, payload.password);
 }
 
 export async function logout(): Promise<void> {
