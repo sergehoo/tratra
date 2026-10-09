@@ -13,7 +13,7 @@
  *
  * Changer CACHE_VERSION purge tous les anciens caches à l'activation.
  */
-const CACHE_VERSION = "v1";
+const CACHE_VERSION = "v2"; // v2 : nouveau logo officiel (purge les anciens caches)
 const CACHE_PREFIX = "tratra-";
 const CORE_CACHE = `${CACHE_PREFIX}core-${CACHE_VERSION}`;
 const STATIC_CACHE = `${CACHE_PREFIX}static-${CACHE_VERSION}`;
