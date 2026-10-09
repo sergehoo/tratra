@@ -116,6 +116,9 @@ class TwilioBackend:
                 code = f" (code {r.json().get('code')})"
             except ValueError:
                 pass
+            if r.status_code in (401, 403):
+                # Identifiants/compte refusés : défaut de configuration serveur, pas une erreur de l'utilisateur.
+                raise SMSNotConfigured(f"Twilio a refusé les identifiants : HTTP {r.status_code}{code}.")
             raise SMSError(f"Twilio a refusé l'envoi : HTTP {r.status_code}{code}.")
         logger.info("SMS envoyé via Twilio -> %s", mask(msisdn))
 
@@ -141,6 +144,8 @@ class AfricasTalkingBackend:
                               headers={"apiKey": self.api_key, "Accept": "application/json"})
         except requests.RequestException as exc:
             raise SMSError(f"Africa's Talking injoignable ({type(exc).__name__}).") from None
+        if r.status_code in (401, 403):
+            raise SMSNotConfigured(f"Africa's Talking a refusé les identifiants : HTTP {r.status_code}.")
         if r.status_code >= 300:
             raise SMSError(f"Africa's Talking a refusé l'envoi : HTTP {r.status_code}.")
         try:

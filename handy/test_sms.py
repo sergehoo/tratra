@@ -176,6 +176,21 @@ def test_twilio_errors_never_leak_the_message(settings, monkeypatch):
     assert "654321" not in str(e.value)
 
 
+def test_provider_credentials_refused_is_a_server_side_unavailability(settings, monkeypatch):
+    """HTTP 401/403 du fournisseur = défaut de configuration serveur : 503 (pas « vérifiez votre numéro »)."""
+    settings.SMS_BACKEND = "twilio"
+    for k, v in {"TWILIO_ACCOUNT_SID": "ACxxx", "TWILIO_AUTH_TOKEN": "tok", "TWILIO_FROM": "+1500"}.items():
+        monkeypatch.setenv(k, v)
+    refused = mock.Mock(status_code=401)
+    refused.json.return_value = {"code": 20003}
+    user, c = _client()
+    with mock.patch("handy.sms.requests.post", return_value=refused):
+        r = c.post(reverse("otp-request"))
+    assert r.status_code == 503 and "pas disponible" in r.json()["detail"]
+    assert not OTPCode.objects.filter(user=user, used=False).exists()
+    assert "tok" not in r.content.decode()
+
+
 def test_twilio_requires_credentials(settings, monkeypatch):
     settings.SMS_BACKEND = "twilio"
     for k in ("TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_FROM", "TWILIO_MESSAGING_SERVICE_SID"):

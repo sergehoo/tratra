@@ -28,3 +28,12 @@ chiffres), `SMS_TIMEOUT` (secondes, défaut `10`).
 ## Activer Twilio en local
 
 Les identifiants Twilio du `.env` ne sont utilisés que si `SMS_BACKEND=twilio` y est aussi défini (par défaut en développement : `console`, aucun SMS réel). Un compte Twilio d'essai n'envoie qu'aux numéros vérifiés.
+
+## Dépannage
+
+- **`503` « L'envoi de SMS n'est pas disponible »** : fournisseur absent ou identifiants refusés par le
+  fournisseur (Twilio : HTTP 401, code 20003 = jeton d'authentification invalide ou révoqué). Corriger
+  `TWILIO_AUTH_TOKEN` / `TWILIO_ACCOUNT_SID` dans `.env` ; le journal serveur indique la cause exacte, sans
+  jamais afficher le jeton, le texte du SMS ni le numéro complet.
+- **`502` « Le SMS n'a pas pu être envoyé »** : le fournisseur a refusé ce message (numéro invalide ou non
+  autorisé — avec un compte Twilio d'essai, seuls les numéros vérifiés reçoivent des SMS) ou est injoignable.

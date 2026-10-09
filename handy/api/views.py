@@ -1339,7 +1339,10 @@ def otp_request(request):
     except sms.SMSError as exc:
         otp.used = True
         otp.save(update_fields=["used"])
-        logger.warning("OTP non envoyé (user=%s) : %s", user.pk, exc)
+        if isinstance(exc, sms.SMSNotConfigured):
+            logger.error("OTP non envoyé (user=%s) : fournisseur SMS indisponible ou mal configuré — %s", user.pk, exc)
+        else:
+            logger.warning("OTP non envoyé (user=%s) : %s", user.pk, exc)
         if isinstance(exc, sms.SMSNotConfigured):
             return _otp_error("L'envoi de SMS n'est pas disponible pour le moment.", status.HTTP_503_SERVICE_UNAVAILABLE)
         return _otp_error("Le SMS n'a pas pu être envoyé. Vérifiez votre numéro puis réessayez.", status.HTTP_502_BAD_GATEWAY)
