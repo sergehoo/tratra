@@ -43,6 +43,9 @@ from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework_simplejwt.authentication import JWTAuthentication
 
+from handy.eligibility import (
+    can_receive_missions, not_on_timeoff, publishable, publishable_user_ids, restrict_public_services,
+)
 from handy.models import (
     User, HandymanProfile, ServiceCategory, Service, ServiceImage, Booking,
     Payment, PaymentLog, Review, Conversation, Message, Notification,
@@ -171,7 +174,8 @@ def suggest_alternatives_qs(booking: Booking, price_tolerance=Decimal('0.15'), k
             price__gte=min_price, price__lte=max_price)
                 .exclude(pk=booking.service.pk))
 
-    return (base.select_related('handyman__handyman_profile')
+    return (base.filter(handyman_id__in=publishable_user_ids())
+            .select_related('handyman__handyman_profile')
             .annotate(distance=Distance('handyman__handyman_profile__location', booking.job_location))
             .filter(distance__lte=km * 1000)
             .order_by('distance', '-handyman__handyman_profile__rating', 'price'))[:10]
@@ -265,8 +269,12 @@ def published_reviews():
 def apply_public_service_filters(qs, params):
     """Filtres de recherche publics communs à /services/ et /services/nearby/.
 
-    categories=1,2 · commune=<commune ou quartier> · verified=1 · online=1 · min_price · max_price
+    categories=1,2 · commune=<commune ou quartier> · verified=1 · online=1 · urgent=1 · min_price · max_price
     """
+    # Publication : seuls les services ACTIFS d'artisans éligibles (compte actif, profil approuvé,
+    # KYC approuvé, profil complet) sont publics — règle unique : handy/eligibility.py.
+    qs = restrict_public_services(qs)
+
     category_ids = _id_list(params.get("categories"))
     if category_ids:
         qs = qs.filter(category_id__in=category_ids)
@@ -284,6 +292,11 @@ def apply_public_service_filters(qs, params):
         # « En ligne » n'a de sens que pour un profil vérifié (cf. /handymen/presence/).
         qs = qs.filter(handyman__handyman_profile__online=True,
                        handyman__handyman_profile__is_approved=True)
+
+    if _flag(params, "urgent"):
+        # « Urgent » = intervention immédiate possible : artisan en ligne MAINTENANT et hors
+        # congé/absence (même sens que « Intervention immédiate » sur la landing).
+        qs = qs.filter(handyman__handyman_profile__online=True).filter(not_on_timeoff(timezone.now()))
 
     min_price = _decimal_param(params.get("min_price"))
     if min_price is not None:
@@ -635,6 +648,11 @@ class BookingViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
         return BookingCreateSerializer if self.action == "create" else BookingSerializer
 
     def perform_create(self, serializer):
+        # Missions : seuls les artisans éligibles (actif, approuvé, KYC approuvé, profil complet)
+        # peuvent recevoir une réservation — règle unique : handy/eligibility.py.
+        if not can_receive_missions(serializer.validated_data.get("handyman")):
+            raise drf_serializers.ValidationError(
+                {"handyman": ["Cet artisan n'est pas éligible aux missions pour le moment."]})
         booking = serializer.save()
         # (option) notifier l'artisan via push (Device) / mail / task Celery
 
@@ -1228,7 +1246,7 @@ def company_profile(request):
 # ---- Chiffres publics (landing) ----
 def compute_public_stats() -> dict:
     """Chiffres RÉELS de la plateforme (aucune valeur inventée ni arrondie « marketing »)."""
-    approved = HandymanProfile.objects.filter(is_approved=True, user__is_active=True)
+    approved = publishable()
     reviews = published_reviews().aggregate(count=Count("id"), average=Avg("rating"))
     return {
         "categories": ServiceCategory.objects.filter(is_active=True).count(),
