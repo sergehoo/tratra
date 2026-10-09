@@ -6,10 +6,10 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from handy.models import Booking, HandymanProfile, Review, User
-from handy.test_eligibility import artisan, make_eligible, service
+from handy.test_eligibility import artisan, service
+from handy.testing import make_eligible
 
-# Règle d'éligibilité STRICTE (cf. conftest.py racine) : le catalogue public ne montre que les artisans éligibles.
-pytestmark = [pytest.mark.django_db, pytest.mark.strict_eligibility]
+pytestmark = pytest.mark.django_db
 URL = "/handy/me/dashboard/"
 
 
@@ -186,3 +186,4 @@ def test_reviews_aggregation_and_notifications_read_all():
     Notification.objects.create(user=cli, notification_type="booking_status", message="y")
     assert api(cli).post("/handy/me/notifications/read-all/").json() == {"marked": 2}
     assert api(cli).get(URL).json()["unread"]["notifications"] == 0
+

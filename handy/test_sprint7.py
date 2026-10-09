@@ -4,6 +4,7 @@ from decimal import Decimal
 
 import pytest
 from django.utils import timezone
+from handy.testing import make_eligible
 from django.urls import reverse
 from rest_framework.test import APIClient
 
@@ -28,6 +29,7 @@ def _user(u, t="client"):
 def test_booking_instant_vs_scheduled(api_client):
     c, h = _user("c_b7"), _user("h_b7", "handyman")
     cat = ServiceCategory.objects.create(name="X", slug="x")
+    make_eligible(h.handyman_profile, category=cat)
     svc = Service.objects.create(handyman=h, category=cat, title="s", description="d",
                                  price_type="fixed", price=Decimal("5000"), is_active=True)
     api_client.force_authenticate(user=c)

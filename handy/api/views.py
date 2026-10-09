@@ -44,7 +44,8 @@ from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework_simplejwt.authentication import JWTAuthentication
 
 from handy.eligibility import (
-    can_receive_missions, not_on_timeoff, publishable, publishable_user_ids, restrict_public_services,
+    can_receive_missions, not_on_timeoff, publishable, publishable_user_ids, published_services,
+    restrict_public_services,
 )
 from handy.models import (
     User, HandymanProfile, ServiceCategory, Service, ServiceImage, Booking,
@@ -262,18 +263,22 @@ def published_reviews():
     base créés avant ce contrôle). Même règle que refresh_handyman_rating
     (handy/signal.py). L'auto-évaluation est exclue par construction : la contrainte
     bk_client_not_handyman interdit une réservation dont le client est l'artisan.
+    Publics seulement pour un artisan éligible (handy/eligibility.py) : un avis ne met pas
+    en avant un artisan qui n'est pas publié.
     """
-    return Review.objects.filter(booking__status="completed")
+    return Review.objects.filter(booking__status="completed", booking__handyman_id__in=publishable_user_ids())
 
 
-def apply_public_service_filters(qs, params):
+def apply_public_service_filters(qs, params, *, restrict=True):
     """Filtres de recherche publics communs à /services/ et /services/nearby/.
 
     categories=1,2 · category__name=<nom> · commune=<commune ou quartier> · verified=1 · online=1 · urgent=1 · min_price · max_price
     """
     # Publication : seuls les services ACTIFS d'artisans éligibles (compte actif, profil approuvé,
     # KYC approuvé, profil complet) sont publics — règle unique : handy/eligibility.py.
-    qs = restrict_public_services(qs)
+    # `restrict=False` : l'artisan consulte SES propres services (actifs ou non, publiés ou non).
+    if restrict:
+        qs = restrict_public_services(qs)
 
     category_ids = _id_list(params.get("categories"))
     if category_ids:
@@ -473,8 +478,7 @@ class HandymanProfileViewSet(viewsets.ModelViewSet):
 
         # services_count = prestations ACTIVES : le front n'affiche « Voir ses prestations »
         # que s'il y en a (un artisan vérifié peut ne travailler que via /match/).
-        qs = (HandymanProfile.objects
-              .filter(is_approved=True, user__is_active=True)
+        qs = (publishable()
               .annotate(services_count=Count("user__services",
                                              filter=Q(user__services__is_active=True),
                                              distinct=True))
@@ -517,9 +521,13 @@ class ServiceCategoryViewSet(viewsets.ModelViewSet):
     pagination_class = DefaultPageNumberPagination
 
     def get_queryset(self):
-        # services_count = nombre de services ACTIFS (chiffre réel affiché au public).
+        # services_count = nombre de services PUBLIÉS (actifs, artisan éligible) : chiffre réel
+        # affiché au public.
         qs = super().get_queryset().annotate(
-            services_count=Count("services", filter=Q(services__is_active=True), distinct=True)
+            services_count=Count(
+                "services",
+                filter=Q(services__is_active=True, services__handyman_id__in=publishable_user_ids()),
+                distinct=True)
         )
         user = getattr(self.request, "user", None)
         if not (user and user.is_authenticated and user.is_staff):
@@ -555,12 +563,20 @@ class ServiceViewSet(viewsets.ModelViewSet):
     ordering = ["-created_at"]
     pagination_class = DefaultPageNumberPagination
 
+    def get_queryset(self):
+        # Fiche, modification, suppression : un service n'est visible que s'il est PUBLIÉ (actif,
+        # artisan éligible) — sauf pour son propriétaire (et le staff). Sinon : 404.
+        return published_services(super().get_queryset(), self.request.user)
+
     def filter_queryset(self, queryset):
         queryset = super().filter_queryset(queryset)
         if getattr(self, "action", None) != "list":
             return queryset
         params = self.request.query_params
-        queryset = apply_public_service_filters(queryset, params)
+        # Un artisan qui filtre sur SON propre id voit tous ses services ; tout autre cas : publiés.
+        user = self.request.user
+        own = user.is_authenticated and str(params.get("handyman") or "") == str(user.pk)
+        queryset = apply_public_service_filters(queryset, params, restrict=not own)
         # ?ordering= (DRF) reste prioritaire ; ?sort= ne s'applique qu'en son absence.
         sort = SERVICE_SORTS.get(str(params.get("sort") or "").strip().lower())
         if sort and not params.get(OrderingFilter.ordering_param):
@@ -1255,7 +1271,7 @@ def compute_public_stats() -> dict:
     reviews = published_reviews().aggregate(count=Count("id"), average=Avg("rating"))
     return {
         "categories": ServiceCategory.objects.filter(is_active=True).count(),
-        "services": Service.objects.filter(is_active=True).count(),
+        "services": restrict_public_services(Service.objects.all()).count(),
         "artisans_verified": approved.count(),
         "artisans_online": approved.filter(online=True).count(),
         "missions_completed": Booking.objects.filter(status="completed").count(),

@@ -8,6 +8,7 @@ import json
 
 import pytest
 from django.test import override_settings
+from handy.testing import make_eligible
 from django.urls import reverse
 from django.utils import timezone
 from django.contrib.gis.geos import Point
@@ -66,11 +67,11 @@ def handyman_profile(db, user_handyman, category):
         ),
     )
     hp.skills.add(category)
-    return hp
+    return make_eligible(hp)  # KYC approuvé + profil complet (règle d'éligibilité)
 
 
 @pytest.fixture
-def service(db, user_handyman, category):
+def service(db, user_handyman, category, handyman_profile):
     return Service.objects.create(
         handyman=user_handyman,
         category=category,

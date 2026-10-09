@@ -21,11 +21,6 @@ from django.db.models import Exists, OuterRef, Q
 
 from handy.models import HandymanDocument, HandymanProfile, TimeOff
 
-# Interrupteur de COMPATIBILITÉ réservé aux suites de tests antérieures à la règle (elles
-# fabriquent des artisans « approuvés » sans KYC ni profil complet) : le conftest.py racine
-# le passe à False hors de test_eligibility.py. Toujours True en exécution réelle.
-STRICT = True
-
 # (clé, libellé, aide) — l'ordre est celui de la liste de contrôle affichée à l'utilisateur.
 CHECKLIST = [
     ("bio", "Présentation", "Décrivez votre activité et votre expérience en quelques lignes."),
@@ -45,10 +40,7 @@ def _filled(field: str) -> Q:
 
 def _profile_conditions() -> tuple:
     """(Q, *Exists) à passer à `.filter(...)` sur un queryset de HandymanProfile."""
-    q = Q(is_approved=True, user__is_active=True)
-    if not STRICT:
-        return (q,)
-    q &= Q(experience_years__gt=0)
+    q = Q(is_approved=True, user__is_active=True, experience_years__gt=0)
     for field in ("bio", "commune", "photo"):
         q &= _filled(field)
 
@@ -90,8 +82,6 @@ def is_publishable(profile) -> bool:
     """Même règle que `publishable()`, pour un objet déjà chargé."""
     if profile is None or not profile.is_approved or not profile.user.is_active:
         return False
-    if not STRICT:
-        return True
     return all(item["done"] for item in profile_checklist(profile))
 
 
@@ -101,16 +91,13 @@ def is_user_publishable(user) -> bool:
 
 
 def restrict_public_services(qs):
-    """Catalogue public : services actifs d'artisans éligibles. (Mode STRICT=False : legacy,
-    aucune restriction — suites de tests antérieures uniquement.)"""
-    if not STRICT:
-        return qs
+    """Catalogue public : services actifs d'artisans éligibles."""
     return qs.filter(is_active=True, handyman_id__in=publishable_user_ids())
 
 
 def can_receive_missions(user) -> bool:
-    """L'artisan peut-il recevoir une réservation ? (STRICT=False : legacy, toujours oui.)"""
-    return True if not STRICT else is_user_publishable(user)
+    """L'artisan peut-il recevoir une réservation ?"""
+    return is_user_publishable(user)
 
 
 def published_services(qs, user=None):

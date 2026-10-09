@@ -24,6 +24,7 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from handy.api.views import _decimal_param, search_services_nearby_qs
+from handy.testing import make_eligible
 from handy.models import (
     Booking, HandymanProfile, HeroSlide, Review, Service, ServiceCategory, User,
 )
@@ -74,6 +75,8 @@ def _artisan(username, first="", last="", *, approved=True, online=False, commun
     profile.save()
     if skills:
         profile.skills.set(skills)
+    if approved:
+        make_eligible(profile)  # KYC approuvé + profil complet : seule base d'un artisan publié
     return user
 
 
@@ -308,7 +311,7 @@ def test_services_public_payload_hides_email_and_embeds_artisan(api_client):
     assert row["artisan"]["commune"] == "Cocody"
     assert row["artisan"]["completed_jobs"] == 12
     assert row["distance_km"] is None
-    assert rows[svc2.id]["artisan"] is None
+    assert svc2.id not in rows  # compte sans profil artisan : jamais publié
     _assert_no_sensitive(r.content.decode())
 
     detail = api_client.get(reverse("services-detail", args=[svc.id]))
@@ -352,19 +355,21 @@ def test_services_filters(api_client, catalogue):
         assert r.status_code == 200, r.content
         return set(_ids(r))
 
-    # aucun filtre is_active implicite (comportement historique conservé)
-    assert ids() == {s["a1"].id, s["a2"].id, s["b1"].id, s["c1"].id, s["b2_off"].id}
-    active = {s["a1"].id, s["a2"].id, s["b1"].id, s["c1"].id}
+    # catalogue public : seulement les services ACTIFS d'artisans ÉLIGIBLES (C : non vérifié ;
+    # b2_off : inactif) — avec ou sans ?is_active=
+    published = {s["a1"].id, s["a2"].id, s["b1"].id}
+    assert ids() == published
+    active = published
     assert ids(is_active="true") == active
     assert ids(is_active="true", categories=f"{c1.id},{c2.id}") == {s["a1"].id, s["a2"].id, s["b1"].id}
-    assert ids(categories=f"{c1.id},abc") == {s["a1"].id, s["b2_off"].id}
-    assert ids(is_active="true", commune="cocody") == {s["a1"].id, s["a2"].id, s["c1"].id}
+    assert ids(categories=f"{c1.id},abc") == {s["a1"].id}
+    assert ids(is_active="true", commune="cocody") == {s["a1"].id, s["a2"].id}
     assert ids(is_active="true", verified="1") == {s["a1"].id, s["a2"].id, s["b1"].id}
     assert ids(is_active="true", online="1") == {s["a1"].id, s["a2"].id}
     assert ids(is_active="true", min_price="6000") == {s["a1"].id, s["b1"].id}
     assert ids(is_active="true", max_price="10000") == {s["a1"].id, s["a2"].id}
     assert ids(is_active="true", min_price="abc", max_price="NaN") == active  # invalides ignorés
-    assert ids(handyman=b.id) == {s["b1"].id, s["b2_off"].id}
+    assert ids(handyman=b.id) == {s["b1"].id}
 
 
 @pytest.mark.django_db
@@ -379,15 +384,15 @@ def test_services_sorts(api_client, catalogue):
         assert r.status_code == 200, r.content
         return _ids(r)
 
-    a1, a2, b1, c1s = s["a1"].id, s["a2"].id, s["b1"].id, s["c1"].id
-    assert order() == [c1s, b1, a2, a1]                      # défaut : -created_at
-    assert order(sort="recent") == [c1s, b1, a2, a1]
-    assert order(sort="price_asc") == [a2, a1, b1, c1s]      # sur devis (NULL) en dernier
-    assert order(sort="price_desc") == [b1, a1, a2, c1s]     # NULL en dernier aussi
-    assert order(sort="rating") == [a2, a1, b1, c1s]         # 4.8 > 3.0 > 0, puis récents
-    assert order(sort="n_importe_quoi") == [c1s, b1, a2, a1]  # valeur inconnue ignorée
+    a1, a2, b1 = s["a1"].id, s["a2"].id, s["b1"].id  # (c1 : artisan non vérifié, jamais publié)
+    assert order() == [b1, a2, a1]                      # défaut : -created_at
+    assert order(sort="recent") == [b1, a2, a1]
+    assert order(sort="price_asc") == [a2, a1, b1]
+    assert order(sort="price_desc") == [b1, a1, a2]
+    assert order(sort="rating") == [a2, a1, b1]         # 4.8 > 3.0, puis récents
+    assert order(sort="n_importe_quoi") == [b1, a2, a1]  # valeur inconnue ignorée
     # ?ordering= (DRF) reste prioritaire sur ?sort=
-    assert order(sort="price_desc", ordering="created_at") == [a1, a2, b1, c1s]
+    assert order(sort="price_desc", ordering="created_at") == [a1, a2, b1]
 
 
 @pytest.mark.django_db

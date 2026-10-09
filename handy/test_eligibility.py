@@ -16,6 +16,7 @@ from handy.models import (
     Booking, HandymanDocument, HandymanProfile, Service, ServiceCategory, TimeOff, User,
 )
 from handy.services.matching import match_artisans
+from handy.testing import make_eligible
 
 pytestmark = pytest.mark.django_db
 
@@ -27,30 +28,14 @@ def _clear_cache():
     cache.clear()
 
 
-def make_eligible(profile, *, category=None):
-    """Complète un profil pour qu'il satisfasse toute la règle (à réutiliser dans les fixtures)."""
-    category = category or ServiceCategory.objects.get_or_create(
-        slug="plomberie", defaults={"name": "Plomberie"})[0]
-    profile.is_approved = True
-    profile.bio = "Plombier depuis dix ans."
-    profile.experience_years = 10
-    profile.photo = "profile_pics/test.jpg"
-    profile.commune = "Cocody"
-    profile.save()
-    profile.skills.add(category)
-    HandymanDocument.objects.get_or_create(
-        handyman=profile, document_type="id_card", defaults={"file": "kyc/test.pdf", "status": "approved"})
-    HandymanDocument.objects.filter(handyman=profile, document_type="id_card").update(status="approved")
-    return profile
-
-
 def artisan(username, *, eligible=True, active=True, online=False):
     user = User.objects.create_user(
         username=username, email=f"{username}@x.test", password="pass1234",
         user_type="handyman", is_active=active)
     profile = user.handyman_profile
     if eligible:
-        make_eligible(profile)
+        make_eligible(profile, category=ServiceCategory.objects.get_or_create(
+            slug="plomberie", defaults={"name": "Plomberie"})[0])
     profile.online = online
     profile.location = Point(-4.0083, 5.36, srid=4326)
     profile.save()
@@ -170,7 +155,7 @@ def test_urgent_means_online_now_and_not_on_timeoff():
 
 def _book(client, svc):
     return client.post("/handy/bookings/", {
-        "service": svc.id, "booking_date": (timezone.now() + timedelta(days=2)).isoformat(),
+        "service": svc.id, "handyman": svc.handyman_id, "booking_date": (timezone.now() + timedelta(days=2)).isoformat(),
         "address": "Rue 12", "city": "Abidjan", "postal_code": "00225", "type": "scheduled",
     }, format="json")
 
@@ -201,3 +186,46 @@ def test_category_name_filter_is_applied():
     assert [s["id"] for s in r.json()["results"]] == [b.id]
     r = client.get(reverse("services-list"), {"category__name": "plomberie"})
     assert [s["id"] for s in r.json()["results"]] == [a.id]
+
+
+# ---- Surfaces publiques : fiches, catégories, avis, propriétaire ---------------------------------
+
+def test_service_detail_is_hidden_unless_published_or_owner():
+    ok = service(artisan("det_ok"), "Publié")
+    hidden = service(artisan("det_inc", eligible=False), "Non publié")
+    off = service(artisan("det_off"), "Désactivé", active=False)
+    anon = APIClient()
+    assert anon.get(reverse("services-detail", args=[ok.id])).status_code == 200
+    for s in (hidden, off):
+        assert anon.get(reverse("services-detail", args=[s.id])).status_code == 404
+    # un autre compte connecté ne le voit pas non plus
+    other = APIClient()
+    other.force_authenticate(User.objects.create_user("autre_c", "a@x.test", "pass1234"))
+    assert other.get(reverse("services-detail", args=[hidden.id])).status_code == 404
+    # le propriétaire garde l'accès à ses propres services, publiés ou non
+    owner = APIClient()
+    owner.force_authenticate(hidden.handyman)
+    assert owner.get(reverse("services-detail", args=[hidden.id])).status_code == 200
+
+
+def test_category_counts_and_public_reviews_ignore_unpublished_artisans():
+    ok = service(artisan("cnt_ok"), "A")
+    service(artisan("cnt_bad", eligible=False), "B")
+    cat = ok.category
+    row = next(c for c in APIClient().get(reverse("categories-list")).json()["results"] if c["id"] == cat.id)
+    assert row["services_count"] == 1
+    r = APIClient().get(reverse("services-list"), {"categories": cat.id})
+    assert r.json()["count"] == 1
+    assert APIClient().get("/handy/public/stats/").json()["services"] == 1
+
+
+def test_owner_lists_own_services_but_public_listing_stays_restricted():
+    me = artisan("mine", eligible=False)
+    own = service(me, "Brouillon", active=False)
+    pub = service(artisan("pub"), "Public")
+    c = APIClient()
+    c.force_authenticate(me)
+    ids = {s["id"] for s in c.get(reverse("services-list"), {"handyman": me.id}).json()["results"]}
+    assert ids == {own.id}
+    public_ids = {s["id"] for s in c.get(reverse("services-list")).json()["results"]}
+    assert public_ids == {pub.id}

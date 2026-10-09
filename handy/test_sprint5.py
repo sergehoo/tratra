@@ -11,6 +11,7 @@ from decimal import Decimal
 
 import pytest
 from django.contrib.gis.geos import Point
+from handy.testing import make_eligible
 from django.utils import timezone
 from django.urls import reverse
 from rest_framework.test import APIClient
@@ -42,6 +43,8 @@ def _artisan_ready(u, cat, *, online=True, approved=True):
     p.location = Point(-4.017, 5.345, srid=4326)
     p.save()
     p.skills.add(cat)
+    if approved:
+        make_eligible(p)
     return h, p
 
 

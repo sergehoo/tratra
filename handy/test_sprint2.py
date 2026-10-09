@@ -9,6 +9,7 @@ from decimal import Decimal
 
 import pytest
 from django.contrib.gis.geos import Point
+from handy.testing import make_eligible
 from django.core.exceptions import ValidationError
 from django.urls import reverse
 from rest_framework.test import APIClient
@@ -123,6 +124,7 @@ def test_presence_active_le_matching(api_client):
     prof.online = False
     prof.save()
     prof.skills.add(cat)
+    make_eligible(prof)
 
     cli = _user("c_pres")
     payload = {"category_id": cat.id, "lat": 5.346, "lng": -4.018}
