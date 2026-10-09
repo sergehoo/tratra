@@ -1,6 +1,7 @@
 "use client";
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { apiErrorMessage, get } from "./api";
+import { useAuth } from "./auth";
 
 /** Réponse de GET /me/dashboard/ — données réelles de l'utilisateur courant (client ET/OU artisan). */
 export interface BookingCounts {
@@ -96,26 +97,37 @@ interface DashboardState {
 
 const Ctx = createContext<DashboardState | null>(null);
 
-/** Charge une seule fois le tableau de bord pour le layout (navigation) et les pages. */
+/** Charge une seule fois le tableau de bord pour le layout (navigation) et les pages.
+ *  Lié au COMPTE : un changement d'utilisateur vide les données et ignore toute réponse en vol
+ *  du compte précédent (aucune donnée d'une session ne survit à la suivante). */
 export function DashboardProvider({ children }: { children: ReactNode }) {
+  const { user } = useAuth();
+  const uid = user?.id ?? null;
+  const current = useRef<number | null>(uid);
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   const reload = useCallback(async () => {
+    const asked = current.current;
     setError("");
     try {
-      setData(await get<DashboardData>("/me/dashboard/"));
+      const fresh = await get<DashboardData>("/me/dashboard/");
+      if (asked === current.current) setData(fresh);
     } catch (e) {
-      setError(apiErrorMessage(e, "Le tableau de bord n’a pas pu être chargé."));
+      if (asked === current.current) setError(apiErrorMessage(e, "Le tableau de bord n’a pas pu être chargé."));
     } finally {
-      setLoading(false);
+      if (asked === current.current) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    void reload();
-  }, [reload]);
+    current.current = uid;
+    setData(null);
+    setError("");
+    setLoading(true);
+    if (uid !== null) void reload();
+  }, [uid, reload]);
 
   const value = useMemo(() => ({ data, loading, error, reload }), [data, loading, error, reload]);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
