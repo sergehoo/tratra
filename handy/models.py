@@ -219,7 +219,7 @@ class HandymanDocument(models.Model):
 
     STATUS_CHOICES = [('pending', 'En attente'), ('approved', 'Approuvé'), ('rejected', 'Rejeté')]
 
-    handyman = models.ForeignKey('HandymanProfile', on_delete=models.CASCADE, related_name='documents')
+    handyman = models.ForeignKey('HandymanProfile', on_delete=models.PROTECT, related_name='documents')
     document_type = models.CharField(max_length=50, choices=DOCUMENT_TYPES)
     file = models.FileField(upload_to=private_kyc_upload_path, storage=KycPrivateStorage())
     description = models.TextField(blank=True, null=True)
@@ -255,7 +255,7 @@ class DepositTransaction(models.Model):
     TRANSACTION_TYPES = [('deposit', 'Dépôt'), ('withdrawal', 'Retrait'), ('deduction', 'Déduction mission')]
     STATUS_CHOICES = [('completed', 'Complété'), ('pending', 'En attente'), ('failed', 'Échoué')]
 
-    handyman = models.ForeignKey(User, on_delete=models.CASCADE, related_name='deposit_transactions')
+    handyman = models.ForeignKey(User, on_delete=models.PROTECT, related_name='deposit_transactions')
     type = models.CharField(max_length=20, choices=TRANSACTION_TYPES, db_index=True)
     amount = models.DecimalField(max_digits=10, decimal_places=2)
     date = models.DateTimeField(auto_now_add=True, db_index=True)
@@ -435,8 +435,9 @@ class Booking(models.Model):
         ('pending', 'En attente'), ('confirmed', 'Confirmé'), ('in_progress', 'En cours'),
         ('completed', 'Terminé'), ('cancelled', 'Annulé'),
     ]
-    client = models.ForeignKey('User', on_delete=models.CASCADE, related_name='client_bookings', db_index=True)
-    handyman = models.ForeignKey('User', on_delete=models.CASCADE, related_name='handyman_bookings', db_index=True)
+    # PROTECT (0029) : supprimer un compte ne doit jamais effacer ses réservations.
+    client = models.ForeignKey('User', on_delete=models.PROTECT, related_name='client_bookings', db_index=True)
+    handyman = models.ForeignKey('User', on_delete=models.PROTECT, related_name='handyman_bookings', db_index=True)
     service = models.ForeignKey('Service', on_delete=models.SET_NULL, null=True, blank=True, related_name='bookings')
 
     booking_date = models.DateTimeField()
@@ -632,7 +633,7 @@ class Payment(models.Model):
         'failed': set(),
     }
 
-    booking = models.OneToOneField('Booking', on_delete=models.CASCADE, related_name='payment')
+    booking = models.OneToOneField('Booking', on_delete=models.PROTECT, related_name='payment')
     amount = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(0)])
     # <-- Interpréter platform_fee comme MONTANT (pas taux). Pour un taux, créer platform_fee_rate.
     platform_fee = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(0)],
@@ -727,7 +728,7 @@ class PaymentLog(models.Model):
 
 
 class Payout(models.Model):
-    handyman = models.ForeignKey(User, on_delete=models.CASCADE, related_name='payouts', db_index=True)
+    handyman = models.ForeignKey(User, on_delete=models.PROTECT, related_name='payouts', db_index=True)
     amount = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(0.01)])
     status = models.CharField(max_length=20,
                               choices=[('pending', 'En attente'), ('sent', 'Envoyé'), ('failed', 'Échoué')],
@@ -763,7 +764,7 @@ class Dispute(models.Model):
         ('release_artisan', "Versement à l'artisan"),
         ('none', 'Aucune action'),
     ]
-    booking = models.ForeignKey(Booking, on_delete=models.CASCADE, related_name='disputes')
+    booking = models.ForeignKey(Booking, on_delete=models.PROTECT, related_name='disputes')
     reporter = models.ForeignKey(User, on_delete=models.CASCADE, related_name='disputes_made')
     reason = models.TextField()
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open', db_index=True)
@@ -820,7 +821,7 @@ class FavoriteHandyman(models.Model):
 
 
 class Review(models.Model):
-    booking = models.OneToOneField('Booking', on_delete=models.CASCADE, related_name='review')
+    booking = models.OneToOneField('Booking', on_delete=models.PROTECT, related_name='review')
     rating = models.PositiveSmallIntegerField(choices=[(i, i) for i in range(1, 6)])
     comment = models.TextField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -956,7 +957,7 @@ class BookingTimeline(models.Model):
     status = models.CharField(max_length=20, choices=Booking.STATUS_CHOICES)
     at = models.DateTimeField(auto_now_add=True)
 class PayoutAccount(models.Model):
-    handyman = models.OneToOneField(User, on_delete=models.CASCADE, related_name='payout_account')
+    handyman = models.OneToOneField(User, on_delete=models.PROTECT, related_name='payout_account')
     provider = models.CharField(max_length=30, choices=[('bank','Bank'), ('om','OrangeMoney'), ('mtn','MTN')])
     account_ref = models.CharField(max_length=120)  # IBAN / phone / wallet id
     verified = models.BooleanField(default=False)
@@ -1035,7 +1036,7 @@ class SubscriptionPlan(models.Model):
 
 class Subscription(models.Model):
     STATUS_CHOICES = [('active', 'Actif'), ('cancelled', 'Annulé'), ('expired', 'Expiré')]
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='subscriptions', db_index=True)
+    user = models.ForeignKey(User, on_delete=models.PROTECT, related_name='subscriptions', db_index=True)
     plan = models.ForeignKey(SubscriptionPlan, on_delete=models.PROTECT, related_name='subscriptions')
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='active', db_index=True)
     started_at = models.DateTimeField(auto_now_add=True)
@@ -1086,7 +1087,7 @@ class CompanyProfile(models.Model):
         return self.company_name or f"Entreprise #{self.user_id}"
 
 class Invoice(models.Model):
-    booking = models.OneToOneField(Booking, on_delete=models.CASCADE, related_name='invoice')
+    booking = models.OneToOneField(Booking, on_delete=models.PROTECT, related_name='invoice')
     number = models.CharField(max_length=50, unique=True, db_index=True)
     amount = models.DecimalField(max_digits=10, decimal_places=2)
     fee = models.DecimalField(max_digits=10, decimal_places=2)
