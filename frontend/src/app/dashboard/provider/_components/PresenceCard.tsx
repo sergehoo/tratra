@@ -112,7 +112,7 @@ export function PresenceCard({
             tone="danger"
             className="mt-4"
             action={
-              <ButtonLink href="/worker/kyc" size="sm" variant="outline">
+              <ButtonLink href="/dashboard/profile/kyc" size="sm" variant="outline">
                 Vérifier mon profil
               </ButtonLink>
             }

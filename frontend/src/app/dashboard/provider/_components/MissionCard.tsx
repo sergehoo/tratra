@@ -4,12 +4,12 @@ import { Card, StatusBadge } from "@/components/ds";
 import type { Booking } from "@/lib/types";
 import { clientName, formatWhen } from "./format";
 
-/** Mission de la liste : carte cliquable vers le détail (/worker/missions/[id]). */
+/** Mission de la liste : carte cliquable vers le détail (/dashboard/provider/missions/[id]). */
 export function MissionCard({ booking: b }: { booking: Booking }) {
   const when = formatWhen(b.booking_date);
   return (
     <Link
-      href={`/worker/missions/${b.id}`}
+      href={`/dashboard/provider/missions/${b.id}`}
       className="group block rounded-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
     >
       <Card interactive className="flex items-center gap-4">

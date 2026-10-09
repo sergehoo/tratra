@@ -22,6 +22,7 @@ import {
   TextField,
   TextareaField,
 } from "@/components/ds";
+import { useAuth } from "@/lib/auth";
 import { formatDuration, priceLabel } from "@/lib/format";
 import type { Service } from "@/lib/types";
 import { ArtisanLine } from "../../_components/ArtisanLine";
@@ -71,6 +72,7 @@ function RecapRow({ label, value, placeholder }: { label: string; value?: ReactN
 }
 
 export default function ServiceDetailPage() {
+  const { user } = useAuth();
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const [svc, setSvc] = useState<Service | null>(null);
@@ -189,7 +191,7 @@ export default function ServiceDetailPage() {
       if (pay) {
         await initiatePayment(bookingId);
       } else {
-        router.push(`/client/bookings/${bookingId}`);
+        router.push(`/dashboard/bookings/${bookingId}`);
       }
     } catch (requestError) {
       const message = apiErrorMessage(requestError, "La réservation n'a pas pu être finalisée.");
@@ -208,7 +210,7 @@ export default function ServiceDetailPage() {
   if (loadError) {
     return (
       <>
-        <PageHeader title="Service indisponible" back={{ href: "/client/services", label: "Retour aux services" }} />
+        <PageHeader title="Service indisponible" back={{ href: "/dashboard/services", label: "Retour aux services" }} />
         <Alert
           tone="danger"
           title="Chargement impossible"
@@ -227,17 +229,18 @@ export default function ServiceDetailPage() {
   if (!svc) {
     return (
       <>
-        <PageHeader title="Service introuvable" back={{ href: "/client/services", label: "Retour aux services" }} />
+        <PageHeader title="Service introuvable" back={{ href: "/dashboard/services", label: "Retour aux services" }} />
         <EmptyState
           icon={<SearchX aria-hidden />}
           title="Ce service n’existe pas ou n’est plus proposé"
           description="Parcourez le catalogue pour trouver un autre service."
-          actions={<ButtonLink href="/client/services">Voir les services</ButtonLink>}
+          actions={<ButtonLink href="/dashboard/services">Voir les services</ButtonLink>}
         />
       </>
     );
   }
 
+  const isOwnService = Boolean(user && svc.handyman && svc.handyman === user.id);
   const duration = formatDuration(svc.duration);
   const price = priceLabel(svc);
   const artisanName = artisanDisplayName(svc);
@@ -258,7 +261,7 @@ export default function ServiceDetailPage() {
       <PageHeader
         eyebrow={svc.category_detail?.name}
         title={svc.title}
-        back={{ href: "/client/services", label: "Retour aux services" }}
+        back={{ href: "/dashboard/services", label: "Retour aux services" }}
       />
 
       <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-5">
@@ -311,6 +314,16 @@ export default function ServiceDetailPage() {
           </div>
         </Card>
 
+        {isOwnService ? (
+          <Card className="lg:col-span-2">
+            <Alert tone="info" title="C’est votre prestation">
+              Vous ne pouvez pas réserver votre propre service. Gérez-le depuis vos prestations.
+            </Alert>
+            <ButtonLink href="/dashboard/provider" variant="outline" block className="mt-4">
+              Gérer mes prestations
+            </ButtonLink>
+          </Card>
+        ) : (
         <form onSubmit={submit} noValidate aria-label="Réserver ce service" className="lg:col-span-2">
           <Card>
             <CardHeader
@@ -430,7 +443,7 @@ export default function ServiceDetailPage() {
                 {error ? <Alert tone="danger">{error}</Alert> : null}
                 {paymentNotice ? <Alert tone="success" title="Réservation enregistrée">{paymentNotice}</Alert> : null}
                 {bookingCreated ? (
-                  <ButtonLink href={`/client/bookings/${createdBookingId}`} variant="outline" block>
+                  <ButtonLink href={`/dashboard/bookings/${createdBookingId}`} variant="outline" block>
                     Voir ma réservation
                   </ButtonLink>
                 ) : null}
@@ -455,6 +468,7 @@ export default function ServiceDetailPage() {
             </div>
           </StickyActionBar>
         </form>
+        )}
       </div>
     </>
   );

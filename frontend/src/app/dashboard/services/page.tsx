@@ -1,6 +1,7 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { ArrowRight, Clock, Search, SearchX, X } from "lucide-react";
 import { apiErrorMessage, get } from "@/lib/api";
 import {
@@ -46,7 +47,11 @@ function ServiceGridSkeleton({ count = 6 }: { count?: number }) {
   );
 }
 
-export default function ServicesPage() {
+function ServicesContent() {
+  const params = useSearchParams();
+  const initialSearch = params.get("search") ?? "";
+  /** Filtre de catégories venu du tableau de bord (ex. « 3,7 »), jamais saisi à la main. */
+  const categories = (params.get("categories") ?? "").replace(/[^0-9,]/g, "");
   const [items, setItems] = useState<Service[]>([]);
   const [total, setTotal] = useState(0);
   const [q, setQ] = useState("");
@@ -63,7 +68,10 @@ export default function ServicesPage() {
     setLoading(true);
     setError("");
     try {
-      const d = await get<Paginated<Service>>(`/services/${query ? `?search=${encodeURIComponent(query)}` : ""}`);
+      const qs = new URLSearchParams();
+      if (query) qs.set("search", query);
+      if (categories) qs.set("categories", categories);
+      const d = await get<Paginated<Service>>(`/services/${qs.size ? `?${qs}` : ""}`);
       setItems(d.results ?? []);
       setTotal(d.count ?? d.results?.length ?? 0);
       setApplied(query);
@@ -73,7 +81,11 @@ export default function ServicesPage() {
       setLoading(false);
     }
   }
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    setQ(initialSearch);
+    void load(initialSearch);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function clearSearch() {
     setQ("");
@@ -90,7 +102,7 @@ export default function ServicesPage() {
   return (
     <>
       <PageHeader
-        title="Trouver un service"
+        title="Explorer les services"
         description="Parcourez les services proposés par les artisans Tratra et choisissez celui qui vous convient."
       />
 
@@ -160,7 +172,7 @@ export default function ServicesPage() {
             icon={<Search aria-hidden />}
             title="Aucun service n’est publié pour le moment"
             description="Le catalogue est vide pour l’instant. Revenez bientôt ou consultez vos réservations en cours."
-            actions={<ButtonLink href="/client">Mes réservations</ButtonLink>}
+            actions={<ButtonLink href="/dashboard/bookings">Mes réservations</ButtonLink>}
           />
         )
       ) : (
@@ -172,7 +184,7 @@ export default function ServicesPage() {
               return (
                 <li key={s.id} className="animate-rise" style={{ animationDelay: `${Math.min(index, 6) * STAGGER}s` }}>
                   <Link
-                    href={`/client/services/${s.id}`}
+                    href={`/dashboard/services/${s.id}`}
                     className="group block h-full rounded-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
                   >
                     <Card interactive padding="none" className="flex h-full flex-col overflow-hidden">
@@ -217,5 +229,13 @@ export default function ServicesPage() {
         </>
       )}
     </>
+  );
+}
+
+export default function ServicesPage() {
+  return (
+    <Suspense fallback={<ServiceGridSkeleton />}>
+      <ServicesContent />
+    </Suspense>
   );
 }

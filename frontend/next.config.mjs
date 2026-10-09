@@ -48,6 +48,19 @@ const nextConfig = {
   // Dossier de build surchargeable (ex. NEXT_DIST_DIR=.next-verify) pour vérifier un build
   // sans perturber un `next dev` en cours dans le même dossier.
   distDir: process.env.NEXT_DIST_DIR || ".next",
+  // Espace utilisateur unifié : les anciennes routes (/client, /worker) restent valides (redirections
+  // temporaires 307 : la requête, query comprise, est conservée).
+  async redirects() {
+    return [
+      { source: "/client", destination: "/dashboard/bookings", permanent: false },
+      { source: "/client/services", destination: "/dashboard/services", permanent: false },
+      { source: "/client/services/:id", destination: "/dashboard/services/:id", permanent: false },
+      { source: "/client/bookings/:id", destination: "/dashboard/bookings/:id", permanent: false },
+      { source: "/worker", destination: "/dashboard/provider", permanent: false },
+      { source: "/worker/missions/:id", destination: "/dashboard/provider/missions/:id", permanent: false },
+      { source: "/worker/kyc", destination: "/dashboard/profile/kyc", permanent: false },
+    ];
+  },
   async headers() {
     return [
       {

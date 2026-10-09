@@ -3,8 +3,8 @@ import type { User, UserType } from "./types";
 
 /** Espaces protégés et rôles qui y ont accès (miroir des RoleGuard). */
 const AREA_ROLES: Record<string, UserType[]> = {
-  "/client": ["client", "employeur", "entreprise"],
-  "/worker": ["handyman"],
+  // Espace utilisateur UNIFIÉ : un même compte peut réserver (client) ET proposer des services (artisan).
+  "/dashboard": ["client", "employeur", "entreprise", "handyman"],
   "/company": ["entreprise"],
   "/admin": ["admin"],
 };
@@ -31,7 +31,7 @@ export function isSafeInternalPath(path: string | null | undefined): path is str
 }
 
 export function homeFor(role?: string | null): string {
-  return (role && HOME_BY_ROLE[role]) || "/client";
+  return (role && HOME_BY_ROLE[role]) || "/dashboard";
 }
 
 /**
@@ -66,11 +66,12 @@ export function spaceHref(user: Pick<User, "user_type"> | null | undefined): str
 /**
  * Lien de réservation d'un service :
  * - visiteur -> connexion puis retour sur la fiche de réservation ;
- * - client / employeur / entreprise -> fiche de réservation ;
- * - artisan / admin -> null (la réservation leur est fermée : masquer le CTA).
+ * - tout compte non administrateur (client, employeur, entreprise, artisan) -> fiche de réservation
+ *   (un artisan peut aussi réserver ; la fiche refuse de réserver son propre service) ;
+ * - administrateur -> null (masquer le CTA).
  */
 export function bookingHref(serviceId: number, user: Pick<User, "user_type"> | null | undefined): string | null {
-  const target = `/client/services/${serviceId}`;
+  const target = `/dashboard/services/${serviceId}`;
   if (!user) return loginHref(target);
-  return AREA_ROLES["/client"].includes(user.user_type) ? target : null;
+  return AREA_ROLES["/dashboard"].includes(user.user_type) ? target : null;
 }

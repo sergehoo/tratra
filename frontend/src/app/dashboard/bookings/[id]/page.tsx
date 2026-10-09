@@ -30,6 +30,7 @@ import type { Booking, ReplacementSuggestion } from "@/lib/types";
 import { ArtisanLine } from "../../_components/ArtisanLine";
 import { BookingProgress } from "../../_components/BookingProgress";
 import { DetailList, type DetailItem } from "../../_components/DetailList";
+import { MessageButton } from "../../_components/MessageButton";
 import { formatDateTimeLong } from "../../_components/dates";
 import { useReveal } from "../../_components/useReveal";
 import { artisanDisplayName } from "@/lib/artisan";
@@ -152,7 +153,7 @@ export default function BookingDetailPage() {
   if (loadError) {
     return (
       <>
-        <PageHeader title="Réservation indisponible" back={{ href: "/client", label: "Mes réservations" }} />
+        <PageHeader title="Réservation indisponible" back={{ href: "/dashboard/bookings", label: "Mes réservations" }} />
         <Alert
           tone="danger"
           title="Chargement impossible"
@@ -171,12 +172,12 @@ export default function BookingDetailPage() {
   if (notFound || !b) {
     return (
       <>
-        <PageHeader title="Réservation introuvable" back={{ href: "/client", label: "Mes réservations" }} />
+        <PageHeader title="Réservation introuvable" back={{ href: "/dashboard/bookings", label: "Mes réservations" }} />
         <EmptyState
           icon={<SearchX aria-hidden />}
           title="Cette réservation n’existe pas ou n’est plus accessible"
           description="Retrouvez la liste de vos réservations pour accéder à celle que vous cherchez."
-          actions={<ButtonLink href="/client">Mes réservations</ButtonLink>}
+          actions={<ButtonLink href="/dashboard/bookings">Mes réservations</ButtonLink>}
         />
       </>
     );
@@ -214,7 +215,7 @@ export default function BookingDetailPage() {
         eyebrow={svc?.category_detail?.name}
         title={title}
         description={`Réservation n° ${b.id}`}
-        back={{ href: "/client", label: "Mes réservations" }}
+        back={{ href: "/dashboard/bookings", label: "Mes réservations" }}
         actions={<StatusBadge kind="booking" status={b.status} />}
       />
 
@@ -315,6 +316,14 @@ export default function BookingDetailPage() {
             </Card>
           ) : null}
 
+          {b.handyman_detail && b.status !== "cancelled" ? (
+            <Card>
+              <p className="font-display text-base font-bold text-ink">Un message à l’artisan ?</p>
+              <p className="mt-1 mb-4 text-sm text-ash">Précisez l’accès, l’heure ou un détail de la prestation.</p>
+              <MessageButton bookingId={b.id} label="Écrire à l’artisan" />
+            </Card>
+          ) : null}
+
           {svc?.id ? (
             <Card variant="soft">
               <p className="font-display text-base font-bold text-ink">
@@ -325,7 +334,7 @@ export default function BookingDetailPage() {
                   ? "Refaites une demande pour ce service depuis sa fiche."
                   : "Retrouvez la fiche complète du service."}
               </p>
-              <ButtonLink href={`/client/services/${svc.id}`} variant="outline" block className="mt-4">
+              <ButtonLink href={`/dashboard/services/${svc.id}`} variant="outline" block className="mt-4">
                 {finished ? "Réserver à nouveau" : "Voir le service"}
               </ButtonLink>
             </Card>

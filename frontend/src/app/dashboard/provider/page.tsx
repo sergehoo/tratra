@@ -1,7 +1,10 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { CalendarClock, ClipboardList, ShieldCheck, Wallet } from "lucide-react";
 import { get, post } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
+import { useDashboard } from "@/lib/dashboard";
 import {
   Alert,
   Button,
@@ -14,9 +17,19 @@ import {
 } from "@/components/ds";
 import type { Booking, Paginated } from "@/lib/types";
 import { MissionCard } from "./_components/MissionCard";
+import { MyServices } from "./_components/MyServices";
 import { PresenceCard } from "./_components/PresenceCard";
 
-export default function WorkerHome() {
+export default function ProviderHome() {
+  const { user } = useAuth();
+  const router = useRouter();
+  const dash = useDashboard();
+  const userId = user?.id;
+  // Pas de profil professionnel : on ouvre le parcours « Proposer un service » (jamais de second compte).
+  const noProfile = !dash.loading && dash.data !== null && !dash.data.capabilities.provider;
+  useEffect(() => {
+    if (noProfile) router.replace("/dashboard/provide");
+  }, [noProfile, router]);
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [available, setAvailable] = useState<string>("—");
   const [online, setOnline] = useState<boolean | null>(null);
@@ -31,14 +44,14 @@ export default function WorkerHome() {
     setBookingsFailed(false);
     setPayoutFailed(false);
     Promise.all([
-      get<Paginated<Booking>>("/bookings/")
+      get<Paginated<Booking>>(`/bookings/?handyman=${userId}`)
         .then((d) => setBookings(d.results ?? []))
         .catch(() => setBookingsFailed(true)),
       get<{ available: string }>("/payouts/available/")
         .then((d) => setAvailable(d.available))
         .catch(() => setPayoutFailed(true)),
     ]).finally(() => setLoading(false));
-  }, []);
+  }, [userId]);
 
   useEffect(() => {
     load();
@@ -65,9 +78,9 @@ export default function WorkerHome() {
   return (
     <>
       <PageHeader
-        eyebrow="Espace artisan"
-        title="Tableau de bord"
-        description="Vos missions, vos gains et votre disponibilité en un coup d’œil."
+        eyebrow="Prestataire"
+        title="Mes prestations"
+        description="Vos services, vos missions, vos gains et votre disponibilité."
       />
 
       {loading ? (
@@ -97,6 +110,8 @@ export default function WorkerHome() {
         </div>
       )}
 
+      <MyServices />
+
       <section aria-labelledby="missions-title" className="mt-8 sm:mt-10">
         <div className="mb-4 flex items-end justify-between gap-3">
           <h2 id="missions-title" className="font-display text-xl font-extrabold tracking-tight text-ink">
@@ -124,7 +139,7 @@ export default function WorkerHome() {
             title="Aucune mission pour le moment"
             description="Dès qu’un client vous réserve, sa demande apparaît ici. Un profil vérifié peut se rendre disponible en ligne et être proposé aux clients."
             actions={
-              <ButtonLink href="/worker/kyc" variant="soft" leftIcon={<ShieldCheck aria-hidden className="h-4 w-4" />}>
+              <ButtonLink href="/dashboard/profile/kyc" variant="soft" leftIcon={<ShieldCheck aria-hidden className="h-4 w-4" />}>
                 Vérifier mon profil
               </ButtonLink>
             }

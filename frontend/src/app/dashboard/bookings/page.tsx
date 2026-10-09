@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { CalendarCheck, CalendarDays, ChevronRight, MapPin, Plus, Search } from "lucide-react";
 import { apiErrorMessage, get } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 import {
   Alert,
   Button,
@@ -16,12 +17,14 @@ import {
 } from "@/components/ds";
 import { iconForCategory } from "@/lib/trades";
 import type { Booking, Paginated } from "@/lib/types";
-import { formatDateTimeShort } from "./_components/dates";
+import { formatDateTimeShort } from "../_components/dates";
 
 /** Délai d'apparition échelonné des cartes (dérivé de la durée « fast » du Design System). */
 const STAGGER = DURATION.fast / 3;
 
 export default function ClientHome() {
+  const { user } = useAuth();
+  const userId = user?.id;
   const [items, setItems] = useState<Booking[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -30,14 +33,15 @@ export default function ClientHome() {
     setLoading(true);
     setError("");
     try {
-      const d = await get<Paginated<Booking>>("/bookings/");
+      // Compte unifié : /bookings/ renvoie aussi les missions reçues — on ne garde ici que mes réservations.
+      const d = await get<Paginated<Booking>>(`/bookings/?client=${userId}`);
       setItems(d.results ?? []);
     } catch (requestError) {
       setError(apiErrorMessage(requestError, "Vos réservations ne peuvent pas être chargées pour le moment."));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [userId]);
 
   useEffect(() => {
     void load();
@@ -49,7 +53,7 @@ export default function ClientHome() {
         title="Mes réservations"
         description="Suivez l’avancement de vos demandes et retrouvez les détails de chaque intervention."
         actions={
-          <ButtonLink href="/client/services" leftIcon={<Plus aria-hidden className="h-4 w-4" />}>
+          <ButtonLink href="/dashboard/services" leftIcon={<Plus aria-hidden className="h-4 w-4" />}>
             Nouvelle demande
           </ButtonLink>
         }
@@ -75,7 +79,7 @@ export default function ClientHome() {
           title="Aucune réservation pour le moment"
           description="Vos réservations apparaîtront ici dès que vous aurez demandé une intervention à un artisan."
           actions={
-            <ButtonLink href="/client/services" leftIcon={<Search aria-hidden className="h-4 w-4" />}>
+            <ButtonLink href="/dashboard/services" leftIcon={<Search aria-hidden className="h-4 w-4" />}>
               Trouver un service
             </ButtonLink>
           }
@@ -90,7 +94,7 @@ export default function ClientHome() {
             return (
               <li key={b.id} className="animate-rise" style={{ animationDelay: `${Math.min(index, 6) * STAGGER}s` }}>
                 <Link
-                  href={`/client/bookings/${b.id}`}
+                  href={`/dashboard/bookings/${b.id}`}
                   className="group block rounded-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
                 >
                   <Card interactive padding="none" className="flex items-center gap-4 p-4 sm:p-5">

@@ -37,7 +37,7 @@ export default function FinalCta() {
           </p>
           <div className="mt-8">
             {isArtisan ? (
-              <CtaLink href="/worker" variant="night" size="lg">
+              <CtaLink href="/dashboard/provide" variant="night" size="lg">
                 <LayoutDashboard aria-hidden className="h-5 w-5" />
                 Accéder à mon espace artisan
               </CtaLink>

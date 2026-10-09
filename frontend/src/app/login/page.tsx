@@ -43,7 +43,7 @@ function LoginForm() {
   const params = useSearchParams();
   const rawNext = params.get("next");
   const next = isSafeInternalPath(rawNext) ? rawNext : null;
-  const isBooking = Boolean(next?.startsWith("/client/services/"));
+  const isBooking = Boolean(next?.startsWith("/dashboard/services/"));
   const uid = useId();
   const errorId = `${uid}-error`;
 

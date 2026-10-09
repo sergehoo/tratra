@@ -53,9 +53,9 @@ export const SHARE = {
 
 /** Espace d'accueil par défaut selon le type d'utilisateur. */
 export const HOME_BY_ROLE: Record<string, string> = {
-  client: "/client",
-  employeur: "/client",
-  handyman: "/worker",
+  client: "/dashboard",
+  employeur: "/dashboard",
+  handyman: "/dashboard",
   entreprise: "/company",
   admin: "/admin",
 };

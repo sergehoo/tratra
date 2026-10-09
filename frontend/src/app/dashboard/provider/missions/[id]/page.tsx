@@ -30,6 +30,7 @@ import {
 import { statusView } from "@/lib/status";
 import type { Booking } from "@/lib/types";
 import { clientName, formatPlace, formatWhen } from "../../_components/format";
+import { MessageButton } from "../../../_components/MessageButton";
 
 // Transitions proposées à l'ouvrier selon le statut courant
 const NEXT: Record<string, { status: string; label: string; variant?: "primary" | "ghost" }[]> = {
@@ -154,7 +155,7 @@ export default function MissionDetailPage() {
     }
   }
 
-  const back = { href: "/worker", label: "Tableau de bord" };
+  const back = { href: "/dashboard/provider", label: "Mes prestations" };
 
   if (loading) return <SkeletonPage />;
   if (!b) {
@@ -185,7 +186,7 @@ export default function MissionDetailPage() {
             icon={<ClipboardList />}
             title="Mission introuvable"
             description="Cette mission n’existe pas ou n’est pas accessible avec votre compte."
-            actions={<ButtonLink href="/worker">Retour au tableau de bord</ButtonLink>}
+            actions={<ButtonLink href="/dashboard/provider">Retour à mes prestations</ButtonLink>}
           />
         )}
       </>
@@ -238,6 +239,14 @@ export default function MissionDetailPage() {
           {error ? <Alert tone="danger" className="mt-4">{error}</Alert> : null}
           {notice && !error ? <Alert tone="success" className="mt-4">{notice}</Alert> : null}
         </Card>
+
+        {b.status !== "cancelled" ? (
+          <Card className="lg:col-start-3 lg:row-start-2">
+            <p className="font-display text-base font-bold text-ink">Contacter le client</p>
+            <p className="mb-4 mt-1 text-sm text-ash">Confirmez l’accès, l’heure ou un détail avant l’intervention.</p>
+            <MessageButton bookingId={b.id} label="Écrire au client" />
+          </Card>
+        ) : null}
 
         <Card className="lg:col-span-2 lg:col-start-1 lg:row-start-1">
           <CardHeader title="Détails de la mission" icon={<ClipboardList className="h-5 w-5" />} />

@@ -38,11 +38,28 @@ export const SUBSCRIPTION_STATUS: Record<string, StatusView> = {
   expired: { label: "Expiré", tone: "gray" },
 };
 
+export const PAYMENT_STATUS: Record<string, StatusView> = {
+  pending: { label: "En attente", tone: "accent" },
+  held: { label: "Sous séquestre", tone: "info" },
+  released: { label: "Versé à l’artisan", tone: "success" },
+  completed: { label: "Payé", tone: "success" },
+  failed: { label: "Échoué", tone: "danger" },
+  refunded: { label: "Remboursé", tone: "gray" },
+};
+
+export const PAYOUT_STATUS: Record<string, StatusView> = {
+  pending: { label: "En attente", tone: "accent" },
+  sent: { label: "Envoyé", tone: "success" },
+  failed: { label: "Échoué", tone: "danger" },
+};
+
 export const STATUS_KINDS = {
   booking: BOOKING_STATUS,
   document: DOCUMENT_STATUS,
   dispute: DISPUTE_STATUS,
   subscription: SUBSCRIPTION_STATUS,
+  payment: PAYMENT_STATUS,
+  payout: PAYOUT_STATUS,
 } as const;
 
 export type StatusKind = keyof typeof STATUS_KINDS;

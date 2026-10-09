@@ -3,7 +3,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { ChevronDown, Circle, Globe, LogOut, type LucideIcon } from "lucide-react";
+import { ChevronDown, Circle, Ellipsis, Globe, LogOut, type LucideIcon } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { Avatar } from "./Avatar";
 import { Alert } from "./Alert";
@@ -11,12 +11,19 @@ import { Badge } from "./Badge";
 import { BrandWordmark } from "./BrandWordmark";
 import { ButtonLink } from "./Button";
 import { cx } from "./cx";
+import { Modal } from "./Modal";
 
 export interface NavItem {
   href: string;
   label: string;
+  /** Libellé court pour la barre de navigation mobile (sinon `label`). */
+  short?: string;
   /** Icône lucide (indispensable pour la barre de navigation mobile). */
   icon?: LucideIcon;
+  /** Compteur réel (non lus…) — affiché seulement s'il est > 0. */
+  badge?: number;
+  /** Mobile : fait partie des onglets du bas ; les autres vont dans « Plus » (si plus de 5 entrées). */
+  primary?: boolean;
 }
 
 const ROLE_LABEL: Record<string, string> = {
@@ -150,7 +157,16 @@ export function AppShell({ title, nav, children }: { title: string; nav: NavItem
   // Numéro enregistré mais non vérifié : rappel discret vers la vérification par code.
   const needsPhoneCheck = Boolean(user?.phone) && user?.is_verified === false;
   const active = activeHref(nav, pathname);
-  const scrollableBottom = nav.length > 5;
+  // Mobile : > 5 entrées -> 4 onglets « primary » + « Plus » (feuille avec le reste).
+  const primaryItems = nav.filter((n) => n.primary).slice(0, 4);
+  const useMore = nav.length > 5 && primaryItems.length > 0;
+  const bottomItems = useMore ? primaryItems : nav;
+  const moreItems = useMore ? nav.filter((n) => !primaryItems.includes(n)) : [];
+  const scrollableBottom = !useMore && nav.length > 5;
+  const [moreOpen, setMoreOpen] = useState(false);
+  useEffect(() => setMoreOpen(false), [pathname]);
+  const moreActive = moreItems.some((n) => n.href === active);
+  const moreBadge = moreItems.reduce((sum, n) => sum + (n.badge ?? 0), 0);
 
   return (
     <div className="min-h-screen bg-canvas text-ink">
@@ -189,6 +205,11 @@ export function AppShell({ title, nav, children }: { title: string; nav: NavItem
                     {isActive ? <span aria-hidden className="absolute -left-3 h-6 w-1 rounded-r-full bg-accent" /> : null}
                     <Icon aria-hidden className={cx("h-[18px] w-[18px] shrink-0", isActive ? "text-primary" : "text-ash group-hover:text-ink")} />
                     {n.label}
+                    {n.badge ? (
+                      <span className="ml-auto rounded-full bg-accent px-2 py-0.5 text-[11px] font-bold leading-none text-ink">
+                        {n.badge > 99 ? "99+" : n.badge}
+                      </span>
+                    ) : null}
                   </Link>
                 </li>
               );
@@ -263,9 +284,9 @@ export function AppShell({ title, nav, children }: { title: string; nav: NavItem
       >
         <ul
           className={cx("mx-auto flex max-w-xl", scrollableBottom ? "scrollbar-none overflow-x-auto" : "")}
-          style={scrollableBottom ? undefined : { display: "grid", gridTemplateColumns: `repeat(${nav.length}, minmax(0, 1fr))` }}
+          style={scrollableBottom ? undefined : { display: "grid", gridTemplateColumns: `repeat(${bottomItems.length + (useMore ? 1 : 0)}, minmax(0, 1fr))` }}
         >
-          {nav.map((n) => {
+          {bottomItems.map((n) => {
             const isActive = n.href === active;
             const Icon = n.icon ?? Circle;
             return (
@@ -288,14 +309,68 @@ export function AppShell({ title, nav, children }: { title: string; nav: NavItem
                     )}
                   >
                     <Icon className="h-5 w-5" />
+                    {n.badge ? <span className="absolute right-3 top-1.5 h-2.5 w-2.5 rounded-full bg-accent ring-2 ring-white" /> : null}
                   </span>
-                  <span className="max-w-full truncate">{n.label}</span>
+                  <span className="max-w-full truncate">{n.short ?? n.label}</span>
                 </Link>
               </li>
             );
           })}
+          {useMore ? (
+            <li>
+              <button
+                type="button"
+                onClick={() => setMoreOpen(true)}
+                aria-haspopup="dialog"
+                className={cx(
+                  "relative flex min-h-[64px] w-full flex-col items-center justify-center gap-1 px-1 pb-1.5 pt-2 text-[11px] font-semibold transition-colors duration-200",
+                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary",
+                  moreActive ? "text-primaryDark" : "text-ash",
+                )}
+              >
+                {moreActive ? <span aria-hidden className="absolute top-0 h-[3px] w-9 rounded-b-full bg-accent" /> : null}
+                <span aria-hidden className={cx("relative grid h-8 w-14 place-items-center rounded-full", moreActive ? "bg-primarySoft" : "bg-transparent")}>
+                  <Ellipsis className="h-5 w-5" />
+                  {moreBadge ? <span className="absolute right-3 top-1.5 h-2.5 w-2.5 rounded-full bg-accent ring-2 ring-white" /> : null}
+                </span>
+                <span>Plus</span>
+              </button>
+            </li>
+          ) : null}
         </ul>
       </nav>
+
+      {useMore ? (
+        <Modal open={moreOpen} onClose={() => setMoreOpen(false)} title="Plus" size="sm">
+          <ul className="grid grid-cols-1 gap-1 pb-2">
+            {moreItems.map((n) => {
+              const Icon = n.icon ?? Circle;
+              const isActive = n.href === active;
+              return (
+                <li key={n.href}>
+                  <Link
+                    href={n.href}
+                    aria-current={isActive ? "page" : undefined}
+                    className={cx(
+                      "flex min-h-[48px] items-center gap-3 rounded-xl px-3 text-[15px] font-semibold transition",
+                      RING,
+                      isActive ? "bg-primarySoft text-primaryDark" : "text-inkSoft hover:bg-canvas hover:text-ink",
+                    )}
+                  >
+                    <Icon aria-hidden className={cx("h-5 w-5 shrink-0", isActive ? "text-primary" : "text-ash")} />
+                    {n.label}
+                    {n.badge ? (
+                      <span className="ml-auto rounded-full bg-accent px-2 py-0.5 text-[11px] font-bold leading-none text-ink">
+                        {n.badge > 99 ? "99+" : n.badge}
+                      </span>
+                    ) : null}
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
+        </Modal>
+      ) : null}
     </div>
   );
 }

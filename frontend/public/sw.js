@@ -13,7 +13,7 @@
  *
  * Changer CACHE_VERSION purge tous les anciens caches à l'activation.
  */
-const CACHE_VERSION = "v2"; // v2 : nouveau logo officiel (purge les anciens caches)
+const CACHE_VERSION = "v3"; // v3 : espace /dashboard unifié, v2 : nouveau logo officiel
 const CACHE_PREFIX = "tratra-";
 const CORE_CACHE = `${CACHE_PREFIX}core-${CACHE_VERSION}`;
 const STATIC_CACHE = `${CACHE_PREFIX}static-${CACHE_VERSION}`;
@@ -27,7 +27,7 @@ const STATIC_CACHE_MAX = 180;
 const PAGES_CACHE_MAX = 30;
 
 /** Préfixes jamais mis en cache (comparaison stricte par segment). */
-const NEVER_CACHE = ["/handy", "/api", "/client", "/worker", "/company", "/admin", "/login", "/register"];
+const NEVER_CACHE = ["/handy", "/api", "/dashboard", "/client", "/worker", "/company", "/admin", "/login", "/register"];
 
 function matchesPrefix(pathname, prefix) {
   return pathname === prefix || pathname.startsWith(`${prefix}/`);

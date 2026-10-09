@@ -11,7 +11,7 @@ export default function CompanyLayout({ children }: { children: React.ReactNode 
         nav={[
           { href: "/company", label: "Mon entreprise", icon: Building2 },
           { href: "/company/plans", label: "Offres B2B", icon: BadgeDollarSign },
-          { href: "/client/services", label: "Trouver un service", icon: Search },
+          { href: "/dashboard/services", label: "Trouver un service", icon: Search },
         ]}
       >
         {children}

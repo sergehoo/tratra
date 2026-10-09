@@ -181,7 +181,7 @@ function RegisterForm() {
   const typeParam = parseType(params.get("type"));
   const rawNext = params.get("next");
   const next = isSafeInternalPath(rawNext) ? rawNext : null;
-  const isBooking = Boolean(next?.startsWith("/client/services/"));
+  const isBooking = Boolean(next?.startsWith("/dashboard/services/"));
 
   const [f, setF] = useState<FormState>(() => ({ ...EMPTY_FORM, user_type: typeParam ?? EMPTY_FORM.user_type }));
   const [fieldErrors, setFieldErrors] = useState<Partial<Record<FieldKey, string>>>({});

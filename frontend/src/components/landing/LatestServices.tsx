@@ -36,7 +36,7 @@ function PublishTile({ wide }: { wide: boolean }) {
       </div>
       <div className="relative mt-8 flex flex-wrap gap-3">
         {isArtisan ? (
-          <CtaLink href="/worker" variant="accent">
+          <CtaLink href="/dashboard/provide" variant="accent">
             <LayoutDashboard aria-hidden className="h-4 w-4" />
             Mon espace artisan
           </CtaLink>
