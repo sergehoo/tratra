@@ -13,7 +13,7 @@
  *
  * Changer CACHE_VERSION purge tous les anciens caches à l'activation.
  */
-const CACHE_VERSION = "v3"; // v3 : espace /dashboard unifié, v2 : nouveau logo officiel
+const CACHE_VERSION = "v4"; // v4 : logo officiel casque-T, v3 : espace /dashboard unifié
 const CACHE_PREFIX = "tratra-";
 const CORE_CACHE = `${CACHE_PREFIX}core-${CACHE_VERSION}`;
 const STATIC_CACHE = `${CACHE_PREFIX}static-${CACHE_VERSION}`;
