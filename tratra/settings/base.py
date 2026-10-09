@@ -202,6 +202,9 @@ REST_FRAMEWORK = {
         'rest_framework.permissions.IsAuthenticated',
     ],
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
+    # Erreurs codées {code, detail, fields} (D13) ; les autres erreurs DRF gardent
+    # leur format historique (handy/api/errors.py).
+    'EXCEPTION_HANDLER': 'handy.api.errors.exception_handler',
     'DEFAULT_THROTTLE_CLASSES': [
         'rest_framework.throttling.AnonRateThrottle',
         'rest_framework.throttling.UserRateThrottle',
@@ -363,6 +366,18 @@ else:
         },
         "staticfiles": {"BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"},
     }
+
+# Hôtes autorisés pour Service.image_url (https uniquement, §4.7) : le stockage
+# public du projet. Par défaut, l'hôte de AWS_S3_ENDPOINT_URL (MinIO) ; en dev sans
+# MinIO, localhost. Toute autre URL est refusée (400 invalid_image_url).
+if MINIO_ENABLED:
+    from urllib.parse import urlsplit as _urlsplit
+    _default_media_hosts = _urlsplit(AWS_S3_ENDPOINT_URL).hostname or ''
+else:
+    _default_media_hosts = 'localhost,127.0.0.1'
+MEDIA_PUBLIC_HOSTS = [
+    h.lower() for h in (env_list('MEDIA_PUBLIC_HOSTS') or _default_media_hosts.split(',')) if h
+]
 
 WHITENOISE_AUTOREFRESH = DEBUG
 WHITENOISE_MAX_AGE = 60 * 60 * 24 * 365

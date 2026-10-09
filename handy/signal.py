@@ -1,12 +1,43 @@
 import logging
 
 from django.db import models
-from django.db.models.signals import post_delete, post_save
+from django.db.models.signals import post_delete, post_save, pre_save
 from django.dispatch import receiver
 
-from handy.models import ServiceImage, User, HandymanProfile, Review, Booking, CompanyProfile
+from handy.media.sanitize import sanitize_new_upload
+from handy.models import (
+    ServiceImage, User, HandymanProfile, Review, Booking, CompanyProfile, Service, ReviewMedia,
+)
 from handy.tasks import notify_booking_status
 logger = logging.getLogger(__name__)
+
+
+# Images servies publiquement : tout NOUVEL envoi est réencodé sans métadonnées
+# (EXIF/GPS), quel que soit le chemin (API, admin Django, commande). L'API valide
+# et réencode déjà en amont (PublicImageField) : le fichier marqué n'est pas
+# retraité ; un fichier déjà en base n'est jamais relu.
+PUBLIC_IMAGE_FIELDS = {
+    ServiceImage: ("image",),
+    Service: ("banner",),
+    ReviewMedia: ("image",),
+    HandymanProfile: ("photo",),
+    User: ("profile_picture",),
+}
+
+
+def sanitize_public_images(sender, instance, **kwargs):
+    if kwargs.get("raw"):  # chargement de fixtures : données telles quelles
+        return
+    update_fields = kwargs.get("update_fields")
+    for field_name in PUBLIC_IMAGE_FIELDS.get(sender, ()):
+        if update_fields is not None and field_name not in update_fields:
+            continue
+        sanitize_new_upload(instance, field_name)
+
+
+for _model in PUBLIC_IMAGE_FIELDS:
+    pre_save.connect(sanitize_public_images, sender=_model,
+                     dispatch_uid=f"handy_sanitize_public_images_{_model.__name__}")
 
 @receiver(post_save, sender=User)
 def create_handyman_profile(sender, instance, created, **kwargs):

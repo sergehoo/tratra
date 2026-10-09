@@ -286,7 +286,10 @@ function collectErrorMessages(data: unknown): string[] {
   if (typeof data === "string") return [data];
   if (Array.isArray(data)) return data.flatMap(collectErrorMessages);
   if (data && typeof data === "object") {
-    return Object.values(data).flatMap(collectErrorMessages);
+    // Erreur codée {code, detail, fields} : `code` (chaîne) est destiné au programme.
+    return Object.entries(data)
+      .filter(([key, value]) => !(key === "code" && typeof value === "string"))
+      .flatMap(([, value]) => collectErrorMessages(value));
   }
   return [];
 }
