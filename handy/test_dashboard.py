@@ -8,7 +8,8 @@ from rest_framework.test import APIClient
 from handy.models import Booking, HandymanProfile, Review, User
 from handy.test_eligibility import artisan, make_eligible, service
 
-pytestmark = pytest.mark.django_db
+# Règle d'éligibilité STRICTE (cf. conftest.py racine) : le catalogue public ne montre que les artisans éligibles.
+pytestmark = [pytest.mark.django_db, pytest.mark.strict_eligibility]
 URL = "/handy/me/dashboard/"
 
 
@@ -138,3 +139,50 @@ def test_become_provider_rules():
     api(me).post("/handy/me/handyman-profile/")
     make_eligible(HandymanProfile.objects.get(user=me))
     assert api(me).get(URL).json()["capabilities"]["publishable"] is True
+
+
+# ---- Agrégations des pages (services, messages, avis, notifications) --------------------------
+
+def test_me_services_lists_unpublished_services_of_the_owner_only():
+    pro = artisan("svc_pro", eligible=False)
+    mine = service(pro, "Mon service non publié")
+    service(artisan("svc_autre"), "Service d'autrui")
+    d = api(pro).get("/handy/me/services/").json()
+    assert d["publishable"] is False
+    assert [s["id"] for s in d["results"]] == [mine.id]
+    assert d["results"][0]["published"] is False and d["results"][0]["is_active"] is True
+    # …alors que le catalogue public ne l'expose pas
+    assert api().get("/handy/services/").json()["count"] == 1  # seul le service de l'artisan éligible « svc_autre »
+
+
+def test_conversations_flow_is_scoped_to_participants():
+    cli, pro, intrus = client_user("c1"), artisan("p1"), client_user("intrus")
+    b = book(cli, service(pro))
+    r = api(cli).post("/handy/me/conversations/", {"booking": b.id}, format="json")
+    assert r.status_code == 201
+    cid = r.json()["id"]
+    assert api(pro).post("/handy/me/conversations/", {"booking": b.id}, format="json").json() == {"id": cid, "created": False}
+    assert api(intrus).post("/handy/me/conversations/", {"booking": b.id}, format="json").status_code == 404
+    assert api(cli).post("/handy/messages/", {"conversation": cid, "sender": cli.id, "content": "Bonjour"}, format="json").status_code == 201
+    lst = api(pro).get("/handy/me/conversations/").json()["results"]
+    assert lst[0]["unread"] == 1 and lst[0]["last_message"] == "Bonjour" and lst[0]["counterpart"].startswith("Aya")
+    thread = api(pro).get(f"/handy/me/conversations/{cid}/messages/").json()
+    assert [m["mine"] for m in thread["results"]] == [False]
+    assert api(intrus).get(f"/handy/me/conversations/{cid}/messages/").status_code == 404
+    assert api(pro).post(f"/handy/me/conversations/{cid}/messages/").json() == {"marked": 1}
+    assert api(pro).get("/handy/me/conversations/").json()["results"][0]["unread"] == 0
+
+
+def test_reviews_aggregation_and_notifications_read_all():
+    from handy.models import Notification
+    cli, pro = client_user("c2"), artisan("p2")
+    done = book(cli, service(pro), "completed", -3)
+    d = api(cli).get("/handy/me/reviews/").json()
+    assert [t["booking_id"] for t in d["to_write"]] == [done.id] and d["given"] == [] and d["received"] == []
+    Review.objects.create(booking=done, rating=4, comment="Très bien")
+    assert api(pro).get("/handy/me/reviews/").json()["received"][0]["author"].startswith("Aya")
+    assert api(cli).get("/handy/me/reviews/").json()["given"][0]["artisan"] != ""
+    Notification.objects.create(user=cli, notification_type="booking_status", message="x")
+    Notification.objects.create(user=cli, notification_type="booking_status", message="y")
+    assert api(cli).post("/handy/me/notifications/read-all/").json() == {"marked": 2}
+    assert api(cli).get(URL).json()["unread"]["notifications"] == 0

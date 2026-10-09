@@ -12,7 +12,10 @@ from .views import (
     otp_request, otp_verify, coupon_validate, payout_account, company_profile, public_stats
 )
 
-from .dashboard import me_become_provider, me_dashboard
+from .dashboard import (
+    me_become_provider, me_conversation_messages, me_conversations, me_dashboard,
+    me_notifications_read_all, me_reviews, me_services,
+)
 
 router = DefaultRouter()
 router.register(r'users', UserViewSet, basename='users')
@@ -57,6 +60,11 @@ urlpatterns = [
     # Compte unifié : tableau de bord agrégé + création du profil professionnel du compte courant.
     path('me/dashboard/', me_dashboard, name='me-dashboard'),
     path('me/handyman-profile/', me_become_provider, name='me-handyman-profile'),
+    path('me/services/', me_services, name='me-services'),
+    path('me/conversations/', me_conversations, name='me-conversations'),
+    path('me/conversations/<int:pk>/messages/', me_conversation_messages, name='me-conversation-messages'),
+    path('me/reviews/', me_reviews, name='me-reviews'),
+    path('me/notifications/read-all/', me_notifications_read_all, name='me-notifications-read-all'),
 
     path('', include(router.urls)),
 ]

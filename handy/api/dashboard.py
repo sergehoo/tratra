@@ -21,7 +21,7 @@ from rest_framework.response import Response
 
 from handy.eligibility import is_publishable, profile_checklist
 from handy.models import (
-    Booking, HandymanDocument, HandymanProfile, Message, Notification, Review, Service,
+    Booking, Conversation, HandymanDocument, HandymanProfile, Message, Notification, Review, Service,
     artisan_available_earnings,
 )
 
@@ -251,3 +251,128 @@ def me_become_provider(request):
     profile, created = HandymanProfile.objects.get_or_create(user=request.user)
     return Response({"created": created, "profile_id": profile.id},
                     status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+
+
+# ---------------------------------------------------------------------------------------------
+# Agrégations de lecture pour les pages du tableau de bord (mêmes règles d'accès que l'existant :
+# chaque requête est bornée à l'utilisateur courant — aucun accès aux données d'autrui).
+# ---------------------------------------------------------------------------------------------
+
+@extend_schema(request=None, responses=OpenApiTypes.OBJECT, tags=["Compte"],
+               summary="Mes services (y compris non publiés) avec leur état de publication")
+@api_view(["GET"])
+@permission_classes([permissions.IsAuthenticated])
+def me_services(request):
+    user = request.user
+    publishable = is_publishable(HandymanProfile.objects.filter(user=user).first())
+    services = (Service.objects.filter(handyman=user).select_related("category")
+                .annotate(bookings_count=Count("bookings")).order_by("-created_at", "-id"))
+    return Response({
+        "publishable": publishable,
+        "results": [{
+            "id": s.id, "title": s.title, "category": s.category.name if s.category_id else None,
+            "price": str(s.price) if s.price is not None else None, "price_type": s.price_type,
+            "duration": s.duration, "is_active": s.is_active,
+            "published": bool(s.is_active and publishable),  # visible dans le catalogue public
+            "bookings_count": s.bookings_count,
+        } for s in services],
+    })
+
+
+def _conversation_item(conv, user) -> dict:
+    others = [p for p in conv.participants.all() if p.pk != user.pk]
+    last = conv.messages.order_by("-created_at", "-id").first()
+    unread = conv.messages.filter(is_read=False).exclude(sender=user).count()
+    return {
+        "id": conv.id,
+        "booking_id": conv.booking_id,
+        "counterpart": public_name(others[0]) if others else "Membre Tratra",
+        "last_message": (last.content[:140] if last else None),
+        "last_at": (last.created_at.isoformat() if last else conv.updated_at.isoformat()),
+        "unread": unread,
+    }
+
+
+@extend_schema(request=OpenApiTypes.OBJECT, responses=OpenApiTypes.OBJECT, tags=["Compte"],
+               summary="Mes conversations (GET) / ouvrir la conversation d'une réservation (POST)")
+@api_view(["GET", "POST"])
+@permission_classes([permissions.IsAuthenticated])
+def me_conversations(request):
+    user = request.user
+    if request.method == "POST":
+        booking = Booking.objects.filter(pk=request.data.get("booking")).first()
+        if booking is None or user.pk not in (booking.client_id, booking.handyman_id):
+            return Response({"detail": "Réservation introuvable."}, status=status.HTTP_404_NOT_FOUND)
+        if booking.handyman_id is None:
+            return Response({"detail": "Aucun artisan n'est encore associé à cette réservation."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        conv = Conversation.objects.filter(booking=booking, participants=booking.client).filter(
+            participants=booking.handyman).first()
+        created = conv is None
+        if created:
+            conv = Conversation.objects.create(booking=booking)
+            conv.participants.set([booking.client, booking.handyman])
+        return Response({"id": conv.id, "created": created},
+                        status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+    convs = (Conversation.objects.filter(participants=user).distinct()
+             .prefetch_related("participants").order_by("-updated_at", "-id")[:50])
+    return Response({"results": [_conversation_item(c, user) for c in convs]})
+
+
+@extend_schema(request=None, responses=OpenApiTypes.OBJECT, tags=["Compte"],
+               summary="Messages d'une de mes conversations (GET) / les marquer lus (POST)")
+@api_view(["GET", "POST"])
+@permission_classes([permissions.IsAuthenticated])
+def me_conversation_messages(request, pk):
+    user = request.user
+    conv = Conversation.objects.filter(pk=pk, participants=user).first()
+    if conv is None:
+        return Response({"detail": "Conversation introuvable."}, status=status.HTTP_404_NOT_FOUND)
+    if request.method == "POST":  # marque lus les messages REÇUS (jamais ceux d'autrui à autrui)
+        n = conv.messages.filter(is_read=False).exclude(sender=user).update(is_read=True)
+        return Response({"marked": n})
+    msgs = conv.messages.select_related("sender").order_by("-created_at", "-id")[:100]
+    return Response({
+        "conversation": _conversation_item(conv, user),
+        "results": [{
+            "id": m.id, "mine": m.sender_id == user.pk, "content": m.content,
+            "created_at": m.created_at.isoformat(), "is_read": m.is_read,
+        } for m in reversed(list(msgs))],
+    })
+
+
+@extend_schema(request=None, responses=OpenApiTypes.OBJECT, tags=["Compte"],
+               summary="Mes avis : reçus, donnés et à rédiger")
+@api_view(["GET"])
+@permission_classes([permissions.IsAuthenticated])
+def me_reviews(request):
+    user = request.user
+
+    def row(r, other):
+        service = r.booking.service
+        return {"id": r.id, "rating": r.rating, "comment": r.comment or "", "created_at": r.created_at.isoformat(),
+                "booking_id": r.booking_id, "service": service.title if service else None,
+                "author" if other == "client" else "artisan": public_name(
+                    r.booking.client if other == "client" else r.booking.handyman)}
+
+    base = Review.objects.select_related("booking", "booking__service", "booking__client", "booking__handyman")
+    received = [row(r, "client") for r in base.filter(booking__handyman=user).order_by("-created_at")[:50]]
+    given = [row(r, "handyman") for r in base.filter(booking__client=user).order_by("-created_at")[:50]]
+    to_write = (Booking.objects.filter(client=user, status="completed", review__isnull=True)
+                .select_related("service", "handyman").order_by("-booking_date", "-id")[:20])
+    return Response({
+        "received": received,
+        "given": given,
+        "to_write": [{"booking_id": b.id, "service": b.service.title if b.service else f"Réservation #{b.id}",
+                      "artisan": public_name(b.handyman),
+                      "booking_date": b.booking_date.isoformat() if b.booking_date else None} for b in to_write],
+    })
+
+
+@extend_schema(request=None, responses=OpenApiTypes.OBJECT, tags=["Compte"],
+               summary="Marquer toutes mes notifications comme lues")
+@api_view(["POST"])
+@permission_classes([permissions.IsAuthenticated])
+def me_notifications_read_all(request):
+    n = Notification.objects.filter(user=request.user, is_read=False).update(is_read=True)
+    return Response({"marked": n})
