@@ -11,6 +11,7 @@ Les « destinations » renvoyées (`target`) sont des clés neutres que chaque c
 traduit en écran : le backend ne connaît aucune URL d'interface.
 """
 
+from django.views.decorators.cache import never_cache
 from django.db.models import Avg, Count, Q
 from django.utils import timezone
 from drf_spectacular.types import OpenApiTypes
@@ -170,6 +171,7 @@ def _actions(user, provider, client_block, unread) -> list:
     return sorted(actions, key=lambda a: order[a["severity"]])
 
 
+@never_cache  # données propres à l'utilisateur : jamais mises en cache (proxy, CDN, navigateur)
 @extend_schema(request=None, responses=OpenApiTypes.OBJECT, tags=["Compte"],
                summary="Tableau de bord unifié de l'utilisateur connecté")
 @api_view(["GET"])
@@ -240,6 +242,7 @@ def me_dashboard(request):
     })
 
 
+@never_cache  # données propres à l'utilisateur : jamais mises en cache (proxy, CDN, navigateur)
 @extend_schema(request=None, responses=OpenApiTypes.OBJECT, tags=["Compte"],
                summary="Créer le profil professionnel du compte courant (idempotent)")
 @api_view(["POST"])
@@ -258,6 +261,7 @@ def me_become_provider(request):
 # chaque requête est bornée à l'utilisateur courant — aucun accès aux données d'autrui).
 # ---------------------------------------------------------------------------------------------
 
+@never_cache  # données propres à l'utilisateur : jamais mises en cache (proxy, CDN, navigateur)
 @extend_schema(request=None, responses=OpenApiTypes.OBJECT, tags=["Compte"],
                summary="Mes services (y compris non publiés) avec leur état de publication")
 @api_view(["GET"])
@@ -293,6 +297,7 @@ def _conversation_item(conv, user) -> dict:
     }
 
 
+@never_cache  # données propres à l'utilisateur : jamais mises en cache (proxy, CDN, navigateur)
 @extend_schema(request=OpenApiTypes.OBJECT, responses=OpenApiTypes.OBJECT, tags=["Compte"],
                summary="Mes conversations (GET) / ouvrir la conversation d'une réservation (POST)")
 @api_view(["GET", "POST"])
@@ -319,6 +324,7 @@ def me_conversations(request):
     return Response({"results": [_conversation_item(c, user) for c in convs]})
 
 
+@never_cache  # données propres à l'utilisateur : jamais mises en cache (proxy, CDN, navigateur)
 @extend_schema(request=None, responses=OpenApiTypes.OBJECT, tags=["Compte"],
                summary="Messages d'une de mes conversations (GET) / les marquer lus (POST)")
 @api_view(["GET", "POST"])
@@ -341,6 +347,7 @@ def me_conversation_messages(request, pk):
     })
 
 
+@never_cache  # données propres à l'utilisateur : jamais mises en cache (proxy, CDN, navigateur)
 @extend_schema(request=None, responses=OpenApiTypes.OBJECT, tags=["Compte"],
                summary="Mes avis : reçus, donnés et à rédiger")
 @api_view(["GET"])
@@ -369,6 +376,7 @@ def me_reviews(request):
     })
 
 
+@never_cache  # données propres à l'utilisateur : jamais mises en cache (proxy, CDN, navigateur)
 @extend_schema(request=None, responses=OpenApiTypes.OBJECT, tags=["Compte"],
                summary="Marquer toutes mes notifications comme lues")
 @api_view(["POST"])
