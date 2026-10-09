@@ -2,6 +2,8 @@
 import hashlib
 import hmac
 import logging
+import secrets
+from datetime import timedelta
 import math
 from decimal import Decimal, InvalidOperation
 from math import radians, cos, sqrt, sin, asin
@@ -1178,18 +1180,57 @@ def match(request):
 
 
 # ---- OTP (vérification de compte) ----
+OTP_RESEND_COOLDOWN_S = 60      # délai minimal entre deux codes
+OTP_MAX_PER_HOUR = 5            # codes émis par compte et par heure
+OTP_MAX_FAILURES = 5            # essais invalides avant invalidation du code
+
+
+def _otp_error(detail, http_status):
+    # Corps {"detail"} seul : les clients affichent le message tel quel (aucun champ technique).
+    return Response({"detail": detail}, status=http_status)
+
+
 @extend_schema(request=None, responses=OpenApiTypes.OBJECT,
-               tags=["OTP"], summary="Envoyer un code OTP de vérification")
+               tags=["OTP"], summary="Envoyer un code OTP de vérification par SMS")
 @api_view(["POST"])
 @permission_classes([permissions.IsAuthenticated])
 def otp_request(request):
-    """Génère un code OTP pour l'utilisateur courant et l'envoie (SMS best-effort)."""
-    otp = OTPCode.issue(request.user, purpose="signup")
-    from handy.tasks import _send_sms, _resolve_msisdn
-    _send_sms(_resolve_msisdn(request.user.id), f"Votre code de vérification Tratra : {otp.code}")
-    payload = {"sent": True}
-    if settings.DEBUG:
-        payload["code"] = otp.code  # exposé uniquement en dev
+    """Génère un code OTP et l'envoie par SMS via le fournisseur configuré (handy/sms.py).
+
+    Jamais de faux succès : sans numéro, sans fournisseur ou si l'envoi échoue, une erreur est
+    renvoyée et le code créé est invalidé. Un seul code valide à la fois ; délai et quota
+    d'émission par compte (calculés en base : valables quel que soit le nombre de processus).
+    """
+    from handy import sms
+
+    user = request.user
+    if not (user.phone or "").strip():
+        return _otp_error("Ajoutez un numéro de téléphone à votre compte pour recevoir un code.", status.HTTP_400_BAD_REQUEST)
+    now = timezone.now()
+    recent = OTPCode.objects.filter(user=user, created_at__gte=now - timedelta(hours=1))
+    last = recent.order_by("-created_at").first()
+    if last and (now - last.created_at).total_seconds() < OTP_RESEND_COOLDOWN_S:
+        wait = OTP_RESEND_COOLDOWN_S - int((now - last.created_at).total_seconds())
+        resp = _otp_error(f"Patientez {wait} s avant de demander un nouveau code.", status.HTTP_429_TOO_MANY_REQUESTS)
+        resp["Retry-After"] = str(wait)
+        return resp
+    if recent.count() >= OTP_MAX_PER_HOUR:
+        return _otp_error("Trop de codes demandés. Réessayez dans une heure.", status.HTTP_429_TOO_MANY_REQUESTS)
+
+    OTPCode.objects.filter(user=user, used=False).update(used=True)  # un seul code valide
+    otp = OTPCode.issue(user, purpose="signup")
+    try:
+        backend = sms.send_sms(user.phone, f"Votre code de vérification Tratra : {otp.code}")
+    except sms.SMSError as exc:
+        otp.used = True
+        otp.save(update_fields=["used"])
+        logger.warning("OTP non envoyé (user=%s) : %s", user.pk, exc)
+        if isinstance(exc, sms.SMSNotConfigured):
+            return _otp_error("L'envoi de SMS n'est pas disponible pour le moment.", status.HTTP_503_SERVICE_UNAVAILABLE)
+        return _otp_error("Le SMS n'a pas pu être envoyé. Vérifiez votre numéro puis réessayez.", status.HTTP_502_BAD_GATEWAY)
+    payload = {"sent": True, "phone": sms.mask(sms.normalize_msisdn(user.phone))}
+    if settings.DEBUG and getattr(backend, "exposes_code", False):
+        payload["code"] = otp.code  # développement avec le backend « console » uniquement
     return Response(payload, status=status.HTTP_201_CREATED)
 
 
@@ -1198,16 +1239,28 @@ def otp_request(request):
 @api_view(["POST"])
 @permission_classes([permissions.IsAuthenticated])
 def otp_verify(request):
-    """Vérifie le code OTP -> marque le compte comme vérifié."""
-    code = str(request.data.get("code") or "")
-    otp = (OTPCode.objects.filter(user=request.user, code=code, used=False)
-           .order_by("-created_at").first())
-    if not otp or not otp.is_valid():
+    """Vérifie le code OTP -> marque le compte comme vérifié.
+
+    Après OTP_MAX_FAILURES essais invalides, les codes en cours sont invalidés : il faut en
+    redemander un (soumis au délai et au quota d'émission) — pas de force brute des 10^6 codes.
+    """
+    user = request.user
+    fail_key = f"otp:fail:{user.pk}"
+    if (cache.get(fail_key) or 0) >= OTP_MAX_FAILURES:
+        return _otp_error("Trop d'essais. Demandez un nouveau code.", status.HTTP_429_TOO_MANY_REQUESTS)
+    code = str(request.data.get("code") or "").strip()
+    otp = (OTPCode.objects.filter(user=user, used=False).order_by("-created_at").first())
+    if not otp or not otp.is_valid() or not secrets.compare_digest(otp.code, code):
+        failures = (cache.get(fail_key) or 0) + 1
+        cache.set(fail_key, failures, timeout=600)
+        if failures >= OTP_MAX_FAILURES:
+            OTPCode.objects.filter(user=user, used=False).update(used=True)
         return Response({"detail": "Code invalide ou expiré."}, status=status.HTTP_400_BAD_REQUEST)
+    cache.delete(fail_key)
     otp.used = True
     otp.save(update_fields=["used"])
-    request.user.is_verified = True
-    request.user.save(update_fields=["is_verified"])
+    user.is_verified = True
+    user.save(update_fields=["is_verified"])
     return Response({"verified": True})
 
 

@@ -40,6 +40,21 @@ if not AWS_S3_ENDPOINT_URL.lower().startswith('https://'):
 if not AWS_S3_VERIFY:
     raise ImproperlyConfigured('AWS_S3_VERIFY must remain enabled in production.')
 
+# SMS (OTP) : en production, uniquement un fournisseur RÉEL avec ses identifiants — jamais le
+# journal « console » ni la boîte « locmem » (voir handy/sms.py).
+SMS_BACKEND = config('SMS_BACKEND', default='').strip().lower()
+_SMS_REQUIRED = {
+    'twilio': ('TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN'),
+    'africastalking': ('AT_USERNAME', 'AT_API_KEY'),
+}
+if SMS_BACKEND not in _SMS_REQUIRED:
+    raise ImproperlyConfigured('SMS_BACKEND must be "twilio" or "africastalking" in production.')
+for _name in _SMS_REQUIRED[SMS_BACKEND]:
+    _require_production_setting(_name)
+if SMS_BACKEND == 'twilio' and not any(config(n, default='').strip() for n in (
+        'TWILIO_MESSAGING_SERVICE_SID', 'TWILIO_FROM', 'TWILIO_PHONE_NUMBER')):
+    raise ImproperlyConfigured('TWILIO_MESSAGING_SERVICE_SID or TWILIO_FROM is required in production.')
+
 # Derrière Traefik (terminaison TLS) : on force HTTPS et on fait confiance à
 # l'en-tête de proto transmis par le reverse proxy.
 SECURE_SSL_REDIRECT = True

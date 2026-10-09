@@ -30,10 +30,14 @@ def _send_fcm(user_id, title, body, data=None):
 
 
 def _send_sms(msisdn, message):
-    """Envoi SMS — stub journalisé. TODO(prod): brancher un provider (Orange/Twilio)."""
+    """Alertes SMS : best-effort (jamais bloquant). Fournisseur : handy/sms.py."""
     if not msisdn:
         return
-    logger.info("SMS (stub) -> %s : %s", msisdn, message)
+    from . import sms
+    try:
+        sms.send_sms(msisdn, message)
+    except sms.SMSError as exc:
+        logger.warning("SMS non envoyé : %s", exc)
 
 
 # ---------- Tâches ----------

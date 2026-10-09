@@ -62,8 +62,11 @@ def test_avis_met_a_jour_quality_score():
 # ---------- OTP ----------
 
 @pytest.mark.django_db
-def test_otp_request_puis_verify(api_client):
+def test_otp_request_puis_verify(api_client, settings):
+    settings.SMS_BACKEND = "locmem"  # aucun SMS réel en test (fournisseur : handy/sms.py)
     u = _user("u_otp", verified=False)
+    u.phone = "+2250700000042"  # un code n'est envoyé qu'à un numéro réel
+    u.save()
     api_client.force_authenticate(user=u)
 
     r = api_client.post(reverse("otp-request"), {}, format="json")
