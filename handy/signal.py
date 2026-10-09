@@ -100,7 +100,9 @@ def on_booking_status_change(sender, instance: Booking, created: bool, **kwargs)
 
     if notify_booking_status:
         try:
-            notify_booking_status.delay(instance.id, instance.status)
+            # retry=False : sans broker joignable (dev, panne), échec immédiat et journalisé au lieu de
+            # ~10 s d'attente par changement de statut ; la notification reste « best-effort ».
+            notify_booking_status.apply_async(args=(instance.id, instance.status), retry=False)
         except Exception:
             logger.exception("Échec d'envoi de la tâche Celery notify_booking_status")
     else:

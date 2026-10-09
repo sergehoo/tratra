@@ -53,3 +53,11 @@ CSRF_TRUSTED_ORIGINS = [
     "http://localhost:3000",     # si front dev
     "http://127.0.0.1:3000",
 ]
+
+# Sans Redis local (REDIS_URL absent) : les tâches Celery s'exécutent aussitôt, dans le processus.
+# Le broker par défaut (hôte « redis ») est injoignable hors Docker et bloquait ~20 s à chaque
+# changement de statut de réservation (serveur de développement et tests).
+if not config('REDIS_URL', default=''):
+    CELERY_TASK_ALWAYS_EAGER = True
+    CELERY_BROKER_URL = 'memory://'
+    CELERY_RESULT_BACKEND = 'cache+memory://'

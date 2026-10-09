@@ -551,7 +551,10 @@ class Booking(models.Model):
         self.status = new_status
         update_fields = ['status', 'updated_at']
         if new_status == 'completed' and not self.end_date:
-            self.end_date = timezone.now()
+            # Jamais avant le début (contrainte bk_end_after_start) : terminer une mission en avance
+            # donnait une IntegrityError (500).
+            now, start = timezone.now(), self.booking_date
+            self.end_date = start if (hasattr(start, 'tzinfo') and start > now) else now
             update_fields.append('end_date')
         if new_status == 'cancelled':
             self.cancellation_fee = self.compute_cancellation_fee()
