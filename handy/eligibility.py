@@ -1,18 +1,21 @@
 """Éligibilité d'un artisan : publication publique ET missions (source unique).
 
-Un artisan n'est publié (recherche, cartes, fiches, chiffres publics) et n'est
-éligible aux missions (réservation, matching) que si TOUT ceci est vrai :
+Un artisan n'est publié (catalogue, recherche de proximité, alternatives, chiffres publics)
+et n'est éligible aux missions (réservation, matching) que si TOUT ceci est vrai :
 
 1. compte actif ;
-2. profil approuvé (`HandymanProfile.is_approved`, décision humaine) ;
-3. KYC approuvé : chaque pièce de `HandymanProfile.REQUIRED_KYC_DOCS` a un
+2. profil complet — ce que l'artisan peut réellement renseigner : présentation, au moins une
+   spécialité, expérience, zone d'intervention (commune), photo ;
+3. KYC approuvé : chaque pièce de `HandymanProfile.REQUIRED_KYC_DOCS` (pièce d'identité) a un
    document au statut « approved » ;
-4. profil complet : mêmes champs que `HandymanProfile.profile_completion()` == 100
-   (bio, spécialité, expérience, licence, CNI, assurance, photo, au moins un document).
+4. profil approuvé par l'équipe Tratra (`HandymanProfile.is_approved`, décision humaine).
 
-Les versions SQL (`publishable`, `publishable_user_ids`) et Python (`is_publishable`)
-décrivent la même règle ; `test_eligibility.py` vérifie qu'elles concordent.
-Pour assouplir ou durcir la règle, ne modifier que ce module.
+(Les numéros CNI/licence/assurance ne sont plus exigés : ils sont en lecture seule dans l'API,
+la pièce d'identité validée fait foi.) La même liste alimente la progression affichée dans le
+tableau de bord (`profile_checklist`) : une seule source de vérité. Les versions SQL
+(`publishable`, `publishable_user_ids`) et Python (`is_publishable`) décrivent la même règle ;
+`test_eligibility.py` vérifie qu'elles concordent. Pour assouplir ou durcir la règle, ne modifier
+que ce module.
 """
 from django.db.models import Exists, OuterRef, Q
 
@@ -23,9 +26,20 @@ from handy.models import HandymanDocument, HandymanProfile, TimeOff
 # le passe à False hors de test_eligibility.py. Toujours True en exécution réelle.
 STRICT = True
 
+# (clé, libellé, aide) — l'ordre est celui de la liste de contrôle affichée à l'utilisateur.
+CHECKLIST = [
+    ("bio", "Présentation", "Décrivez votre activité et votre expérience en quelques lignes."),
+    ("skills", "Spécialités", "Choisissez au moins un métier que vous exercez."),
+    ("experience", "Expérience", "Indiquez vos années d'expérience."),
+    ("zone", "Zone d'intervention", "Renseignez votre commune."),
+    ("photo", "Photo de profil", "Ajoutez une photo : les clients choisissent des visages."),
+    ("kyc", "Pièce d'identité vérifiée", "Déposez votre pièce d'identité ; l'équipe Tratra la vérifie."),
+    ("approval", "Validation par l'équipe Tratra", "Dernière étape, après vérification de votre dossier."),
+]
+
 
 def _filled(field: str) -> Q:
-    """Champ texte/fichier renseigné (ni NULL ni chaîne vide)."""
+    """Champ texte/fichier renseigné (ni NULL ni chaîne vide, ni espaces seuls)."""
     return Q(**{f"{field}__isnull": False}) & ~Q(**{field: ""})
 
 
@@ -35,17 +49,30 @@ def _profile_conditions() -> tuple:
     if not STRICT:
         return (q,)
     q &= Q(experience_years__gt=0)
-    for field in ("bio", "license_number", "cni_number", "insurance_info", "photo"):
+    for field in ("bio", "commune", "photo"):
         q &= _filled(field)
 
     has_skill = HandymanProfile.skills.through.objects.filter(handymanprofile_id=OuterRef("pk"))
-    has_document = HandymanDocument.objects.filter(handyman_id=OuterRef("pk"))
     kyc = [
         Exists(HandymanDocument.objects.filter(
             handyman_id=OuterRef("pk"), document_type=doc_type, status="approved"))
         for doc_type in sorted(HandymanProfile.REQUIRED_KYC_DOCS)
     ]
-    return (q, Exists(has_skill), Exists(has_document), *kyc)
+    return (q, Exists(has_skill), *kyc)
+
+
+def profile_checklist(profile) -> list:
+    """Liste de contrôle du dossier artisan : [{key, label, hint, done}] — mêmes règles que le SQL."""
+    done = {
+        "bio": bool((profile.bio or "").strip()),
+        "skills": profile.skills.exists(),
+        "experience": (profile.experience_years or 0) > 0,
+        "zone": bool((profile.commune or "").strip()),
+        "photo": bool(profile.photo),
+        "kyc": profile.has_required_kyc(),
+        "approval": bool(profile.is_approved),
+    }
+    return [{"key": k, "label": label, "hint": hint, "done": done[k]} for k, label, hint in CHECKLIST]
 
 
 def publishable(profiles=None):
@@ -65,7 +92,7 @@ def is_publishable(profile) -> bool:
         return False
     if not STRICT:
         return True
-    return bool(profile.has_required_kyc() and profile.is_fully_completed)
+    return all(item["done"] for item in profile_checklist(profile))
 
 
 def is_user_publishable(user) -> bool:

@@ -34,9 +34,6 @@ def make_eligible(profile, *, category=None):
     profile.is_approved = True
     profile.bio = "Plombier depuis dix ans."
     profile.experience_years = 10
-    profile.license_number = "LIC-1"
-    profile.cni_number = "CNI-1"
-    profile.insurance_info = "Assurance AXA"
     profile.photo = "profile_pics/test.jpg"
     profile.commune = "Cocody"
     profile.save()
@@ -74,15 +71,32 @@ BREAKERS = {
     "non_approuve": lambda p: setattr(p, "is_approved", False),
     "sans_bio": lambda p: setattr(p, "bio", ""),
     "sans_experience": lambda p: setattr(p, "experience_years", 0),
-    "sans_licence": lambda p: setattr(p, "license_number", None),
-    "sans_cni": lambda p: setattr(p, "cni_number", ""),
-    "sans_assurance": lambda p: setattr(p, "insurance_info", ""),
+    "sans_zone": lambda p: setattr(p, "commune", ""),
     "sans_photo": lambda p: setattr(p, "photo", ""),
     "sans_specialite": lambda p: p.skills.clear(),
     "kyc_en_attente": lambda p: HandymanDocument.objects.filter(handyman=p).update(status="pending"),
     "kyc_rejete": lambda p: HandymanDocument.objects.filter(handyman=p).update(status="rejected"),
     "sans_document": lambda p: HandymanDocument.objects.filter(handyman=p).delete(),
 }
+
+
+def test_licence_cni_assurance_ne_sont_pas_requises():
+    """Champs en lecture seule dans l'API : l'artisan ne peut pas les renseigner lui-même."""
+    user = artisan("sans_numeros")
+    p = user.handyman_profile
+    p.license_number = p.cni_number = p.insurance_info = None
+    p.save()
+    assert is_publishable(HandymanProfile.objects.get(pk=p.pk)) is True
+
+
+def test_checklist_reflects_the_rule():
+    from handy.eligibility import profile_checklist
+    user = artisan("liste", eligible=False)
+    items = {i["key"]: i["done"] for i in profile_checklist(user.handyman_profile)}
+    assert items == {"bio": False, "skills": False, "experience": False, "zone": False,
+                     "photo": False, "kyc": False, "approval": False}
+    make_eligible(user.handyman_profile)
+    assert all(i["done"] for i in profile_checklist(HandymanProfile.objects.get(user=user)))
 
 
 @pytest.mark.parametrize("case", sorted(BREAKERS))

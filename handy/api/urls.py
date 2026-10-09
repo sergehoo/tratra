@@ -12,6 +12,8 @@ from .views import (
     otp_request, otp_verify, coupon_validate, payout_account, company_profile, public_stats
 )
 
+from .dashboard import me_become_provider, me_dashboard
+
 router = DefaultRouter()
 router.register(r'users', UserViewSet, basename='users')
 router.register(r'handymen', HandymanProfileViewSet, basename='handymen')
@@ -52,6 +54,9 @@ urlpatterns = [
     path('companies/me/', company_profile, name='company-profile'),
     # Public (landing) : chiffres réels, sans authentification.
     path('public/stats/', public_stats, name='public-stats'),
+    # Compte unifié : tableau de bord agrégé + création du profil professionnel du compte courant.
+    path('me/dashboard/', me_dashboard, name='me-dashboard'),
+    path('me/handyman-profile/', me_become_provider, name='me-handyman-profile'),
 
     path('', include(router.urls)),
 ]
