@@ -2,7 +2,7 @@ import Image from "next/image";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { ArrowLeft, BadgeCheck, Navigation, ShieldCheck, Wallet, type LucideIcon } from "lucide-react";
-import { ButtonLink, Card, Eyebrow, cx } from "@/components/ds";
+import { BrandWordmark, ButtonLink, Card, Eyebrow, cx } from "@/components/ds";
 import { ESCROW_ENABLED } from "@/lib/config";
 
 /**
@@ -53,9 +53,7 @@ function BrandLink() {
       <span className="grid h-11 w-11 place-items-center rounded-control bg-white shadow-hair ring-1 ring-black/5">
         <Image src="/tratra_logo.webp" alt="" width={30} height={30} priority className="h-[30px] w-[30px]" />
       </span>
-      <span aria-hidden className="font-display text-[1.35rem] font-extrabold tracking-tight text-white">
-        Tra<span className="text-accent">tra</span>
-      </span>
+      <BrandWordmark tone="night" />
     </Link>
   );
 }

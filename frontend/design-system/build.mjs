@@ -124,6 +124,8 @@ function buildDart() {
     "abstract final class TtFont {",
     `  static const String display = '${tokens.font.display.family}';`,
     `  static const String body = '${tokens.font.body.family}';`,
+    `  /// Script de marque, réservé au nom « Tratra » (TratraWordmark).`,
+    `  static const String brand = '${tokens.font.brand.family}';`,
     "}",
     "",
     "/// Spécification d'un style de texte (taille desktop/mobile, interligne, graisse, crénage en em).",

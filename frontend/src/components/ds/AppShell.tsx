@@ -8,6 +8,7 @@ import { useAuth } from "@/lib/auth";
 import { Avatar } from "./Avatar";
 import { Alert } from "./Alert";
 import { Badge } from "./Badge";
+import { BrandWordmark } from "./BrandWordmark";
 import { ButtonLink } from "./Button";
 import { cx } from "./cx";
 
@@ -162,9 +163,7 @@ export function AppShell({ title, nav, children }: { title: string; nav: NavItem
         <div className="px-5 pb-4 pt-6">
           <Link href="/" aria-label="Tratra — retour au site" className={cx("flex items-center gap-2.5 rounded-2xl", RING)}>
             <BrandMark className="h-11 w-11" />
-            <span aria-hidden className="font-display text-[1.35rem] font-extrabold tracking-tight text-ink">
-              Tra<span className="text-primary">tra</span>
-            </span>
+            <BrandWordmark />
           </Link>
         </div>
         <p className="mx-5 mb-3 mt-2 inline-flex w-fit items-center gap-2 rounded-full bg-accentSoft px-3 py-1 text-[11px] font-bold uppercase tracking-[0.14em] text-ink ring-1 ring-inset ring-accent/40">

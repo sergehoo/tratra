@@ -1,6 +1,6 @@
 import Image from "next/image";
 import type { ReactNode } from "react";
-import { CONTAINER, Eyebrow, cx } from "@/components/ds";
+import { BrandWordmark, CONTAINER, Eyebrow, cx } from "@/components/ds";
 
 /**
  * Écran système plein cadre (page introuvable, erreur inattendue).
@@ -24,9 +24,7 @@ function BrandLink() {
       <span className="grid h-11 w-11 place-items-center rounded-control bg-white shadow-hair ring-1 ring-black/5">
         <Image src="/tratra_logo.webp" alt="" width={30} height={30} priority className="h-[30px] w-[30px]" />
       </span>
-      <span aria-hidden className="font-display text-[1.35rem] font-extrabold tracking-tight text-white">
-        Tra<span className="text-accent">tra</span>
-      </span>
+      <BrandWordmark tone="night" />
     </a>
   );
 }

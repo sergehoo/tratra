@@ -43,6 +43,7 @@ const config: Config = {
       fontFamily: {
         sans: ["var(--font-body)", "system-ui", "-apple-system", "Segoe UI", "Roboto", "sans-serif"],
         display: ["var(--font-display)", "var(--font-body)", "system-ui", "sans-serif"],
+        brand: ["Bonskin", "var(--font-display)", "cursive"],
       },
       fontSize,
       borderRadius,

@@ -71,7 +71,7 @@ export default function OfflinePage() {
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/icons/icon-192.png" alt="" width={20} height={20} className="h-5 w-5 rounded" />
           <span>
-            <span className="font-display font-bold text-night">Tratra</span> · Artisans vérifiés à domicile
+            <span className="font-brand text-xl text-night">Tratra</span> · Artisans vérifiés à domicile
           </span>
         </footer>
       </section>

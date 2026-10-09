@@ -29,6 +29,7 @@ export { Modal, ConfirmDialog } from "./Modal";
 export { Tabs, type TabItem } from "./Tabs";
 export { DataTable, type Column } from "./DataTable";
 export { Avatar, useImageFallback } from "./Avatar";
+export { BrandWordmark } from "./BrandWordmark";
 export { EmptyState } from "./EmptyState";
 export {
   Skeleton,

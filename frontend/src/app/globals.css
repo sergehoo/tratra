@@ -1,4 +1,13 @@
 @import "../styles/tokens.css";
+@font-face {
+  /* Script de marque : nom « Tratra » uniquement (design-system/BONSKIN-LICENCE.md). */
+  font-family: "Bonskin";
+  src: url("/fonts/Bonskin.otf") format("opentype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;

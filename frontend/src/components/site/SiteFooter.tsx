@@ -1,6 +1,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { BadgeCheck, Navigation, ShieldCheck, Wallet } from "lucide-react";
+import { BrandWordmark } from "@/components/ds/BrandWordmark";
 import { CONTAINER } from "@/components/ds/layout";
 import { ESCROW_ENABLED } from "@/lib/config";
 import { registerHref } from "@/lib/links";
@@ -80,9 +81,7 @@ export default function SiteFooter({ trades }: { trades?: FooterLink[] }) {
             <span className="grid h-12 w-12 place-items-center rounded-panel bg-white">
               <Image src="/tratra_logo.webp" alt="Tratra" width={36} height={36} className="h-9 w-9" />
             </span>
-            <span aria-hidden className="font-display text-2xl font-extrabold tracking-tight text-white">
-              Tra<span className="text-accent">tra</span>
-            </span>
+            <BrandWordmark tone="night" className="text-[2.3rem]" />
           </Link>
           <p className="mt-5 max-w-sm text-[15px] leading-relaxed">
             {ESCROW_ENABLED

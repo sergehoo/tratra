@@ -18,6 +18,7 @@ import {
   X,
   type LucideIcon,
 } from "lucide-react";
+import { BrandWordmark } from "@/components/ds/BrandWordmark";
 import { ButtonLink } from "@/components/ds/Button";
 import { DURATION, EASE } from "@/components/ds/motion";
 import { CONTAINER } from "@/components/ds/layout";
@@ -165,14 +166,7 @@ export default function SiteHeader({ variant = "overlay" }: { variant?: "overlay
                 className="h-[30px] w-[30px]"
               />
             </span>
-            <span
-              aria-hidden
-              className={`font-display text-xl font-extrabold tracking-tight transition-colors duration-base lg:text-[1.35rem] ${
-                transparent ? "text-white" : "text-ink"
-              }`}
-            >
-              Tra<span className={transparent ? "text-accent" : "text-primary"}>tra</span>
-            </span>
+            <BrandWordmark tone={transparent ? "night" : "light"} className="text-[2rem] transition-colors duration-base lg:text-[2.25rem]" />
           </Link>
 
           <nav aria-label="Navigation principale" className="hidden lg:block">
