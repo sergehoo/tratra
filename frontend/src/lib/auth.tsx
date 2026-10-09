@@ -12,6 +12,8 @@ interface AuthState {
   login: (u: string, p: string, next?: string | null) => Promise<User>;
   register: (payload: Parameters<typeof api.register>[0], next?: string | null) => Promise<User>;
   logout: () => Promise<void>;
+  /** Recharge le profil (ex. `is_verified` après une vérification par code). */
+  refreshUser: () => Promise<User | null>;
 }
 
 const Ctx = createContext<AuthState | null>(null);
@@ -65,7 +67,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   async function register(payload: Parameters<typeof api.register>[0], next?: string | null) {
     const me = await api.register(payload);
     setUser(me);
-    router.push(safeNext(next, me.user_type));
+    const destination = safeNext(next, me.user_type);
+    // Un numéro a été enregistré : proposer sa vérification par code (« Plus tard » possible).
+    router.push(me.phone && !me.is_verified ? `/verify-phone?next=${encodeURIComponent(destination)}` : destination);
     return me;
   }
 
@@ -75,8 +79,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     router.push("/login");
   }
 
+  async function refreshUser() {
+    try {
+      const fresh = await api.me();
+      setUser(fresh);
+      return fresh;
+    } catch {
+      return null;
+    }
+  }
+
   return (
-    <Ctx.Provider value={{ user, loading, login, register, logout }}>
+    <Ctx.Provider value={{ user, loading, login, register, logout, refreshUser }}>
       {children}
     </Ctx.Provider>
   );

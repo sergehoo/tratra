@@ -6,7 +6,9 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ChevronDown, Circle, Globe, LogOut, type LucideIcon } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { Avatar } from "./Avatar";
+import { Alert } from "./Alert";
 import { Badge } from "./Badge";
+import { ButtonLink } from "./Button";
 import { cx } from "./cx";
 
 export interface NavItem {
@@ -142,8 +144,10 @@ function UserMenu({ onLogout }: { onLogout: () => void }) {
  * L'unique <h1> d'une page est fourni par <PageHeader /> dans le contenu.
  */
 export function AppShell({ title, nav, children }: { title: string; nav: NavItem[]; children: ReactNode }) {
-  const { logout } = useAuth();
+  const { user, logout } = useAuth();
   const pathname = usePathname();
+  // Numéro enregistré mais non vérifié : rappel discret vers la vérification par code.
+  const needsPhoneCheck = Boolean(user?.phone) && user?.is_verified === false;
   const active = activeHref(nav, pathname);
   const scrollableBottom = nav.length > 5;
 
@@ -234,6 +238,20 @@ export function AppShell({ title, nav, children }: { title: string; nav: NavItem
             id="contenu"
             className="relative mx-auto w-full max-w-6xl animate-fadeIn px-4 pb-28 pt-6 sm:px-6 lg:px-8 lg:pb-14 lg:pt-8"
           >
+            {needsPhoneCheck ? (
+              <Alert
+                tone="warning"
+                title="Vérifiez votre numéro de téléphone"
+                className="mb-6"
+                action={
+                  <ButtonLink href={`/verify-phone?next=${encodeURIComponent(pathname)}`} size="sm" variant="outline">
+                    Vérifier maintenant
+                  </ButtonLink>
+                }
+              >
+                Un code vous sera envoyé par SMS pour sécuriser votre compte.
+              </Alert>
+            ) : null}
             {children}
           </main>
         </div>

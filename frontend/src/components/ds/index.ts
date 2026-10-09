@@ -20,6 +20,7 @@ export {
   Checkbox,
   type FieldControlProps,
 } from "./Field";
+export { OtpInput } from "./OtpInput";
 export { Card, CardHeader, Stat, type CardProps, type CardVariant } from "./Card";
 export { Badge, type BadgeTone } from "./Badge";
 export { StatusBadge } from "./StatusBadge";
