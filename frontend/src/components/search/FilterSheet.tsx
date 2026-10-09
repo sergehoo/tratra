@@ -2,6 +2,8 @@
 import { useEffect, useId, useRef, type ReactNode, type RefObject } from "react";
 import { AnimatePresence, m } from "framer-motion";
 import { X } from "lucide-react";
+import { Button } from "@/components/ds/Button";
+import { DURATION, EASE } from "@/components/ds/motion";
 import { FOCUS_RING } from "./controls";
 
 const FOCUSABLE =
@@ -88,7 +90,7 @@ export default function FilterSheet({
   return (
     <AnimatePresence>
       {open ? (
-        <div key="filter-sheet" className="fixed inset-0 z-[80] lg:hidden">
+        <div key="filter-sheet" className="fixed inset-0 z-modal lg:hidden">
           <m.div
             aria-hidden
             className="absolute inset-0 bg-night/60 backdrop-blur-[2px]"
@@ -96,7 +98,7 @@ export default function FilterSheet({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            transition={{ duration: 0.2 }}
+            transition={{ duration: DURATION.base }}
           />
           <m.div
             ref={panelRef}
@@ -104,16 +106,16 @@ export default function FilterSheet({
             aria-modal="true"
             aria-labelledby={titleId}
             tabIndex={-1}
-            className="absolute inset-x-0 bottom-0 flex max-h-[90dvh] flex-col rounded-t-[28px] bg-white shadow-strong outline-none"
+            className="absolute inset-x-0 bottom-0 flex max-h-[90dvh] flex-col rounded-t-sheet bg-white shadow-strong outline-none"
             initial={{ y: "100%" }}
             animate={{ y: 0 }}
             exit={{ y: "100%" }}
-            transition={{ type: "spring", damping: 34, stiffness: 340, mass: 0.9 }}
+            transition={{ duration: DURATION.slow, ease: EASE }}
           >
             <div aria-hidden className="flex justify-center pt-3">
-              <span className="h-1.5 w-12 rounded-full bg-slate-200" />
+              <span className="h-1.5 w-12 rounded-full bg-line" />
             </div>
-            <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-5 pb-3 pt-1">
+            <div className="flex items-center justify-between gap-3 border-b border-lineSoft px-5 pb-3 pt-1">
               <h2 id={titleId} className="font-display text-lg font-extrabold text-ink">
                 Filtres
               </h2>
@@ -121,28 +123,19 @@ export default function FilterSheet({
                 type="button"
                 onClick={onClose}
                 aria-label="Fermer les filtres"
-                className={`-mr-2 grid h-11 w-11 place-items-center rounded-full text-ink transition hover:bg-slate-100 ${FOCUS_RING}`}
+                className={`-mr-2 grid h-11 w-11 place-items-center rounded-full text-ink transition duration-base hover:bg-lineSoft ${FOCUS_RING}`}
               >
                 <X aria-hidden className="h-5 w-5" />
               </button>
             </div>
             <div className="flex-1 overflow-y-auto overscroll-contain px-5 py-6">{children}</div>
-            <div className="flex gap-3 border-t border-slate-100 bg-white px-5 pb-[max(1rem,env(safe-area-inset-bottom))] pt-4">
-              <button
-                type="button"
-                onClick={onReset}
-                disabled={resetDisabled}
-                className={`min-h-[48px] rounded-2xl border border-slate-200 px-4 text-sm font-semibold text-ink transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 ${FOCUS_RING}`}
-              >
+            <div className="flex gap-3 border-t border-lineSoft bg-white px-5 pb-[max(1rem,env(safe-area-inset-bottom))] pt-4">
+              <Button type="button" variant="outline" size="lg" onClick={onReset} disabled={resetDisabled}>
                 Réinitialiser
-              </button>
-              <button
-                type="button"
-                onClick={onClose}
-                className={`min-h-[48px] flex-1 rounded-2xl bg-primary px-4 text-sm font-bold text-white shadow-glow transition hover:bg-primaryDark ${FOCUS_RING}`}
-              >
+              </Button>
+              <Button type="button" size="lg" onClick={onClose} className="min-w-0 flex-1 !whitespace-normal text-center">
                 {applyLabel}
-              </button>
+              </Button>
             </div>
           </m.div>
         </div>

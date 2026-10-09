@@ -36,7 +36,7 @@ export function SkeletonCard({ className = "" }: { className?: string }) {
 /** Liste de cartes en chargement, annoncée une seule fois aux lecteurs d'écran. */
 export function SkeletonList({ count = 3, className = "" }: { count?: number; className?: string }) {
   return (
-    <div role="status" aria-label="Chargement en cours" className={cx("grid gap-3", className)}>
+    <div role="status" aria-label="Chargement en cours" className={cx("grid grid-cols-1 gap-3", className)}>
       {Array.from({ length: count }, (_, i) => (
         <SkeletonCard key={i} />
       ))}
@@ -48,7 +48,7 @@ export function SkeletonList({ count = 3, className = "" }: { count?: number; cl
 /** Rangée d'indicateurs en chargement. */
 export function SkeletonStats({ count = 3, className = "" }: { count?: number; className?: string }) {
   return (
-    <div role="status" aria-label="Chargement en cours" className={cx("grid gap-4 sm:grid-cols-3", className)}>
+    <div role="status" aria-label="Chargement en cours" className={cx("grid grid-cols-1 gap-4 sm:grid-cols-3", className)}>
       {Array.from({ length: count }, (_, i) => (
         <div key={i} aria-hidden className="flex items-start gap-4 rounded-card border border-lineSoft bg-white p-5 shadow-soft">
           <div className="skeleton h-12 w-12 shrink-0 !rounded-2xl" />

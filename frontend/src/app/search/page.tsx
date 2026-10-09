@@ -36,7 +36,7 @@ export default function SearchPage() {
   return (
     <>
       <SiteHeader variant="solid" />
-      <main id="contenu" className="min-h-screen bg-slate-50">
+      <main id="contenu" tabIndex={-1} className="min-h-screen bg-canvas outline-none">
         {/* useSearchParams (état de recherche dans l'URL) exige une frontière Suspense. */}
         <Suspense fallback={<SearchPageSkeleton />}>
           <SearchClient />

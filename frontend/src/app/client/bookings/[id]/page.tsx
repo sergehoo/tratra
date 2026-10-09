@@ -1,89 +1,349 @@
 "use client";
-import { useEffect, useState, useCallback } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
-import { get, post } from "@/lib/api";
-import { Card, Badge, Button } from "@/components/ui";
+import {
+  CalendarDays,
+  FileText,
+  MapPin,
+  MessageSquareText,
+  SearchX,
+  UserRound,
+  Users,
+  Wallet,
+  XCircle,
+} from "lucide-react";
+import { ApiError, apiErrorMessage, get, post } from "@/lib/api";
+import {
+  Alert,
+  Button,
+  ButtonLink,
+  Card,
+  CardHeader,
+  ConfirmDialog,
+  EmptyState,
+  PageHeader,
+  SkeletonPage,
+  StatusBadge,
+} from "@/components/ds";
+import { formatFCFA, priceLabel } from "@/lib/format";
 import type { Booking, ReplacementSuggestion } from "@/lib/types";
+import { ArtisanLine } from "../../_components/ArtisanLine";
+import { BookingProgress } from "../../_components/BookingProgress";
+import { DetailList, type DetailItem } from "../../_components/DetailList";
+import { formatDateTimeLong } from "../../_components/dates";
+import { useReveal } from "../../_components/useReveal";
+import { artisanDisplayName } from "@/lib/artisan";
+
+/** Champs renvoyés par l'API de réservation mais absents du type partagé `Booking`. */
+type BookingView = Booking & {
+  description?: string | null;
+  handyman_comment?: string | null;
+};
+
+/** Texte libre saisi par un utilisateur : retours à la ligne conservés. */
+function FreeText({ children }: { children: string }) {
+  return <span className="whitespace-pre-line font-normal text-inkSoft">{children}</span>;
+}
 
 export default function BookingDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const [b, setB] = useState<Booking | null>(null);
-  const [repl, setRepl] = useState<ReplacementSuggestion[]>([]);
+  const [b, setB] = useState<BookingView | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [notFound, setNotFound] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [acceptingId, setAcceptingId] = useState<number | null>(null);
+  const [repl, setRepl] = useState<ReplacementSuggestion[]>([]);
+  /** idle : rien demandé · loading : requête en cours · loaded : réponse reçue (peut être vide). */
+  const [replState, setReplState] = useState<"idle" | "loading" | "loaded">("idle");
+  const [confirmCancel, setConfirmCancel] = useState(false);
+  const [actionError, setActionError] = useState("");
+  const [notice, setNotice] = useState("");
+  const feedbackRef = useRef<HTMLDivElement>(null);
 
-  const load = useCallback(() => {
-    get<Booking>(`/bookings/${id}/`).then(setB).catch(() => {}).finally(() => setLoading(false));
-  }, [id]);
-  useEffect(() => { load(); }, [load]);
+  useReveal(feedbackRef, actionError || notice);
+
+  /**
+   * `initial` : premier chargement (squelette, erreur plein écran, « introuvable »).
+   * Sinon : actualisation silencieuse après une action — la page reste affichée.
+   */
+  const load = useCallback(
+    async (initial = false) => {
+      if (initial) {
+        setLoading(true);
+        setLoadError("");
+        setNotFound(false);
+      }
+      try {
+        setB(await get<BookingView>(`/bookings/${id}/`));
+      } catch (requestError) {
+        if (initial) {
+          setB(null);
+          if (requestError instanceof ApiError && requestError.status === 404) setNotFound(true);
+          else setLoadError(apiErrorMessage(requestError, "Cette réservation ne peut pas être chargée pour le moment."));
+        } else {
+          setActionError(
+            apiErrorMessage(requestError, "L’affichage n’a pas pu être actualisé. Rechargez la page pour voir l’état à jour."),
+          );
+        }
+      } finally {
+        if (initial) setLoading(false);
+      }
+    },
+    [id],
+  );
+
+  useEffect(() => {
+    void load(true);
+  }, [load]);
 
   async function cancel() {
     setBusy(true);
+    setActionError("");
+    setNotice("");
     try {
       await post(`/bookings/${id}/transition/`, { status: "cancelled" });
-      load();
+      setNotice("Votre réservation a été annulée.");
+      await load();
+    } catch (requestError) {
+      setActionError(apiErrorMessage(requestError, "La réservation n’a pas pu être annulée."));
     } finally {
       setBusy(false);
+      setConfirmCancel(false);
     }
   }
 
   async function loadReplacements() {
-    const data = await get<ReplacementSuggestion[]>(`/bookings/${id}/replacements/`).catch(() => []);
-    setRepl(data);
+    setActionError("");
+    setNotice("");
+    setReplState("loading");
+    try {
+      const data = await get<ReplacementSuggestion[]>(`/bookings/${id}/replacements/`);
+      setRepl(Array.isArray(data) ? data : []);
+      setReplState("loaded");
+    } catch (requestError) {
+      setRepl([]);
+      setReplState("idle");
+      setActionError(apiErrorMessage(requestError, "Les artisans de remplacement ne peuvent pas être chargés pour le moment."));
+    }
   }
 
   async function accept(suggestionId: number) {
     setBusy(true);
+    setAcceptingId(suggestionId);
+    setActionError("");
+    setNotice("");
     try {
       await post(`/bookings/${id}/accept-replacement/`, { suggestion_id: suggestionId });
       setRepl([]);
-      load();
+      setReplState("idle");
+      setNotice("Votre réservation est confiée à l’artisan que vous avez choisi.");
+      await load();
+    } catch (requestError) {
+      setActionError(apiErrorMessage(requestError, "Le remplacement n’a pas pu être appliqué."));
     } finally {
       setBusy(false);
+      setAcceptingId(null);
     }
   }
 
-  if (loading) return <p className="text-ash">Chargement…</p>;
-  if (!b) return <Card><p className="text-ash">Réservation introuvable.</p></Card>;
+  if (loading) return <SkeletonPage />;
 
+  if (loadError) {
+    return (
+      <>
+        <PageHeader title="Réservation indisponible" back={{ href: "/client", label: "Mes réservations" }} />
+        <Alert
+          tone="danger"
+          title="Chargement impossible"
+          action={
+            <Button size="sm" variant="outline" onClick={() => void load(true)}>
+              Réessayer
+            </Button>
+          }
+        >
+          {loadError}
+        </Alert>
+      </>
+    );
+  }
+
+  if (notFound || !b) {
+    return (
+      <>
+        <PageHeader title="Réservation introuvable" back={{ href: "/client", label: "Mes réservations" }} />
+        <EmptyState
+          icon={<SearchX aria-hidden />}
+          title="Cette réservation n’existe pas ou n’est plus accessible"
+          description="Retrouvez la liste de vos réservations pour accéder à celle que vous cherchez."
+          actions={<ButtonLink href="/client">Mes réservations</ButtonLink>}
+        />
+      </>
+    );
+  }
+
+  const svc = b.service_detail;
+  const title = svc?.title ?? `Réservation n° ${b.id}`;
   const cancellable = ["pending", "confirmed"].includes(b.status);
+  const finished = b.status === "completed" || b.status === "cancelled";
+
+  const publicName = artisanDisplayName(svc);
+  const firstName = b.handyman_detail?.first_name;
+  const artisan = svc && publicName ? <ArtisanLine service={svc} size={44} /> : firstName || "Non renseigné";
+  const when = formatDateTimeLong(b.booking_date);
+  const place = [b.address, b.city].filter(Boolean).join(", ");
+  const proposed = formatFCFA(b.proposed_price);
+
+  const details: DetailItem[] = [
+    { label: "Artisan", icon: UserRound, value: artisan },
+    { label: "Date et heure", icon: CalendarDays, value: when ?? "Non renseignée" },
+    { label: "Adresse", icon: MapPin, value: place || "Non renseignée" },
+  ];
+  if (svc) details.push({ label: "Tarif du service", icon: Wallet, value: priceLabel(svc) });
+  if (proposed) details.push({ label: "Prix proposé", icon: Wallet, value: proposed });
+  if (b.description?.trim()) {
+    details.push({ label: "Votre demande", icon: FileText, value: <FreeText>{b.description.trim()}</FreeText> });
+  }
+  if (b.handyman_comment?.trim()) {
+    details.push({ label: "Message de l’artisan", icon: MessageSquareText, value: <FreeText>{b.handyman_comment.trim()}</FreeText> });
+  }
 
   return (
-    <div className="max-w-2xl space-y-5">
-      <Card>
-        <div className="flex items-center justify-between">
-          <h2 className="text-xl font-bold">{b.service_detail?.title ?? `Réservation #${b.id}`}</h2>
-          <Badge tone={b.status === "completed" ? "gray" : "primary"}>{b.status}</Badge>
-        </div>
-        <dl className="mt-4 grid grid-cols-2 gap-y-2 text-sm">
-          <dt className="text-ash">Artisan</dt>
-          <dd>{b.handyman_detail?.first_name ?? b.handyman_detail?.username ?? "—"}</dd>
-          <dt className="text-ash">Date</dt>
-          <dd>{b.booking_date ? new Date(b.booking_date).toLocaleString("fr-FR") : "—"}</dd>
-          <dt className="text-ash">Adresse</dt>
-          <dd>{b.address}, {b.city}</dd>
-        </dl>
-        {cancellable && (
-          <div className="mt-5 flex gap-2">
-            <Button variant="ghost" onClick={cancel} disabled={busy}>Annuler la réservation</Button>
-            <Button variant="ghost" onClick={loadReplacements} disabled={busy}>Voir des remplaçants</Button>
-          </div>
-        )}
-      </Card>
+    <>
+      <PageHeader
+        eyebrow={svc?.category_detail?.name}
+        title={title}
+        description={`Réservation n° ${b.id}`}
+        back={{ href: "/client", label: "Mes réservations" }}
+        actions={<StatusBadge kind="booking" status={b.status} />}
+      />
 
-      {repl.length > 0 && (
-        <Card>
-          <h3 className="mb-3 font-bold">Artisans de remplacement suggérés</h3>
-          <div className="grid gap-3">
-            {repl.map((r) => (
-              <div key={r.id} className="flex items-center justify-between rounded-xl border border-slate-100 p-3">
-                <span>{r.suggested_service_detail?.title ?? "Service"} — {r.suggested_service_detail?.handyman_detail?.username}</span>
-                <Button onClick={() => accept(r.id)} disabled={busy}>Choisir</Button>
+      <div ref={feedbackRef} className="mb-6 space-y-3 empty:hidden">
+        {notice ? (
+          <Alert tone="success" onDismiss={() => setNotice("")}>
+            {notice}
+          </Alert>
+        ) : null}
+        {actionError ? (
+          <Alert tone="danger" onDismiss={() => setActionError("")}>
+            {actionError}
+          </Alert>
+        ) : null}
+      </div>
+
+      <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-3">
+        <div className="space-y-6 lg:col-span-2">
+          <Card>
+            <CardHeader title="Avancement" />
+            <BookingProgress status={b.status} />
+          </Card>
+
+          <Card>
+            <CardHeader title="Détails de l’intervention" />
+            <DetailList items={details} />
+          </Card>
+        </div>
+
+        <div className="space-y-6">
+          {cancellable ? (
+            <Card>
+              <CardHeader title="Gérer la réservation" description="Cette réservation n’a pas encore démarré." />
+              <div className="space-y-3">
+                <Button
+                  variant="soft"
+                  block
+                  onClick={() => void loadReplacements()}
+                  loading={replState === "loading"}
+                  disabled={busy}
+                  leftIcon={<Users aria-hidden className="h-4 w-4" />}
+                >
+                  Voir des artisans de remplacement
+                </Button>
+                <Button
+                  variant="outline"
+                  block
+                  onClick={() => setConfirmCancel(true)}
+                  disabled={busy}
+                  leftIcon={<XCircle aria-hidden className="h-4 w-4 text-danger" />}
+                >
+                  Annuler la réservation
+                </Button>
               </div>
-            ))}
-          </div>
-        </Card>
-      )}
-    </div>
+            </Card>
+          ) : null}
+
+          {cancellable && replState === "loaded" && repl.length === 0 ? (
+            <Alert tone="info" title="Aucun remplaçant disponible">
+              Aucun artisan de remplacement n’est disponible pour le moment. Votre réservation reste inchangée.
+            </Alert>
+          ) : null}
+
+          {cancellable && repl.length > 0 ? (
+            <Card>
+              <CardHeader
+                title="Artisans de remplacement"
+                description="Choisissez l’artisan qui reprendra cette intervention."
+              />
+              <ul className="grid grid-cols-1 gap-3">
+                {repl.map((r) => {
+                  const suggested = r.suggested_service_detail;
+                  const name = artisanDisplayName(suggested);
+                  return (
+                    <li key={r.id} className="animate-rise space-y-3 rounded-panel border border-lineSoft bg-canvas p-4">
+                      <p className="font-display text-base font-bold leading-snug text-ink">{suggested?.title ?? "Service"}</p>
+                      {suggested ? <ArtisanLine service={suggested} size={36} /> : null}
+                      <div className="flex items-center justify-between gap-3">
+                        {suggested ? (
+                          <span className="font-display text-base font-extrabold text-primaryDark">{priceLabel(suggested)}</span>
+                        ) : (
+                          <span />
+                        )}
+                        <Button
+                          size="sm"
+                          onClick={() => void accept(r.id)}
+                          disabled={busy}
+                          loading={acceptingId === r.id}
+                          aria-label={name ? `Choisir ${name} pour cette réservation` : "Choisir cet artisan pour cette réservation"}
+                        >
+                          Choisir
+                        </Button>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            </Card>
+          ) : null}
+
+          {svc?.id ? (
+            <Card variant="soft">
+              <p className="font-display text-base font-bold text-ink">
+                {finished ? "Besoin d’un nouveau passage ?" : "Le service réservé"}
+              </p>
+              <p className="mt-1 text-sm text-ash">
+                {finished
+                  ? "Refaites une demande pour ce service depuis sa fiche."
+                  : "Retrouvez la fiche complète du service."}
+              </p>
+              <ButtonLink href={`/client/services/${svc.id}`} variant="outline" block className="mt-4">
+                {finished ? "Réserver à nouveau" : "Voir le service"}
+              </ButtonLink>
+            </Card>
+          ) : null}
+        </div>
+      </div>
+
+      <ConfirmDialog
+        open={confirmCancel}
+        onClose={() => setConfirmCancel(false)}
+        onConfirm={() => void cancel()}
+        tone="danger"
+        loading={busy}
+        title="Annuler cette réservation ?"
+        description="Une réservation annulée ne peut pas être rétablie : il faudra faire une nouvelle demande pour retrouver un créneau."
+        confirmLabel="Oui, annuler"
+        cancelLabel="Garder la réservation"
+      />
+    </>
   );
 }

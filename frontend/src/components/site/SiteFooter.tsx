@@ -1,6 +1,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { BadgeCheck, Navigation, ShieldCheck, Wallet } from "lucide-react";
+import { CONTAINER } from "@/components/ds/layout";
 import { ESCROW_ENABLED } from "@/lib/config";
 import { registerHref } from "@/lib/links";
 
@@ -37,7 +38,7 @@ const TRUST: FooterLink[] = [
 ];
 
 const LINK =
-  "inline-flex min-h-[40px] items-center rounded-lg text-[15px] text-white/70 transition-colors hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent";
+  "inline-flex min-h-[40px] items-center rounded-lg text-[15px] text-white/70 transition-colors duration-base hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent";
 
 function Column({ title, links, id }: { title: string; links: FooterLink[]; id: string }) {
   return (
@@ -70,13 +71,13 @@ export default function SiteFooter({ trades }: { trades?: FooterLink[] }) {
         aria-hidden
         className="pointer-events-none absolute -top-40 left-1/2 h-80 w-[48rem] -translate-x-1/2 rounded-full bg-primary/20 blur-3xl"
       />
-      <div className="relative mx-auto grid w-full max-w-7xl gap-12 px-4 py-16 sm:px-6 md:py-20 lg:grid-cols-12">
+      <div className={`relative grid gap-12 py-16 md:py-20 lg:grid-cols-12 ${CONTAINER}`}>
         <div className="lg:col-span-4">
           <Link
             href="/"
-            className="inline-flex items-center gap-3 rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            className="inline-flex items-center gap-3 rounded-panel focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
           >
-            <span className="grid h-12 w-12 place-items-center rounded-2xl bg-white">
+            <span className="grid h-12 w-12 place-items-center rounded-panel bg-white">
               <Image src="/tratra_logo.webp" alt="Tratra" width={36} height={36} className="h-9 w-9" />
             </span>
             <span aria-hidden className="font-display text-2xl font-extrabold tracking-tight text-white">
@@ -121,7 +122,7 @@ export default function SiteFooter({ trades }: { trades?: FooterLink[] }) {
       </div>
 
       <div className="relative border-t border-white/10">
-        <div className="mx-auto w-full max-w-7xl px-4 py-6 text-sm text-white/60 sm:px-6">
+        <div className={`py-6 text-sm text-white/60 ${CONTAINER}`}>
           <p>© {year} Tratra. Tous droits réservés.</p>
         </div>
       </div>

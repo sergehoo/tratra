@@ -1,12 +1,15 @@
 "use client";
-import Link from "next/link";
 import { ArrowRight, Clock, MapPin } from "lucide-react";
+import { Badge } from "@/components/ds/Badge";
+import { ButtonLink } from "@/components/ds/Button";
+import { Card } from "@/components/ds/Card";
 import { useAuth } from "@/lib/auth";
 import { bookingHref } from "@/lib/links";
 import { formatDistance, formatDuration, priceLabel } from "@/lib/format";
 import { iconForCategory } from "@/lib/trades";
 import type { Service } from "@/lib/types";
-import { Avatar, OnlineDot, RatingStars, VerifiedBadge, useImageFallback } from "./primitives";
+import { Avatar, RatingStars, VerifiedBadge, useImageFallback } from "./primitives";
+import { artisanDisplayName } from "@/lib/artisan";
 
 /** Première image réelle du service (galerie, bannière ou URL), sinon null. */
 export function serviceImage(service: Service): string | null {
@@ -20,13 +23,13 @@ export default function ServiceCard({ service }: { service: Service }) {
   const img = useImageFallback(image);
   const Icon = iconForCategory(service.category_detail?.slug);
   const artisan = service.artisan;
-  const name = artisan?.display_name ?? service.handyman_detail?.first_name ?? "Artisan";
+  const name = artisanDisplayName(service) ?? "Artisan";
   const duration = formatDuration(service.duration);
   const distance = formatDistance(service.distance_km);
   const isQuote = service.price_type === "quote" || !service.price;
 
   return (
-    <article className="group flex h-full flex-col overflow-hidden rounded-3xl border border-slate-100 bg-white shadow-soft transition duration-300 hover:-translate-y-1 hover:shadow-strong">
+    <Card as="article" padding="none" interactive className="group flex h-full flex-col overflow-hidden">
       <div className="relative aspect-[4/3] overflow-hidden">
         {!img.failed ? (
           // Repli sur la tuile catégorie si l'image ne charge pas (URL expirée…).
@@ -38,7 +41,7 @@ export default function ServiceCard({ service }: { service: Service }) {
             alt={service.images?.[0]?.alt_text || service.title}
             loading="lazy"
             decoding="async"
-            className="h-full w-full object-cover transition duration-500 group-hover:scale-105"
+            className="h-full w-full object-cover transition duration-slow ease-emphasized group-hover:scale-105"
           />
         ) : (
           <div aria-hidden className="grid h-full w-full place-items-center bg-gradient-to-br from-primarySoft via-white to-accentSoft">
@@ -46,16 +49,15 @@ export default function ServiceCard({ service }: { service: Service }) {
           </div>
         )}
         {service.category_detail ? (
-          <span className="absolute left-3 top-3 inline-flex items-center gap-1.5 rounded-full bg-white/90 px-3 py-1 text-xs font-semibold text-ink shadow-sm backdrop-blur">
+          <span className="absolute left-3 top-3 inline-flex items-center gap-1.5 rounded-full bg-white/90 px-3 py-1 text-xs font-semibold text-ink shadow-hair backdrop-blur">
             <Icon aria-hidden className="h-3.5 w-3.5 text-primary" />
             {service.category_detail.name}
           </span>
         ) : null}
         {distance ? (
-          <span className="absolute right-3 top-3 inline-flex items-center gap-1 rounded-full bg-night/80 px-2.5 py-1 text-xs font-semibold text-white backdrop-blur">
-            <MapPin aria-hidden className="h-3.5 w-3.5 text-accent" />
+          <Badge tone="night" icon={<MapPin className="text-accent" />} className="absolute right-3 top-3">
             {distance}
-          </span>
+          </Badge>
         ) : null}
       </div>
 
@@ -72,7 +74,7 @@ export default function ServiceCard({ service }: { service: Service }) {
           ) : null}
         </div>
 
-        <div className="mt-auto flex items-center gap-3 border-t border-slate-100 pt-3">
+        <div className="mt-auto flex items-center gap-3 border-t border-lineSoft pt-3">
           <Avatar name={name} photo={artisan?.photo} size={36} online={artisan?.online} />
           <div className="min-w-0 flex-1">
             <p className="flex items-center gap-1.5 truncate text-sm font-semibold text-ink">
@@ -80,35 +82,40 @@ export default function ServiceCard({ service }: { service: Service }) {
               {artisan?.is_verified ? (
                 <VerifiedBadge className="!px-1.5" label="Vérifié" />
               ) : artisan ? (
-                <span className="shrink-0 rounded-full bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium text-ash">
+                <Badge tone="gray" className="shrink-0 !px-1.5 !py-0.5 !text-[11px] !font-medium">
                   Vérification en cours
-                </span>
+                </Badge>
               ) : null}
             </p>
             <p className="flex flex-wrap items-center gap-x-2 text-xs text-ash">
               <RatingStars rating={artisan?.rating} />
               {artisan && artisan.completed_jobs > 0 ? <span>{artisan.completed_jobs} missions</span> : null}
               {artisan?.commune ? <span className="truncate">{artisan.commune}</span> : null}
-              {artisan?.online ? <OnlineDot /> : null}
+              {artisan?.online ? (
+                <Badge tone="success" pulse>
+                  En ligne
+                </Badge>
+              ) : null}
             </p>
           </div>
         </div>
 
         {href ? (
-          <Link
+          <ButtonLink
             href={href}
-            className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-2xl bg-primary px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-primaryDark focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
+            block
+            className="!shadow-hair"
             aria-label={`${isQuote ? "Demander un devis" : "Réserver"} : ${service.title}`}
+            rightIcon={<ArrowRight aria-hidden className="h-4 w-4" />}
           >
             {isQuote ? "Demander un devis" : "Réserver"}
-            <ArrowRight aria-hidden className="h-4 w-4" />
-          </Link>
+          </ButtonLink>
         ) : (
-          <p className="rounded-2xl bg-slate-50 px-4 py-2.5 text-center text-xs text-ash">
+          <p className="rounded-control bg-canvas px-4 py-2.5 text-center text-xs text-ash">
             Réservation ouverte aux comptes client et entreprise.
           </p>
         )}
       </div>
-    </article>
+    </Card>
   );
 }

@@ -1,6 +1,5 @@
 "use client";
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
-import Link from "next/link";
 import {
   ArrowRight,
   CalendarClock,
@@ -13,14 +12,17 @@ import {
   UserRound,
   WifiOff,
 } from "lucide-react";
-import { Avatar, EmptyState } from "@/components/market/primitives";
+import { Avatar } from "@/components/ds/Avatar";
+import { Button, ButtonLink } from "@/components/ds/Button";
+import { Card } from "@/components/ds/Card";
+import { EmptyState } from "@/components/ds/EmptyState";
 import ActiveFilters, { type ActiveChip } from "@/components/search/ActiveFilters";
-import { FOCUS_RING } from "@/components/search/controls";
 import FilterSheet from "@/components/search/FilterSheet";
 import FiltersPanel, { type CategoriesStatus } from "@/components/search/FiltersPanel";
 import ResultsToolbar from "@/components/search/ResultsToolbar";
 import SearchHero from "@/components/search/SearchHero";
 import SearchResults from "@/components/search/SearchResults";
+import { RESULTS_LAYOUT, RESULTS_SHELL } from "@/components/search/SearchSkeleton";
 import {
   DEFAULT_RADIUS,
   MAX_RADIUS,
@@ -57,9 +59,6 @@ const FILTER_DEFAULTS: Partial<SearchState> = {
 };
 
 const CATEGORIES_PATH = `/categories/${qs({ page_size: 100, ordering: "name" })}`;
-
-const BTN_PRIMARY = `inline-flex min-h-[48px] items-center justify-center gap-2 rounded-2xl bg-primary px-5 text-sm font-bold text-white shadow-glow transition hover:bg-primaryDark ${FOCUS_RING}`;
-const BTN_SECONDARY = `inline-flex min-h-[48px] items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-5 text-sm font-semibold text-ink transition hover:border-primary/40 hover:bg-slate-50 ${FOCUS_RING}`;
 
 function joinFr(parts: string[]): string {
   if (parts.length <= 1) return parts.join("");
@@ -240,13 +239,17 @@ export default function SearchClient() {
         description="Les artisans Tratra publient actuellement leurs prestations. Revenez très vite : elles apparaîtront ici dès leur mise en ligne."
         actions={
           <>
-            <Link href={registerHref("handyman")} className={BTN_PRIMARY}>
+            <ButtonLink
+              href={registerHref("handyman")}
+              size="lg"
+              className="!whitespace-normal text-center"
+              rightIcon={<ArrowRight aria-hidden className="h-4 w-4 shrink-0" />}
+            >
               Vous êtes artisan ? Proposez vos services
-              <ArrowRight aria-hidden className="h-4 w-4" />
-            </Link>
-            <Link href="/" className={BTN_SECONDARY}>
+            </ButtonLink>
+            <ButtonLink href="/" variant="outline" size="lg">
               Retour à l&apos;accueil
-            </Link>
+            </ButtonLink>
           </>
         }
       />
@@ -258,9 +261,9 @@ export default function SearchClient() {
         title="Aucune prestation de cet artisan pour ces critères"
         description="Cet artisan n'a pas de prestation publiée correspondant à votre recherche."
         actions={
-          <button type="button" onClick={() => update({ handyman: "" })} className={BTN_PRIMARY}>
+          <Button type="button" size="lg" onClick={() => update({ handyman: "" })}>
             Voir tous les artisans
-          </button>
+          </Button>
         }
       />
     );
@@ -271,10 +274,14 @@ export default function SearchClient() {
         title="Aucun artisan en ligne pour ces critères pour le moment"
         description="Les artisans hors ligne peuvent intervenir à la date de votre choix : planifiez votre intervention."
         actions={
-          <button type="button" onClick={() => update({ online: false })} className={BTN_PRIMARY}>
-            Planifier une intervention
-            <ArrowRight aria-hidden className="h-4 w-4" />
-          </button>
+          <Button
+            type="button"
+            size="lg"
+            onClick={() => update({ online: false })}
+            rightIcon={<ArrowRight aria-hidden className="h-4 w-4" />}
+          >
+            Voir les artisans hors ligne
+          </Button>
         }
       />
     );
@@ -287,18 +294,23 @@ export default function SearchClient() {
         actions={
           <>
             {state.radius < MAX_RADIUS ? (
-              <button type="button" onClick={() => update({ radius: MAX_RADIUS })} className={BTN_PRIMARY}>
-                <LocateFixed aria-hidden className="h-4 w-4" />
+              <Button
+                type="button"
+                size="lg"
+                onClick={() => update({ radius: MAX_RADIUS })}
+                leftIcon={<LocateFixed aria-hidden className="h-4 w-4" />}
+              >
                 Élargir à {MAX_RADIUS} km
-              </button>
+              </Button>
             ) : null}
-            <button
+            <Button
               type="button"
+              size="lg"
+              variant={state.radius < MAX_RADIUS ? "outline" : "primary"}
               onClick={clearLocation}
-              className={state.radius < MAX_RADIUS ? BTN_SECONDARY : BTN_PRIMARY}
             >
               Rechercher partout
-            </button>
+            </Button>
           </>
         }
       />
@@ -319,10 +331,14 @@ export default function SearchClient() {
           )
         }
         actions={
-          <button type="button" onClick={() => reset()} className={BTN_PRIMARY}>
-            <RotateCcw aria-hidden className="h-4 w-4" />
+          <Button
+            type="button"
+            size="lg"
+            onClick={() => reset()}
+            leftIcon={<RotateCcw aria-hidden className="h-4 w-4" />}
+          >
             Retirer les filtres
-          </button>
+          </Button>
         }
       />
     );
@@ -335,19 +351,23 @@ export default function SearchClient() {
       description="Le service n'a pas pu répondre à cette recherche. Vérifiez votre connexion puis réessayez."
       actions={
         <>
-          <button type="button" onClick={search.retry} className={BTN_PRIMARY}>
-            <RotateCcw aria-hidden className="h-4 w-4" />
+          <Button
+            type="button"
+            size="lg"
+            onClick={search.retry}
+            leftIcon={<RotateCcw aria-hidden className="h-4 w-4" />}
+          >
             Réessayer
-          </button>
+          </Button>
           {/* Un lien partagé peut viser un artisan ou un critère qui n'existe plus. */}
           {state.handyman ? (
-            <button type="button" onClick={() => update({ handyman: "" })} className={BTN_SECONDARY}>
+            <Button type="button" variant="outline" size="lg" onClick={() => update({ handyman: "" })}>
               Voir tous les artisans
-            </button>
+            </Button>
           ) : hasAnyCriteria ? (
-            <button type="button" onClick={() => reset()} className={BTN_SECONDARY}>
+            <Button type="button" variant="outline" size="lg" onClick={() => reset()}>
               Retirer les filtres
-            </button>
+            </Button>
           ) : null}
         </>
       }
@@ -368,32 +388,35 @@ export default function SearchClient() {
     <>
       <SearchHero state={state} update={update} trades={trades} categoriesStatus={categoriesStatus} />
 
-      <div className="mx-auto max-w-7xl px-4 pb-20 pt-8 sm:px-6 lg:px-8 lg:pt-10">
-        <div className="lg:grid lg:grid-cols-[288px_minmax(0,1fr)] lg:gap-8">
+      <div className={RESULTS_SHELL}>
+        <div className={RESULTS_LAYOUT}>
           <aside className="hidden lg:block" aria-labelledby={asideTitleId}>
-            <div className="sticky top-28 max-h-[calc(100vh-8rem)] overflow-y-auto rounded-3xl border border-slate-100 bg-white p-5 shadow-soft [scrollbar-width:thin]">
+            <Card
+              padding="none"
+              className="sticky top-28 max-h-[calc(100vh-8rem)] overflow-y-auto p-5 [scrollbar-width:thin]"
+            >
               <div className="mb-6 flex items-center justify-between gap-2">
                 <h2 id={asideTitleId} className="flex items-center gap-2 font-display text-lg font-extrabold text-ink">
                   <SlidersHorizontal aria-hidden className="h-5 w-5 text-primary" />
                   Filtres
                 </h2>
                 {filterCount > 0 ? (
-                  <button
-                    type="button"
-                    onClick={resetFilters}
-                    className={`-mr-2 inline-flex min-h-[44px] items-center rounded-xl px-2 text-sm font-semibold text-primaryDark hover:underline ${FOCUS_RING}`}
-                  >
+                  <Button type="button" variant="soft" onClick={resetFilters}>
                     Effacer
-                  </button>
+                  </Button>
                 ) : null}
               </div>
               <FiltersPanel {...panelProps} />
-            </div>
+            </Card>
           </aside>
 
           <section aria-labelledby={resultsTitleId} className="min-w-0">
             {state.handyman && listMode ? (
-              <div className="relative mb-6 flex flex-col gap-4 overflow-hidden rounded-3xl bg-night p-5 text-white shadow-strong sm:flex-row sm:items-center">
+              <Card
+                variant="night"
+                padding="md"
+                className="relative mb-6 flex flex-col gap-4 overflow-hidden sm:flex-row sm:items-center"
+              >
                 <div
                   aria-hidden
                   className="pointer-events-none absolute -right-16 -top-16 h-48 w-48 rounded-full bg-primary/40 blur-3xl"
@@ -407,26 +430,27 @@ export default function SearchClient() {
                     className="relative"
                   />
                 ) : (
-                  <span className="relative grid h-14 w-14 shrink-0 place-items-center rounded-2xl bg-white/10 text-accent">
+                  <span className="relative grid h-14 w-14 shrink-0 place-items-center rounded-panel bg-white/10 text-accent">
                     <UserRound aria-hidden className="h-6 w-6" />
                   </span>
                 )}
                 <div className="relative min-w-0 flex-1">
-                  <p className="text-xs font-bold uppercase tracking-[0.14em] text-accent">Prestations d&apos;un artisan</p>
+                  <p className="text-eyebrow uppercase text-accent">Prestations d&apos;un artisan</p>
                   <p className="mt-0.5 truncate font-display text-lg font-bold">
                     {handymanArtisan?.display_name ?? "Artisan sélectionné"}
                   </p>
                   {handymanArtisan?.commune ? <p className="text-sm text-white/70">{handymanArtisan.commune}</p> : null}
                 </div>
-                <button
+                <Button
                   type="button"
+                  variant="accent"
+                  className="relative"
                   onClick={() => update({ handyman: "" })}
-                  className="relative inline-flex min-h-[44px] items-center justify-center gap-2 rounded-xl bg-white px-4 text-sm font-bold text-night transition hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-night"
+                  rightIcon={<ArrowRight aria-hidden className="h-4 w-4" />}
                 >
                   Voir tous les artisans
-                  <ArrowRight aria-hidden className="h-4 w-4" />
-                </button>
-              </div>
+                </Button>
+              </Card>
             ) : null}
 
             <ResultsToolbar
@@ -446,9 +470,12 @@ export default function SearchClient() {
             <ActiveFilters chips={chips} onResetAll={() => reset()} />
 
             {ignored.length ? (
-              <div
+              <Card
+                variant="accent"
+                radius="panel"
+                padding="sm"
                 role="note"
-                className="mt-5 flex flex-col gap-3 rounded-2xl border border-accent/50 bg-accentSoft p-4 sm:flex-row sm:items-center"
+                className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center"
               >
                 <LocateFixed aria-hidden className="h-5 w-5 shrink-0 text-night" />
                 <p className="min-w-0 flex-1 text-sm text-ink [overflow-wrap:anywhere]">
@@ -456,24 +483,18 @@ export default function SearchClient() {
                   {ignored.length > 1 ? "ne s'appliquent" : "ne s'applique"} pas.
                 </p>
                 <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={clearLocation}
-                    className={`inline-flex min-h-[44px] items-center rounded-xl bg-night px-4 text-sm font-semibold text-white transition hover:bg-nightSoft ${FOCUS_RING}`}
-                  >
+                  <Button type="button" variant="night" onClick={clearLocation}>
                     Rechercher partout
-                  </button>
-                  <button
+                  </Button>
+                  <Button
                     type="button"
-                    onClick={() =>
-                      update({ q: "", priceType: "", sort: "recent", handyman: "" })
-                    }
-                    className={`inline-flex min-h-[44px] items-center rounded-xl border border-night/15 bg-white px-4 text-sm font-semibold text-ink transition hover:bg-slate-50 ${FOCUS_RING}`}
+                    variant="outlineNight"
+                    onClick={() => update({ q: "", priceType: "", sort: "recent", handyman: "" })}
                   >
                     Retirer ces critères
-                  </button>
+                  </Button>
                 </div>
-              </div>
+              </Card>
             ) : null}
 
             <div className="mt-6">
@@ -484,13 +505,17 @@ export default function SearchClient() {
                   description="La liste des métiers est nécessaire pour appliquer votre filtre. Vérifiez votre connexion puis réessayez."
                   actions={
                     <>
-                      <button type="button" onClick={cats.reload} className={BTN_PRIMARY}>
-                        <RotateCcw aria-hidden className="h-4 w-4" />
+                      <Button
+                        type="button"
+                        size="lg"
+                        onClick={cats.reload}
+                        leftIcon={<RotateCcw aria-hidden className="h-4 w-4" />}
+                      >
                         Réessayer
-                      </button>
-                      <button type="button" onClick={() => update({ metier: [] })} className={BTN_SECONDARY}>
+                      </Button>
+                      <Button type="button" variant="outline" size="lg" onClick={() => update({ metier: [] })}>
                         Voir tous les métiers
-                      </button>
+                      </Button>
                     </>
                   }
                 />

@@ -1,8 +1,11 @@
 "use client";
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
-import { CircleAlert, LayoutGrid, Loader2, LocateFixed, MapPin, Search, X } from "lucide-react";
+import { CircleAlert, LayoutGrid, LocateFixed, MapPin, Search, X } from "lucide-react";
+import { buttonClass } from "@/components/ds/Button";
+import { cx } from "@/components/ds/cx";
+import { Spinner } from "@/components/ds/Spinner";
 import type { ResolvedTrade } from "@/lib/trades";
-import { HeroBackdrop, SearchIntro } from "./SearchSkeleton";
+import { HERO_SHELL, HeroBackdrop, SEARCH_CARD, SearchIntro, TradeChipsSkeleton } from "./SearchSkeleton";
 import type { CategoriesStatus } from "./FiltersPanel";
 import {
   DEFAULT_RADIUS,
@@ -44,20 +47,20 @@ function TradeChip({
       type="button"
       aria-pressed={pressed}
       onClick={onClick}
-      className={`inline-flex min-h-[44px] shrink-0 items-center gap-2 whitespace-nowrap rounded-full border px-4 text-sm font-semibold transition ${RING_ON_GREEN} ${
+      className={`inline-flex min-h-[44px] shrink-0 items-center gap-2 whitespace-nowrap rounded-full border px-4 text-sm font-semibold transition duration-base ease-emphasized ${RING_ON_GREEN} ${
         on
-          ? "border-accent bg-accent text-night shadow-[0_10px_28px_rgba(246,201,14,0.35)]"
+          ? "border-accent bg-accent text-ink shadow-glowAccent"
           : pressed === "mixed"
             ? "border-accent/70 bg-white/15 text-white"
             : "border-white/15 bg-white/10 text-white hover:border-white/30 hover:bg-white/20"
       }`}
     >
-      <Icon aria-hidden className={`h-4 w-4 ${on ? "text-night" : "text-accent"}`} />
+      <Icon aria-hidden className={`h-4 w-4 ${on ? "text-ink" : "text-accent"}`} />
       {label}
       {typeof count === "number" && count > 0 ? (
         <span
           className={`rounded-full px-1.5 py-0.5 text-[11px] font-bold leading-none ${
-            on ? "bg-night/10 text-night" : "bg-white/15 text-white"
+            on ? "bg-night/10 text-ink" : "bg-white/15 text-white"
           }`}
         >
           <span className="sr-only">, </span>
@@ -154,24 +157,24 @@ export default function SearchHero({
   }
 
   const fieldShell =
-    "group relative flex min-h-[60px] min-w-0 items-center gap-3 rounded-2xl px-4 transition hover:bg-slate-50 focus-within:bg-slate-50 focus-within:ring-2 focus-within:ring-primary/40";
-  const fieldLabel = "block text-[11px] font-bold uppercase tracking-[0.12em] text-ash";
+    "relative flex min-h-[60px] min-w-0 items-center gap-3 rounded-panel px-4 transition duration-base hover:bg-canvas focus-within:bg-canvas focus-within:ring-2 focus-within:ring-primary/40";
+  const fieldLabel = "block text-eyebrow uppercase text-primaryDark";
   const fieldInput =
-    "w-full min-w-0 bg-transparent text-[15px] font-medium text-ink outline-none placeholder:font-normal placeholder:text-slate-400 [&::-webkit-search-cancel-button]:appearance-none";
+    "w-full min-w-0 bg-transparent text-[15px] font-medium text-ink outline-none placeholder:font-normal placeholder:text-fog [&::-webkit-search-cancel-button]:appearance-none";
   const clearBtn =
-    "-mr-2 grid h-11 w-11 shrink-0 place-items-center rounded-full text-ash transition hover:bg-slate-200/70 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary";
+    "-mr-2 grid h-11 w-11 shrink-0 place-items-center rounded-full text-ash transition duration-base hover:bg-line hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary";
 
   return (
     <section className="relative isolate overflow-hidden">
       <HeroBackdrop />
-      <div className="relative mx-auto max-w-7xl px-4 pb-7 pt-8 sm:px-6 sm:pt-12 lg:px-8 lg:pb-9">
+      <div className={HERO_SHELL}>
         <SearchIntro />
 
         <form
           role="search"
           aria-label="Rechercher une prestation"
           onSubmit={submit}
-          className="mt-5 rounded-3xl bg-white p-2 shadow-strong ring-1 ring-black/5 sm:mt-8"
+          className={SEARCH_CARD}
         >
           <div className="flex flex-col gap-2 lg:flex-row lg:items-stretch">
             <div className="flex min-w-0 flex-col gap-2 sm:flex-row lg:flex-1">
@@ -200,7 +203,7 @@ export default function SearchHero({
                 ) : null}
               </div>
 
-              <span aria-hidden className="hidden w-px self-stretch bg-slate-100 sm:my-3 sm:block" />
+              <span aria-hidden className="hidden w-px self-stretch bg-line sm:my-3 sm:block" />
 
               <div className={`${fieldShell} sm:flex-1`}>
                 <MapPin aria-hidden className="h-5 w-5 shrink-0 text-primary" />
@@ -235,29 +238,30 @@ export default function SearchHero({
                 disabled={locating}
                 aria-pressed={located}
                 aria-busy={locating || undefined}
-                className={`inline-flex min-h-[52px] min-w-0 flex-1 items-center justify-center gap-2 rounded-2xl px-4 text-sm font-semibold transition disabled:cursor-wait lg:min-h-[60px] lg:flex-none ${
-                  located
-                    ? "bg-night text-white hover:bg-nightSoft"
-                    : "bg-primarySoft text-primaryDark hover:bg-primary/15"
-                } focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2`}
+                className={buttonClass(
+                  located ? "night" : "soft",
+                  "lg",
+                  cx(
+                    "min-w-0 flex-1 disabled:!cursor-wait disabled:!opacity-100 lg:min-h-[60px] lg:flex-none",
+                    // `night` prévoit un liseré jaune : sur la carte blanche on garde un liseré blanc.
+                    located && "focus-visible:!ring-offset-white",
+                  ),
+                )}
               >
                 {locating ? (
-                  <Loader2 aria-hidden className="h-4 w-4 animate-spin" />
+                  <Spinner />
                 ) : (
                   <LocateFixed aria-hidden className={`h-4 w-4 ${located ? "text-accent" : ""}`} />
                 )}
                 <span className="truncate">{locating ? "Localisation…" : "Autour de moi"}</span>
                 {located && !locating ? (
-                  <span className="rounded-full bg-accent px-2 py-0.5 text-[11px] font-bold text-night">
+                  <span className="rounded-full bg-accent px-2 py-0.5 text-[11px] font-bold text-ink">
                     {state.radius} km
                   </span>
                 ) : null}
                 {located && !locating ? <X aria-hidden className="h-3.5 w-3.5 text-white/60" /> : null}
               </button>
-              <button
-                type="submit"
-                className="inline-flex min-h-[52px] min-w-[52px] items-center justify-center gap-2 rounded-2xl bg-accent px-4 text-sm font-bold text-night shadow-[0_10px_28px_rgba(246,201,14,0.35)] transition hover:bg-accentDark focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-night focus-visible:ring-offset-2 lg:min-h-[60px] lg:px-6"
-              >
+              <button type="submit" className={buttonClass("primary", "lg", "min-w-[52px] lg:min-h-[60px]")}>
                 <Search aria-hidden className="h-5 w-5" />
                 <span className="sr-only sm:not-sr-only">Rechercher</span>
               </button>
@@ -268,7 +272,7 @@ export default function SearchHero({
         {geoError ? (
           <div
             role="alert"
-            className="mt-3 flex items-start gap-3 rounded-2xl border border-white/15 bg-night/35 px-4 py-3 text-sm text-white backdrop-blur"
+            className="mt-3 flex items-start gap-3 rounded-panel border border-white/15 bg-night/35 px-4 py-3 text-sm text-white backdrop-blur"
           >
             <CircleAlert aria-hidden className="mt-0.5 h-4 w-4 shrink-0 text-accent" />
             <p className="flex-1">{geoError}</p>
@@ -284,11 +288,7 @@ export default function SearchHero({
         ) : null}
 
         {categoriesStatus === "loading" ? (
-          <div className="mt-5 flex gap-2 overflow-hidden" aria-hidden>
-            {Array.from({ length: 6 }, (_, i) => (
-              <span key={i} className="h-11 w-32 shrink-0 animate-pulse rounded-full bg-white/10" />
-            ))}
-          </div>
+          <TradeChipsSkeleton />
         ) : trades.length ? (
           <div className="mt-5">
             <p id={familiesLabelId} className="sr-only">

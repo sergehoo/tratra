@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { RotateCw } from "lucide-react";
+import { Button } from "@/components/ds/Button";
 
 /**
  * Recharge la page demandée (le service worker sert /offline à la place de
@@ -25,14 +26,14 @@ export default function RetryButton() {
   }, []);
 
   return (
-    <button
+    <Button
       type="button"
+      size="lg"
       onClick={retry}
-      disabled={retrying}
-      className="inline-flex min-h-[48px] items-center justify-center gap-2 rounded-xl bg-primary px-6 py-3 font-semibold text-white shadow-glow transition hover:bg-primaryDark focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 disabled:cursor-wait disabled:opacity-80"
+      loading={retrying}
+      leftIcon={<RotateCw aria-hidden className="h-5 w-5" />}
     >
-      <RotateCw className={`h-5 w-5 ${retrying ? "animate-spin" : ""}`} aria-hidden="true" />
       {retrying ? "Nouvelle tentative…" : "Réessayer"}
-    </button>
+    </Button>
   );
 }

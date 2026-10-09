@@ -1,11 +1,13 @@
 "use client";
 import type { ReactNode } from "react";
 import { m } from "framer-motion";
-import { ChevronDown, Loader2, RotateCcw } from "lucide-react";
+import { ChevronDown, RotateCcw } from "lucide-react";
+import { Alert } from "@/components/ds/Alert";
+import { Button } from "@/components/ds/Button";
+import { DURATION, EASE } from "@/components/ds/motion";
 import ServiceCard from "@/components/market/ServiceCard";
 import { CardGridSkeleton } from "@/components/market/Skeletons";
 import { formatCount } from "@/lib/format";
-import { FOCUS_RING } from "./controls";
 import { RESULTS_GRID } from "./SearchSkeleton";
 import { PAGE_SIZE } from "./useSearchState";
 import type { ServiceSearch } from "./useServiceSearch";
@@ -37,7 +39,7 @@ export default function SearchResults({
     <div>
       <div
         aria-busy={pending || undefined}
-        className={`${RESULTS_GRID} transition-opacity duration-300 ${pending ? "pointer-events-none opacity-50" : ""}`}
+        className={`${RESULTS_GRID} transition-opacity duration-base ${pending ? "pointer-events-none opacity-50" : ""}`}
       >
         {items.map((service, i) => (
           <m.div
@@ -45,7 +47,7 @@ export default function SearchResults({
             className="h-full"
             initial={{ opacity: 0, y: 16 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1], delay: Math.min(i % PAGE_SIZE, 8) * 0.04 }}
+            transition={{ duration: DURATION.slow, ease: EASE, delay: Math.min(i % PAGE_SIZE, 8) * 0.04 }}
           >
             <ServiceCard service={service} />
           </m.div>
@@ -61,9 +63,9 @@ export default function SearchResults({
               <strong className="font-semibold text-ink">{formatCount(items.length)}</strong> sur{" "}
               {formatCount(total)} prestation{total > 1 ? "s" : ""}
             </p>
-            <div aria-hidden className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-200">
+            <div aria-hidden className="mt-2 h-1.5 overflow-hidden rounded-full bg-line">
               <div
-                className="h-full rounded-full bg-gradient-to-r from-primary to-accent transition-all duration-500"
+                className="h-full rounded-full bg-gradient-to-r from-primary to-accent transition-[width] duration-slow ease-emphasized"
                 style={{ width: `${progress}%` }}
               />
             </div>
@@ -71,35 +73,24 @@ export default function SearchResults({
         ) : null}
 
         {more === "error" ? (
-          <p role="alert" className="text-sm font-medium text-red-700">
+          <Alert tone="danger" className="w-full max-w-md">
             Impossible de charger la suite des résultats. Vérifiez votre connexion.
-          </p>
+          </Alert>
         ) : null}
 
         {hasMore ? (
-          <button
+          <Button
             type="button"
+            variant="soft"
+            size="lg"
             onClick={loadMore}
-            disabled={more === "loading" || pending}
-            className={`inline-flex min-h-[48px] items-center gap-2 rounded-2xl border-2 border-primary bg-white px-6 text-sm font-bold text-primaryDark transition hover:bg-primary hover:text-white disabled:cursor-wait disabled:opacity-60 ${FOCUS_RING}`}
+            loading={more === "loading"}
+            disabled={pending}
+            leftIcon={more === "error" ? <RotateCcw aria-hidden className="h-4 w-4" /> : undefined}
+            rightIcon={more === "idle" ? <ChevronDown aria-hidden className="h-4 w-4" /> : undefined}
           >
-            {more === "loading" ? (
-              <>
-                <Loader2 aria-hidden className="h-4 w-4 animate-spin" />
-                Chargement…
-              </>
-            ) : more === "error" ? (
-              <>
-                <RotateCcw aria-hidden className="h-4 w-4" />
-                Réessayer
-              </>
-            ) : (
-              <>
-                Charger plus
-                <ChevronDown aria-hidden className="h-4 w-4" />
-              </>
-            )}
-          </button>
+            {more === "loading" ? "Chargement…" : more === "error" ? "Réessayer" : "Charger plus"}
+          </Button>
         ) : null}
       </div>
     </div>

@@ -118,7 +118,7 @@ export function DataTable<T>({
       </div>
 
       {/* Mobile : cartes empilées */}
-      <ul className="grid gap-3 md:hidden">
+      <ul className="grid grid-cols-1 gap-3 md:hidden">
         {rows.map((row) => {
           const href = rowHref?.(row);
           const body = (

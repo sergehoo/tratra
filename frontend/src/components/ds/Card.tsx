@@ -122,7 +122,7 @@ export function Stat({
       <div className="min-w-0">
         <p className="font-display text-3xl font-extrabold leading-none tracking-tight text-ink">{value}</p>
         <p className="mt-1.5 text-sm font-medium text-ash">{label}</p>
-        {hint ? <p className="mt-1 text-xs text-fog">{hint}</p> : null}
+        {hint ? <p className="mt-1 text-xs text-ash">{hint}</p> : null}
       </div>
     </Card>
   );

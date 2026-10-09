@@ -1,6 +1,9 @@
 "use client";
 import { useId, useMemo } from "react";
-import { BadgeCheck, ChevronDown, LocateFixed, RotateCcw, Zap } from "lucide-react";
+import { BadgeCheck, LocateFixed, RotateCcw, TriangleAlert, Zap } from "lucide-react";
+import { Alert } from "@/components/ds/Alert";
+import { Button } from "@/components/ds/Button";
+import { CONTROL, Select } from "@/components/ds/Field";
 import type { Category } from "@/lib/types";
 import type { ResolvedTrade } from "@/lib/trades";
 import { FilterSection, FOCUS_RING, Segmented, SwitchButton } from "./controls";
@@ -91,7 +94,7 @@ function PriceInput({
           onKeyDown={(e) => {
             if (e.key === "Enter") flush();
           }}
-          className="min-h-[44px] w-full rounded-xl border border-slate-200 bg-white pl-3 pr-12 text-sm font-semibold text-ink outline-none transition placeholder:text-slate-300 focus:border-primary focus:ring-4 focus:ring-primary/15 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:opacity-60"
+          className={`${CONTROL} min-h-[44px] pl-3 pr-12 font-semibold`}
         />
         <span
           aria-hidden
@@ -133,16 +136,15 @@ export default function FiltersPanel({
   return (
     <div className="space-y-7">
       <FilterSection title="Métier" titleId={ids.category}>
-        <div className="relative">
+        <div>
           <label htmlFor={`${ids.category}-select`} className="sr-only">
             Catégorie de prestation
           </label>
-          <select
+          <Select
             id={`${ids.category}-select`}
             value={categoriesStatus === "ready" ? selectValue : ""}
             disabled={categoriesStatus !== "ready"}
             onChange={(e) => update({ metier: e.target.value ? [e.target.value] : [] })}
-            className="min-h-[48px] w-full appearance-none rounded-xl border border-slate-200 bg-white pl-3.5 pr-10 text-sm font-semibold text-ink outline-none transition focus:border-primary focus:ring-4 focus:ring-primary/15 disabled:cursor-wait disabled:opacity-60"
           >
             <option value="">
               {categoriesStatus === "loading" ? "Chargement des métiers…" : "Toutes les catégories"}
@@ -161,11 +163,7 @@ export default function FiltersPanel({
                 ))}
               </optgroup>
             ))}
-          </select>
-          <ChevronDown
-            aria-hidden
-            className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ash"
-          />
+          </Select>
         </div>
         {categoriesStatus === "error" ? (
           <p className="flex flex-wrap items-center gap-x-2 text-xs text-ash">
@@ -215,22 +213,24 @@ export default function FiltersPanel({
       ) : null}
 
       {distanceSorted ? (
-        <div className="rounded-2xl border border-primary/15 bg-primarySoft/60 p-4">
-          <p className="flex items-start gap-2 text-sm text-primaryDark">
-            <LocateFixed aria-hidden className="mt-0.5 h-4 w-4 shrink-0" />
-            <span>
-              Autour de vous, les résultats sont classés <strong>par distance</strong>. Le type de tarif et le tri
-              s&apos;appliquent à la recherche sans localisation.
-            </span>
-          </p>
-          <button
-            type="button"
-            onClick={() => update({ lat: null, lng: null, radius: DEFAULT_RADIUS })}
-            className={`mt-3 inline-flex min-h-[44px] items-center rounded-xl bg-white px-3.5 text-sm font-semibold text-primaryDark shadow-sm ring-1 ring-primary/20 transition hover:bg-primarySoft ${FOCUS_RING}`}
-          >
-            Rechercher sans localisation
-          </button>
-        </div>
+        <Alert
+          tone="brand"
+          icon={<LocateFixed />}
+          action={
+            <Button
+              type="button"
+              variant="outline"
+              block
+              className="!whitespace-normal text-center"
+              onClick={() => update({ lat: null, lng: null, radius: DEFAULT_RADIUS })}
+            >
+              Rechercher sans localisation
+            </Button>
+          }
+        >
+          Autour de vous, les résultats sont classés <strong>par distance</strong>. Le type de tarif et le tri
+          s&apos;appliquent à la recherche sans localisation.
+        </Alert>
       ) : (
         <FilterSection title="Type de tarif" titleId={ids.priceType}>
           <Segmented<PriceTypeKey | "">
@@ -264,7 +264,8 @@ export default function FiltersPanel({
           />
         </div>
         {invalidRange ? (
-          <p role="status" className="text-xs font-medium text-amber-700">
+          <p role="status" className="flex items-start gap-1.5 text-xs font-medium text-warningInk">
+            <TriangleAlert aria-hidden className="mt-px h-3.5 w-3.5 shrink-0" />
             Le minimum dépasse le maximum : aucun prix ne peut correspondre.
           </p>
         ) : null}

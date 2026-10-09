@@ -53,10 +53,8 @@ export function SwitchButton({
       aria-pressed={pressed}
       onClick={onToggle}
       disabled={disabled}
-      className={`group flex min-h-[56px] w-full items-center gap-3 rounded-2xl border px-3.5 py-3 text-left transition disabled:cursor-not-allowed disabled:opacity-50 ${FOCUS_RING} ${
-        pressed
-          ? "border-primary/40 bg-primarySoft"
-          : "border-slate-200 bg-white hover:border-primary/30 hover:bg-slate-50"
+      className={`group flex min-h-[56px] w-full items-center gap-3 rounded-panel border px-3.5 py-3 text-left transition duration-base ease-emphasized disabled:cursor-not-allowed disabled:opacity-50 ${FOCUS_RING} ${
+        pressed ? "border-primary/40 bg-primarySoft" : "border-line bg-white hover:border-primary/30 hover:bg-canvas"
       }`}
     >
       <span className="min-w-0 flex-1">
@@ -68,11 +66,13 @@ export function SwitchButton({
       </span>
       <span
         aria-hidden
-        className={`relative h-6 w-11 shrink-0 rounded-full transition ${pressed ? "bg-primary" : "bg-slate-300"}`}
+        className={`relative h-6 w-11 shrink-0 rounded-full transition-colors duration-base ease-emphasized ${
+          pressed ? "bg-primary" : "bg-fog"
+        }`}
       >
         <span
-          className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all ${
-            pressed ? "left-[22px]" : "left-0.5"
+          className={`absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow-hair transition-transform duration-base ease-emphasized ${
+            pressed ? "translate-x-5" : "translate-x-0"
           }`}
         />
       </span>
@@ -109,10 +109,10 @@ export function Segmented<T extends string | number>({
             aria-label={o.ariaLabel}
             disabled={disabled}
             onClick={() => onChange(o.value)}
-            className={`min-h-[44px] rounded-xl border px-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${FOCUS_RING} ${
+            className={`min-h-[44px] rounded-control border px-2 text-sm font-semibold transition duration-base ease-emphasized disabled:cursor-not-allowed disabled:opacity-50 ${FOCUS_RING} ${
               active
-                ? "border-primary bg-primary text-white shadow-[0_6px_18px_rgba(46,139,87,0.28)]"
-                : "border-slate-200 bg-white text-ink hover:border-primary/40 hover:bg-primarySoft/60"
+                ? "border-primaryDark bg-primaryDark text-white shadow-hair"
+                : "border-line bg-white text-ink hover:border-primary/40 hover:bg-primarySoft/60"
             }`}
           >
             {o.label}

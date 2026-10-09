@@ -1,6 +1,7 @@
 "use client";
 import Image from "next/image";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, m } from "framer-motion";
 import {
@@ -17,6 +18,9 @@ import {
   X,
   type LucideIcon,
 } from "lucide-react";
+import { ButtonLink } from "@/components/ds/Button";
+import { DURATION, EASE } from "@/components/ds/motion";
+import { CONTAINER } from "@/components/ds/layout";
 import { useAuth } from "@/lib/auth";
 import { registerHref, spaceHref } from "@/lib/links";
 
@@ -36,7 +40,6 @@ const NAV: NavItem[] = [
 const SEARCH_ITEM: NavItem = { href: "/search", label: "Rechercher", icon: Search };
 
 const FOCUS = "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent";
-const EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
 
 /**
  * En-tête du site public.
@@ -45,6 +48,7 @@ const EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
  */
 export default function SiteHeader({ variant = "overlay" }: { variant?: "overlay" | "solid" }) {
   const { user, loading } = useAuth();
+  const onSearch = usePathname() === SEARCH_ITEM.href;
   const [scrolled, setScrolled] = useState(false);
   const [open, setOpen] = useState(false);
   const toggleRef = useRef<HTMLButtonElement>(null);
@@ -136,7 +140,7 @@ export default function SiteHeader({ variant = "overlay" }: { variant?: "overlay
 
   const linkTone = transparent
     ? "text-white/85 hover:bg-white/10 hover:text-white"
-    : "text-slate-600 hover:bg-slate-100 hover:text-ink";
+    : "text-inkSoft hover:bg-lineSoft hover:text-ink";
 
   return (
     <>
@@ -145,15 +149,13 @@ export default function SiteHeader({ variant = "overlay" }: { variant?: "overlay
       </a>
 
       <header
-        className={`${variant === "overlay" ? "fixed" : "sticky"} inset-x-0 top-0 z-50 transition-[background-color,box-shadow] duration-300 ${
-          transparent
-            ? "bg-transparent"
-            : "bg-white/90 shadow-[0_1px_0_rgba(15,23,42,0.06),0_12px_32px_-16px_rgba(15,23,42,0.22)] backdrop-blur-md"
+        className={`${variant === "overlay" ? "fixed" : "sticky"} inset-x-0 top-0 z-header border-b transition-[background-color,box-shadow,border-color] duration-base ease-emphasized ${
+          transparent ? "border-transparent bg-transparent" : "border-lineSoft bg-white/90 shadow-soft backdrop-blur-md"
         }`}
       >
-        <div className="mx-auto flex h-16 max-w-7xl items-center justify-between gap-3 px-4 sm:px-6 lg:h-20">
-          <Link href="/" className={`flex shrink-0 items-center gap-2.5 rounded-2xl ${FOCUS}`}>
-            <span className="grid h-10 w-10 place-items-center rounded-xl bg-white shadow-sm ring-1 ring-black/5 lg:h-11 lg:w-11">
+        <div className={`flex h-16 items-center justify-between gap-3 lg:h-20 ${CONTAINER}`}>
+          <Link href="/" className={`flex shrink-0 items-center gap-2.5 rounded-panel ${FOCUS}`}>
+            <span className="grid h-10 w-10 place-items-center rounded-control bg-white shadow-hair ring-1 ring-line lg:h-11 lg:w-11">
               <Image
                 src="/tratra_logo.webp"
                 alt="Tratra"
@@ -165,7 +167,7 @@ export default function SiteHeader({ variant = "overlay" }: { variant?: "overlay
             </span>
             <span
               aria-hidden
-              className={`font-display text-xl font-extrabold tracking-tight transition-colors duration-300 lg:text-[1.35rem] ${
+              className={`font-display text-xl font-extrabold tracking-tight transition-colors duration-base lg:text-[1.35rem] ${
                 transparent ? "text-white" : "text-ink"
               }`}
             >
@@ -188,7 +190,10 @@ export default function SiteHeader({ variant = "overlay" }: { variant?: "overlay
               <li>
                 <Link
                   href={SEARCH_ITEM.href}
-                  className={`inline-flex min-h-[44px] items-center gap-2 whitespace-nowrap rounded-full px-3 text-sm font-semibold transition-colors xl:px-4 ${linkTone} ${FOCUS}`}
+                  aria-current={onSearch ? "page" : undefined}
+                  className={`inline-flex min-h-[44px] items-center gap-2 whitespace-nowrap rounded-full px-3 text-sm font-semibold transition-colors xl:px-4 ${
+                    onSearch ? (transparent ? "bg-white/15 text-white" : "bg-primarySoft text-primaryDark") : linkTone
+                  } ${FOCUS}`}
                 >
                   <Search aria-hidden className="h-4 w-4" />
                   {SEARCH_ITEM.label}
@@ -202,16 +207,12 @@ export default function SiteHeader({ variant = "overlay" }: { variant?: "overlay
               {loading ? (
                 <span
                   aria-hidden
-                  className={`h-11 w-44 rounded-full ${transparent ? "bg-white/10" : "bg-slate-100"}`}
+                  className={`h-11 w-44 rounded-full ${transparent ? "bg-white/10" : "bg-lineSoft"}`}
                 />
               ) : space ? (
-                <Link
-                  href={space}
-                  className={`inline-flex min-h-[44px] items-center gap-2 whitespace-nowrap rounded-full bg-primaryDark px-5 text-sm font-semibold text-white shadow-glow transition hover:-translate-y-0.5 hover:bg-[#185736] ${FOCUS} focus-visible:ring-offset-2`}
-                >
-                  <LayoutDashboard aria-hidden className="h-4 w-4" />
+                <ButtonLink href={space} variant="primary" leftIcon={<LayoutDashboard aria-hidden className="h-4 w-4" />}>
                   Mon espace
-                </Link>
+                </ButtonLink>
               ) : (
                 <>
                   <Link
@@ -221,17 +222,13 @@ export default function SiteHeader({ variant = "overlay" }: { variant?: "overlay
                     <LogIn aria-hidden className="h-4 w-4" />
                     Connexion
                   </Link>
-                  <Link
+                  <ButtonLink
                     href={registerHref("handyman")}
-                    className={`inline-flex min-h-[44px] items-center gap-2 whitespace-nowrap rounded-full bg-accent px-5 text-sm font-bold text-ink shadow-[0_10px_28px_-10px_rgba(246,201,14,.7)] transition hover:-translate-y-0.5 hover:bg-[#ffd42e] ${FOCUS} focus-visible:ring-offset-2 ${
-                      transparent
-                        ? "focus-visible:ring-white focus-visible:ring-offset-night"
-                        : "focus-visible:ring-night"
-                    }`}
+                    variant="accent"
+                    leftIcon={<HardHat aria-hidden className="h-4 w-4" />}
                   >
-                    <HardHat aria-hidden className="h-4 w-4" />
                     Devenir artisan
-                  </Link>
+                  </ButtonLink>
                 </>
               )}
             </div>
@@ -246,7 +243,7 @@ export default function SiteHeader({ variant = "overlay" }: { variant?: "overlay
               className={`grid h-11 w-11 place-items-center rounded-full transition-colors lg:hidden ${FOCUS} ${
                 transparent
                   ? "bg-white/10 text-white ring-1 ring-inset ring-white/20 hover:bg-white/20"
-                  : "bg-slate-100 text-ink hover:bg-slate-200"
+                  : "bg-lineSoft text-ink hover:bg-line"
               }`}
             >
               {open ? <X aria-hidden className="h-5 w-5" /> : <Menu aria-hidden className="h-5 w-5" />}
@@ -268,16 +265,16 @@ export default function SiteHeader({ variant = "overlay" }: { variant?: "overlay
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
-                transition={{ duration: 0.2 }}
+                transition={{ duration: DURATION.base }}
               />
               <m.div
                 key="menu-panel"
                 ref={panelRef}
-                className="fixed inset-x-0 top-16 z-40 max-h-[calc(100dvh-4rem)] overflow-y-auto rounded-b-[1.75rem] bg-white px-4 pb-6 pt-3 shadow-strong sm:px-6"
+                className="fixed inset-x-0 top-16 z-40 max-h-[calc(100dvh-4rem)] overflow-y-auto rounded-b-sheet bg-white px-4 pb-6 pt-3 shadow-strong sm:px-6"
                 initial={{ opacity: 0, y: -16 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -12 }}
-                transition={{ duration: 0.28, ease: EASE }}
+                transition={{ duration: DURATION.base, ease: EASE }}
               >
                 <nav aria-label="Navigation mobile">
                   <ul className="space-y-1">
@@ -286,49 +283,55 @@ export default function SiteHeader({ variant = "overlay" }: { variant?: "overlay
                         <Link
                           href={item.href}
                           onClick={() => close()}
-                          className={`group flex min-h-[52px] items-center gap-3 rounded-2xl px-2 text-base font-semibold text-ink transition-colors hover:bg-slate-50 ${FOCUS}`}
+                          aria-current={onSearch && item.href === SEARCH_ITEM.href ? "page" : undefined}
+                          className={`group flex min-h-[52px] items-center gap-3 rounded-panel px-2 text-base font-semibold text-ink transition-colors hover:bg-canvas ${FOCUS}`}
                         >
-                          <span className="grid h-10 w-10 place-items-center rounded-xl bg-primarySoft text-primaryDark transition-colors group-hover:bg-accent group-hover:text-ink">
+                          <span className="grid h-10 w-10 place-items-center rounded-control bg-primarySoft text-primaryDark transition-colors group-hover:bg-accent group-hover:text-ink">
                             <item.icon aria-hidden className="h-5 w-5" />
                           </span>
                           {item.label}
-                          <ChevronRight aria-hidden className="ml-auto h-5 w-5 text-slate-300" />
+                          <ChevronRight aria-hidden className="ml-auto h-5 w-5 text-fog" />
                         </Link>
                       </li>
                     ))}
                   </ul>
                 </nav>
 
-                <div className="mt-4 grid gap-3 border-t border-slate-100 pt-5">
+                <div className="mt-4 grid gap-3 border-t border-lineSoft pt-5">
                   {loading ? (
-                    <span aria-hidden className="h-12 w-full rounded-full bg-slate-100" />
+                    <span aria-hidden className="h-12 w-full rounded-full bg-lineSoft" />
                   ) : space ? (
-                    <Link
+                    <ButtonLink
                       href={space}
+                      size="lg"
+                      block
                       onClick={() => close()}
-                      className={`inline-flex min-h-[52px] items-center justify-center gap-2 rounded-full bg-primaryDark px-5 font-semibold text-white ${FOCUS} focus-visible:ring-offset-2`}
+                      leftIcon={<LayoutDashboard aria-hidden className="h-5 w-5" />}
                     >
-                      <LayoutDashboard aria-hidden className="h-5 w-5" />
                       Mon espace
-                    </Link>
+                    </ButtonLink>
                   ) : (
                     <>
-                      <Link
+                      <ButtonLink
                         href={registerHref("handyman")}
+                        variant="accent"
+                        size="lg"
+                        block
                         onClick={() => close()}
-                        className="inline-flex min-h-[52px] items-center justify-center gap-2 rounded-full bg-accent px-5 font-bold text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-night focus-visible:ring-offset-2"
+                        leftIcon={<HardHat aria-hidden className="h-5 w-5" />}
                       >
-                        <HardHat aria-hidden className="h-5 w-5" />
                         Devenir artisan
-                      </Link>
-                      <Link
+                      </ButtonLink>
+                      <ButtonLink
                         href="/login"
+                        variant="outline"
+                        size="lg"
+                        block
                         onClick={() => close()}
-                        className={`inline-flex min-h-[52px] items-center justify-center gap-2 rounded-full border border-slate-200 px-5 font-semibold text-ink hover:border-primary/50 hover:text-primaryDark ${FOCUS}`}
+                        leftIcon={<LogIn aria-hidden className="h-5 w-5" />}
                       >
-                        <LogIn aria-hidden className="h-5 w-5" />
                         Connexion
-                      </Link>
+                      </ButtonLink>
                     </>
                   )}
                 </div>
