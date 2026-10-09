@@ -53,7 +53,7 @@ export function StarRow({ value, className = "" }: { value: number; className?: 
   return (
     <span className={`inline-flex gap-0.5 ${className}`} role="img" aria-label={`${v} étoiles sur 5`}>
       {Array.from({ length: 5 }, (_, i) => (
-        <Star key={i} aria-hidden className={`h-4 w-4 ${i < v ? "fill-accent text-accent" : "text-slate-300"}`} />
+        <Star key={i} aria-hidden className={`h-4 w-4 ${i < v ? "fill-accent text-accent" : "text-line"}`} />
       ))}
     </span>
   );
@@ -62,8 +62,8 @@ export function StarRow({ value, className = "" }: { value: number; className?: 
 /** Indicateur « en ligne maintenant » (présence réelle de l'artisan). */
 export function OnlineDot({ label = "En ligne", className = "" }: { label?: string; className?: string }) {
   return (
-    <span className={`inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-700 ${className}`}>
-      <span aria-hidden className="h-2 w-2 animate-pulseDot rounded-full bg-emerald-500" />
+    <span className={`inline-flex items-center gap-1.5 text-xs font-semibold text-successInk ${className}`}>
+      <span aria-hidden className="h-2 w-2 animate-pulseDot rounded-full bg-success" />
       {label}
     </span>
   );
