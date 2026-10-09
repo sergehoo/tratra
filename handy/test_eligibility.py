@@ -174,3 +174,16 @@ def test_booking_requires_eligible_handyman():
     assert not Booking.objects.filter(service=bad).exists()
     r_ok = _book(api, good)
     assert r_ok.status_code == 201, r_ok.content
+
+
+def test_category_name_filter_is_applied():
+    """L'app mobile filtre par nom de catégorie (`category__name`) : le filtre doit être réel."""
+    a = service(artisan("c_ok"), "Plomberie A")
+    other_cat = ServiceCategory.objects.create(name="Électricité", slug="electricite")
+    b = Service.objects.create(handyman=a.handyman, category=other_cat, title="Prises", description="d",
+                               price_type="fixed", price=1000, is_active=True)
+    client = APIClient()
+    r = client.get(reverse("services-list"), {"category__name": "Électricité"})
+    assert [s["id"] for s in r.json()["results"]] == [b.id]
+    r = client.get(reverse("services-list"), {"category__name": "plomberie"})
+    assert [s["id"] for s in r.json()["results"]] == [a.id]

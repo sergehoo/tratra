@@ -269,7 +269,7 @@ def published_reviews():
 def apply_public_service_filters(qs, params):
     """Filtres de recherche publics communs à /services/ et /services/nearby/.
 
-    categories=1,2 · commune=<commune ou quartier> · verified=1 · online=1 · urgent=1 · min_price · max_price
+    categories=1,2 · category__name=<nom> · commune=<commune ou quartier> · verified=1 · online=1 · urgent=1 · min_price · max_price
     """
     # Publication : seuls les services ACTIFS d'artisans éligibles (compte actif, profil approuvé,
     # KYC approuvé, profil complet) sont publics — règle unique : handy/eligibility.py.
@@ -292,6 +292,11 @@ def apply_public_service_filters(qs, params):
         # « En ligne » n'a de sens que pour un profil vérifié (cf. /handymen/presence/).
         qs = qs.filter(handyman__handyman_profile__online=True,
                        handyman__handyman_profile__is_approved=True)
+
+    category_name = _text_param(params.get("category__name"))
+    if category_name:
+        # Compatibilité app mobile : filtre par nom de catégorie (insensible à la casse).
+        qs = qs.filter(category__name__iexact=category_name)
 
     if _flag(params, "urgent"):
         # « Urgent » = intervention immédiate possible : artisan en ligne MAINTENANT et hors
