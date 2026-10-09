@@ -22,6 +22,7 @@ from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 from handy.api.errors import CodedAPIException, field_error
 from handy.media.sanitize import sanitize_image
+from handy.sms import SMSError, normalize_msisdn
 from handy.models import (
     User, HandymanProfile, ServiceCategory, ServiceImage, Service, Booking,
     Payment, PaymentLog, Review, Conversation, Message, Notification,
@@ -169,8 +170,9 @@ class PublicReviewSerializer(serializers.ModelSerializer):
 
 SIGNUP_UNAVAILABLE_DETAIL = (
     "Inscription impossible avec ces informations. "
-    "Si vous avez déjà un compte, connectez-vous."
+    "Si vous avez déjà un compte, connectez-vous ou réinitialisez votre mot de passe."
 )
+PHONE_INVALID_DETAIL = "Numéro de téléphone invalide. Saisissez-le avec l'indicatif du pays, par exemple +225 07 00 00 00 00."
 PASSWORD_CHANGE_ENDPOINT_DETAIL = (
     "Le mot de passe ne se modifie pas ici : utilisez la fonction dédiée."
 )
@@ -182,18 +184,46 @@ def signup_unavailable() -> CodedAPIException:
     return CodedAPIException("signup_unavailable", SIGNUP_UNAVAILABLE_DETAIL, status=400)
 
 
-class UserSerializer(serializers.ModelSerializer):
-    """Compte utilisateur (`POST /users/` = inscription legacy, `PATCH /users/{id}/`).
+def normalize_phone(raw) -> Optional[str]:
+    """Numéro au format E.164 (+225… par défaut) ; None si vide ; ValidationError si invalide."""
+    value = (raw or "").strip()
+    if not value:
+        return None
+    try:
+        return normalize_msisdn(value)
+    except SMSError:
+        raise serializers.ValidationError(PHONE_INVALID_DETAIL)
 
-    Règles L1a (§4.12) :
-    - inscription : `validate_password`, rôle hors liste blanche refusé (y compris
-      `admin`, même pour le staff), `phone` IGNORÉ (enregistré à NULL, à prouver
-      ensuite par OTP), conflit d'email ou de username sous le code générique
-      `signup_unavailable` (aucun « existe déjà » par champ) ;
-    - mise à jour : `password` refusé (400 `password_change_endpoint`, aucun
-      stockage en clair), `user_type` en lecture seule.
+
+def generate_username() -> str:
+    """Identifiant technique interne (jamais affiché ni saisi) : le compte se connecte par téléphone."""
+    import secrets
+
+    while True:
+        candidate = f"u{secrets.token_hex(6)}"
+        if not User.objects.filter(username=candidate).exists():
+            return candidate
+
+
+class UserSerializer(serializers.ModelSerializer):
+    """Compte utilisateur (`POST /users/` = inscription du compte unique, `PATCH /users/{id}/`).
+
+    Inscription (compte unique, plus de choix client/artisan/entreprise) :
+    - OBLIGATOIRES : `first_name`, `last_name`, `phone` (E.164, +225 par défaut), `password`
+      (validateurs Django) et `accept_terms: true` (conditions et confidentialité, horodaté) ;
+    - FACULTATIFS : `email` (à renseigner après connexion), `username` (hérité : généré si absent) ;
+    - le téléphone est enregistré NON vérifié : `is_verified` (lecture seule) ne passe à vrai
+      qu'après validation effective d'un code (`/auth/otp/verify/`) — jamais avant ;
+    - `user_type` : « client » par défaut (valeurs historiques acceptées pour les anciens clients,
+      jamais `admin`) ; les fonctions artisan / entreprise s'ajoutent ensuite au MÊME compte ;
+    - un numéro, e-mail ou identifiant déjà pris : réponse générique `signup_unavailable`
+      (aucun « existe déjà » par champ : anti-énumération ; récupération par OTP possible).
+
+    Mise à jour : `password` refusé (400 `password_change_endpoint`), `user_type` en lecture seule ;
+    changer de numéro remet `is_verified` à faux ; l'e-mail est modifiable (conflit : message générique).
     """
     password = serializers.CharField(write_only=True, required=False)
+    accept_terms = serializers.BooleanField(write_only=True, required=False)
     profile_picture = PublicImageField(required=False, allow_null=True)
 
     class Meta:
@@ -202,29 +232,39 @@ class UserSerializer(serializers.ModelSerializer):
         fields = [
             "id", "username", "email", "first_name", "last_name", "user_type",
             "phone", "profile_picture", "address", "city", "postal_code", "country",
-            "latitude", "longitude", "is_verified", "date_joined", "last_login",'password',
+            "latitude", "longitude", "is_verified", "date_joined", "last_login", 'password',
+            "accept_terms",
         ]
-        read_only_fields = ['id',"date_joined", "last_login", "is_verified"]
+        read_only_fields = ['id', "date_joined", "last_login", "is_verified"]
 
     # Rôles que l'on autorise à l'auto-inscription publique (jamais 'admin').
     SELF_SIGNUP_ROLES = {"client", "employeur", "handyman", "entreprise"}
-    _SIGNUP_UNIQUE_FIELDS = ("email", "username", "phone")
+    _UNIQUE_FIELDS = ("email", "username", "phone")
 
     def get_fields(self):
         fields = super().get_fields()
+        # Pas de « … existe déjà » par champ : le conflit est traité dans validate() sous un
+        # message générique (anti-énumération).
+        for name in self._UNIQUE_FIELDS:
+            field = fields.get(name)
+            if field is not None:
+                field.validators = [v for v in field.validators if not isinstance(v, UniqueValidator)]
         if self.instance is None:
-            # Inscription : mot de passe obligatoire ; téléphone ignoré (M-M5, S-S1).
             fields["password"].required = True
-            fields["phone"].read_only = True
-            # Pas de « … existe déjà » par champ : le conflit est traité dans
-            # validate() sous un code générique (anti-énumération).
-            for name in self._SIGNUP_UNIQUE_FIELDS:
-                field = fields.get(name)
-                if field is not None:
-                    field.validators = [v for v in field.validators if not isinstance(v, UniqueValidator)]
+            fields["accept_terms"].required = True
+            for name in ("first_name", "last_name", "phone"):
+                fields[name].required = True
+                fields[name].allow_blank = False
+                fields[name].allow_null = False
+            fields["username"].required = False
+            fields["email"].required = False
+            fields["email"].allow_null = True
+            fields["email"].allow_blank = True
         else:
             # `user_type` est déprécié (D14) : jamais modifié après la création.
             fields["user_type"].read_only = True
+            fields["email"].allow_null = True
+            fields["email"].allow_blank = True
         return fields
 
     def to_internal_value(self, data):
@@ -247,31 +287,61 @@ class UserSerializer(serializers.ModelSerializer):
         return value
 
     def validate_phone(self, value):
-        # '' -> NULL : deux chaînes vides violeraient l'unicité du numéro (erreur 500).
-        value = (value or "").strip()
-        return value or None
+        # E.164 ; '' -> NULL (deux chaînes vides violeraient l'unicité du numéro : erreur 500).
+        return normalize_phone(value)
+
+    def validate_email(self, value):
+        return (value or "").strip().lower() or None
+
+    def validate_accept_terms(self, value):
+        if self.instance is None and value is not True:
+            raise serializers.ValidationError(
+                "Vous devez accepter les conditions d'utilisation et la politique de confidentialité.")
+        return value
+
+    def _taken(self, attrs) -> bool:
+        """Numéro, e-mail ou identifiant déjà utilisés par un AUTRE compte."""
+        query = Q()
+        for name in self._UNIQUE_FIELDS:
+            value = attrs.get(name)
+            if value:
+                query |= Q(**{f"{name}__iexact": value}) if name != "phone" else Q(phone=value)
+        if not query:
+            return False
+        others = User.objects.filter(query)
+        if self.instance is not None:
+            others = others.exclude(pk=self.instance.pk)
+        return others.exists()
 
     def validate(self, attrs):
         if self.instance is None:
             password = attrs.get("password")
-            candidate = User(**{k: attrs.get(k) or "" for k in ("username", "email", "first_name", "last_name")})
+            candidate = User(**{k: attrs.get(k) or "" for k in ("username", "first_name", "last_name")},
+                             email=attrs.get("email") or "")
             try:
                 validate_password(password, user=candidate)
             except DjangoValidationError as exc:
                 raise serializers.ValidationError({"password": list(exc.messages)})
-            email = attrs.get("email") or ""
-            username = attrs.get("username") or ""
-            if User.objects.filter(Q(email__iexact=email) | Q(username__iexact=username)).exists():
+            if self._taken(attrs):
                 raise signup_unavailable()
+        elif self._taken({k: attrs.get(k) for k in ("email", "phone") if k in attrs}):
+            # Compte connecté : e-mail ou numéro déjà liés à un autre compte (message sans détail).
+            raise serializers.ValidationError(
+                {"detail": "Ces informations ne peuvent pas être utilisées pour ce compte."})
         return attrs
 
     def create(self, validated_data):
         password = validated_data.pop('password')
-        validated_data.pop("phone", None)  # inscription legacy : numéro jamais enregistré
+        validated_data.pop("accept_terms", None)
+        validated_data["username"] = validated_data.get("username") or generate_username()
+        validated_data["email"] = validated_data.get("email") or None
+        validated_data.setdefault("user_type", "client")
         user = User(**validated_data)
         # garde-fou : aucune création publique ne peut octroyer de privilèges Django
         user.is_staff = False
         user.is_superuser = False
+        user.is_verified = False  # jamais vérifié avant la validation effective d'un code OTP
+        user.terms_accepted_at = timezone.now()
         user.set_password(password)
         try:
             with transaction.atomic():
@@ -285,27 +355,56 @@ class UserSerializer(serializers.ModelSerializer):
         # Défense en profondeur : jamais d'écriture brute du mot de passe.
         validated_data.pop("password", None)
         validated_data.pop("user_type", None)
+        validated_data.pop("accept_terms", None)
+        if "email" in validated_data:
+            validated_data["email"] = validated_data["email"] or None
+        if "phone" in validated_data and validated_data["phone"] != instance.phone:
+            instance.is_verified = False  # un nouveau numéro doit être prouvé à son tour
         return super().update(instance, validated_data)
 
+
+def resolve_login_identifier(raw) -> str:
+    """Identifiant saisi -> nom d'utilisateur. Un numéro de téléphone (E.164, +225 par défaut) est
+    résolu vers son compte ; e-mail et identifiants historiques passent tels quels."""
+    import re
+
+    value = (raw or "").strip()
+    if value and re.fullmatch(r"\+?[\d\s().-]{8,22}", value):
+        try:
+            user = User.objects.filter(phone=normalize_msisdn(value)).only("username").first()
+        except SMSError:
+            user = None
+        if user is not None:
+            return user.get_username()
+    return value
+
+
 class EmailOrUsernameTokenObtainPairSerializer(TokenObtainPairSerializer):
+    """Connexion : `phone` (ou `username`/`email`) + `password`. Le champ historique `username` accepte
+    aussi un numéro de téléphone ; les anciens comptes gardent leur identifiant ou leur e-mail."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields[self.username_field].required = False
+        self.fields[self.username_field].allow_blank = True
+        for name in ("phone", "email"):
+            self.fields[name] = serializers.CharField(required=False, allow_blank=True, write_only=True)
+
     def validate(self, attrs):
-        # champs attendus: username et password (mais on accepte email)
-        username = attrs.get("username") or attrs.get("email")
+        raw = attrs.get("username") or attrs.get("phone") or attrs.get("email")
+        request = self.context.get("request")
         password = attrs.get("password")
 
-        if not username or not password:
+        if not raw or not password:
             raise self.fail("no_active_account")
 
-        user = authenticate(
-            request=self.context.get("request"),
-            username=username,   # ton backend doit supporter username OU email
-            password=password,
-        )
+        identifier = resolve_login_identifier(raw)
+        user = authenticate(request=request, username=identifier, password=password)
         if not user:
             raise self.fail("no_active_account")
 
         data = super().validate({"username": user.get_username(), "password": password})
-        # Optionnel: renvoyer un bloc user pour l’app
+        # Optionnel: renvoyer un bloc user pour l'app
         data["user"] = {
             "id": user.pk,
             "email": user.email,
@@ -316,9 +415,13 @@ class EmailOrUsernameTokenObtainPairSerializer(TokenObtainPairSerializer):
             "date_joined": user.date_joined.isoformat() if user.date_joined else None,
             "user_type": getattr(user, "user_type", "client"),
             "profile_image": getattr(user, "profile_image", None),
-            "phone_number": getattr(user, "phone_number", None),
+            "phone": user.phone,
+            "phone_number": user.phone,
+            "is_verified": bool(user.is_verified),
         }
         return data
+
+
 # ========= HANDYMAN PROFILE =========
 
 class HandymanProfileSerializer(serializers.ModelSerializer):

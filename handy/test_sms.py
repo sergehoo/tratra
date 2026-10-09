@@ -44,7 +44,7 @@ def test_otp_is_sent_by_sms_and_never_returned():
     user, c = _client()
     r = c.post(reverse("otp-request"))
     assert r.status_code == 201
-    assert r.json() == {"sent": True, "phone": "+225••••01"}  # numéro masqué, JAMAIS le code
+    assert r.json() == {"sent": True, "phone": "+225••••01", "expires_in": 600, "resend_in": 60}  # masqué, JAMAIS le code
     (to, text), = sms.outbox
     code = OTPCode.objects.get(user=user).code
     assert to == "+2250700000001" and code in text

@@ -1295,6 +1295,7 @@ def match(request):
 
 
 # ---- OTP (vérification de compte) ----
+OTP_TTL_MINUTES = 10            # durée de validité d'un code
 OTP_RESEND_COOLDOWN_S = 60      # délai minimal entre deux codes
 OTP_MAX_PER_HOUR = 5            # codes émis par compte et par heure
 OTP_MAX_FAILURES = 5            # essais invalides avant invalidation du code
@@ -1333,7 +1334,7 @@ def otp_request(request):
         return _otp_error("Trop de codes demandés. Réessayez dans une heure.", status.HTTP_429_TOO_MANY_REQUESTS)
 
     OTPCode.objects.filter(user=user, used=False).update(used=True)  # un seul code valide
-    otp = OTPCode.issue(user, purpose="signup")
+    otp = OTPCode.issue(user, purpose="signup", ttl_minutes=OTP_TTL_MINUTES)
     try:
         backend = sms.send_sms(user.phone, f"Votre code de vérification Tratra : {otp.code}")
     except sms.SMSError as exc:
@@ -1346,7 +1347,8 @@ def otp_request(request):
         if isinstance(exc, sms.SMSNotConfigured):
             return _otp_error("L'envoi de SMS n'est pas disponible pour le moment.", status.HTTP_503_SERVICE_UNAVAILABLE)
         return _otp_error("Le SMS n'a pas pu être envoyé. Vérifiez votre numéro puis réessayez.", status.HTTP_502_BAD_GATEWAY)
-    payload = {"sent": True, "phone": sms.mask(sms.normalize_msisdn(user.phone))}
+    payload = {"sent": True, "phone": sms.mask(sms.normalize_msisdn(user.phone)),
+               "expires_in": OTP_TTL_MINUTES * 60, "resend_in": OTP_RESEND_COOLDOWN_S}
     if settings.DEBUG and getattr(backend, "exposes_code", False):
         payload["code"] = otp.code  # développement avec le backend « console » uniquement
     return Response(payload, status=status.HTTP_201_CREATED)
@@ -1373,7 +1375,11 @@ def otp_verify(request):
         cache.set(fail_key, failures, timeout=600)
         if failures >= OTP_MAX_FAILURES:
             OTPCode.objects.filter(user=user, used=False).update(used=True)
-        return Response({"detail": "Code invalide ou expiré."}, status=status.HTTP_400_BAD_REQUEST)
+            return _otp_error("Code invalide. Trop d'essais : demandez un nouveau code.",
+                              status.HTTP_400_BAD_REQUEST)
+        left = OTP_MAX_FAILURES - failures
+        return Response({"detail": f"Code invalide ou expiré. Il vous reste {left} essai{'s' if left > 1 else ''}."},
+                        status=status.HTTP_400_BAD_REQUEST)
     cache.delete(fail_key)
     otp.used = True
     otp.save(update_fields=["used"])

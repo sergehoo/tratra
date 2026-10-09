@@ -510,8 +510,10 @@ def test_profile_patch_used_by_flutter_still_works(api_client, make_user):
     }, format="json")
     assert r.status_code == 200, r.content
     user.refresh_from_db()
+    # Le numéro est normalisé en E.164 (+225 par défaut) et doit être prouvé à nouveau par OTP.
     assert (user.email, user.username, user.first_name, user.phone) == (
-        "nouvel@example.test", "flutter_user2", "Koffi", "0102030405")
+        "nouvel@example.test", "flutter_user2", "Koffi", "+2250102030405")
+    assert user.is_verified is False
 
 
 def test_user_type_is_read_only_after_signup(api_client, make_user):
@@ -525,21 +527,27 @@ def test_user_type_is_read_only_after_signup(api_client, make_user):
     assert not HandymanProfile.objects.filter(user=user).exists()
 
 
+_PHONES = iter(range(7000000100, 7000009999))
+
+
 def _signup(api_client, **extra):
+    # Contrat du compte unique : prénom, nom, téléphone, mot de passe et conditions obligatoires.
     payload = {"username": "nouveau", "email": "nouveau@example.test", "password": STRONG_PASSWORD,
-               "first_name": "Ama", "last_name": "Diallo"}
+               "first_name": "Ama", "last_name": "Diallo", "phone": f"+225{next(_PHONES):010d}"[:14],
+               "accept_terms": True}
     payload.update(extra)
     return api_client.post(reverse("users-list"), payload, format="json")
 
 
-def test_legacy_signup_ignores_phone(api_client, make_user):
-    make_user("porteur", phone="0505050505")
-    r = _signup(api_client, phone="0505050505")  # numéro d'un autre compte : aucun oracle
-    assert r.status_code == 201, r.content
-    assert r.json()["phone"] is None
-    assert User.objects.get(username="nouveau").phone is None
+def test_signup_stores_the_phone_unverified_and_conflicts_stay_generic(api_client, make_user):
+    make_user("porteur", phone="+2250505050505")
+    r = _signup(api_client, phone="0505050505")  # numéro d'un autre compte : réponse générique, aucun oracle
+    body = _assert_coded(r, "signup_unavailable", 400)
+    assert "fields" not in body
     r = _signup(api_client, username="nouveau2", email="nouveau2@example.test", phone="0700000001")
-    assert r.status_code == 201 and User.objects.get(username="nouveau2").phone is None
+    assert r.status_code == 201, r.content
+    user = User.objects.get(username="nouveau2")
+    assert user.phone == "+2250700000001" and user.is_verified is False
 
 
 def test_legacy_signup_conflicts_are_generic(api_client, make_user):

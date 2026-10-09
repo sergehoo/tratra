@@ -22,7 +22,7 @@ from rest_framework.response import Response
 
 from handy.eligibility import is_publishable, profile_checklist
 from handy.models import (
-    Booking, Conversation, HandymanDocument, HandymanProfile, Message, Notification, Review, Service,
+    Booking, CompanyProfile, Conversation, HandymanDocument, HandymanProfile, Message, Notification, Review, Service,
     artisan_available_earnings,
 )
 
@@ -227,7 +227,7 @@ def me_dashboard(request):
             "client": user.user_type != "admin",
             "provider": profile is not None,
             "publishable": bool(provider and provider["publishable"]),
-            "company": user.user_type == "entreprise",
+            "company": user.user_type == "entreprise" or CompanyProfile.objects.filter(user=user).exists(),
         },
         "client": client_block,
         "provider": provider,

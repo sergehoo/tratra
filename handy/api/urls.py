@@ -1,6 +1,7 @@
 # /Users/ogahserge/Documents/tratra/handy/api/urls.py
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
+from handy.api.recovery import password_reset_confirm, password_reset_request
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView, TokenBlacklistView
 
 from .views import (
@@ -52,6 +53,8 @@ urlpatterns = [
     path('match/', match, name='match'),
     path('auth/otp/request/', otp_request, name='otp-request'),
     path('auth/otp/verify/', otp_verify, name='otp-verify'),
+    path('auth/password-reset/request/', password_reset_request, name='password-reset-request'),
+    path('auth/password-reset/confirm/', password_reset_confirm, name='password-reset-confirm'),
     path('coupons/validate/', coupon_validate, name='coupon-validate'),
     path('payout-account/', payout_account, name='payout-account'),
     path('companies/me/', company_profile, name='company-profile'),

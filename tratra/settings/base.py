@@ -214,6 +214,7 @@ REST_FRAMEWORK = {
         'anon': config('THROTTLE_ANON', default='60/min'),
         'user': config('THROTTLE_USER', default='1000/hour'),
         'login': config('THROTTLE_LOGIN', default='10/min'),
+        'recovery': config('THROTTLE_RECOVERY', default='20/hour'),
         'webhook': config('THROTTLE_WEBHOOK', default='120/min'),
     },
 }

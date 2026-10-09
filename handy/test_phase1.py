@@ -15,7 +15,8 @@ def api_client(db):
 def test_inscription_entreprise_cree_profil(api_client):
     # L1a : mot de passe conforme aux validateurs (« pass1234 » est désormais refusé).
     r = api_client.post(reverse("users-list"), {
-        "username": "acme", "email": "acme@ex.com",
+        "username": "acme", "email": "acme@ex.com", "first_name": "Acme", "last_name": "SARL",
+        "phone": "+2250700000071", "accept_terms": True,
         "password": "Tr4tra!Essai-2026", "user_type": "entreprise",
     }, format="json")
     assert r.status_code == 201, r.content

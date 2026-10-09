@@ -22,7 +22,9 @@ from handy.storage import KycPrivateStorage
 
 
 class User(AbstractUser):
-    email = models.EmailField(unique=True)
+    # Facultatif (compte unique téléphone + mot de passe) : NULL possible, plusieurs comptes sans e-mail.
+    # L'unicité ne porte que sur les adresses renseignées.
+    email = models.EmailField(unique=True, null=True, blank=True)
 
     USER_TYPES = (
         ('client', 'Client'),
@@ -48,7 +50,9 @@ class User(AbstractUser):
     last_location = gis_models.PointField(srid=4326, null=True, blank=True)  # pour suggestions
     last_location_ts = models.DateTimeField(null=True, blank=True)
 
-    is_verified = models.BooleanField(default=False, db_index=True)
+    is_verified = models.BooleanField(default=False, db_index=True)  # téléphone prouvé par OTP (jamais avant)
+    # Horodatage de l'acceptation des conditions d'utilisation et de la politique de confidentialité.
+    terms_accepted_at = models.DateTimeField(null=True, blank=True)
 
     groups = models.ManyToManyField(
         Group, verbose_name=_('groups'), blank=True,
@@ -997,7 +1001,8 @@ class Coupon(models.Model):
 
 
 class OTPCode(models.Model):
-    PURPOSES = [('signup', 'Inscription'), ('login', 'Connexion'), ('phone', 'Vérification téléphone')]
+    PURPOSES = [('signup', 'Inscription'), ('login', 'Connexion'), ('phone', 'Vérification téléphone'),
+                ('recovery', 'Récupération du compte')]
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='otp_codes')
     code = models.CharField(max_length=6, db_index=True)
     purpose = models.CharField(max_length=20, choices=PURPOSES, default='signup')

@@ -51,7 +51,8 @@ def _booking(client, handyman):
 def test_signup_rejette_role_admin(api_client):
     url = reverse("users-list")
     res = api_client.post(url, {
-        "username": "evil", "email": "evil@ex.com",
+        "username": "evil", "email": "evil@ex.com", "first_name": "Evil", "last_name": "Admin",
+        "phone": "+2250700000072", "accept_terms": True,
         "password": SIGNUP_PASSWORD, "user_type": "admin",
     }, format="json")
     assert res.status_code == 400
@@ -64,7 +65,8 @@ def test_signup_rejette_role_admin(api_client):
 def test_signup_client_ok_sans_privilege(api_client):
     url = reverse("users-list")
     res = api_client.post(url, {
-        "username": "alice", "email": "alice@ex.com",
+        "username": "alice", "email": "alice@ex.com", "first_name": "Alice", "last_name": "Kone",
+        "phone": "+2250700000073", "accept_terms": True,
         "password": SIGNUP_PASSWORD, "user_type": "client",
     }, format="json")
     assert res.status_code == 201, res.content
