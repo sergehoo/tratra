@@ -1,8 +1,9 @@
 @import "../styles/tokens.css";
 @font-face {
-  /* Script de marque : nom « Tratra » uniquement (design-system/BONSKIN-LICENCE.md). */
-  font-family: "Bonskin";
-  src: url("/fonts/Bonskin.otf") format("opentype");
+  /* Script de marque : nom « Tratra » uniquement. Kaushan Script, licence SIL OFL 1.1 (usage
+     commercial autorisé) : design-system/FONT-LICENCE.md. */
+  font-family: "Kaushan Script";
+  src: url("/fonts/KaushanScript-Regular.ttf") format("truetype");
   font-weight: 400;
   font-style: normal;
   font-display: swap;
