@@ -1,18 +1,27 @@
 # handy/api/serializers.py
+from collections.abc import Mapping
 from decimal import Decimal
 from pathlib import Path
 from typing import Optional
+from urllib.parse import urlsplit
 
 from django.conf import settings
 from django.contrib.auth import authenticate
+from django.contrib.auth.password_validation import validate_password
 from django.contrib.gis.geos import Point
+from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db import IntegrityError, transaction
+from django.db.models import Q
 from django.utils import timezone
 from rest_framework import serializers
 from rest_framework.reverse import reverse
+from rest_framework.validators import UniqueValidator
 from drf_spectacular.utils import extend_schema_field
 from drf_spectacular.types import OpenApiTypes
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
+from handy.api.errors import CodedAPIException, field_error
+from handy.media.sanitize import sanitize_image
 from handy.models import (
     User, HandymanProfile, ServiceCategory, ServiceImage, Service, Booking,
     Payment, PaymentLog, Review, Conversation, Message, Notification,
@@ -21,6 +30,20 @@ from handy.models import (
 )
 from handy.services.pricing import estimate_price
 from handy.services.fees import compute_platform_fee
+
+
+# ========= IMAGES PUBLIQUES =========
+
+class PublicImageField(serializers.ImageField):
+    """Image servie publiquement : JPEG, PNG ou WebP uniquement, réencodée par
+    Pillow SANS métadonnées (EXIF/GPS…) et sous un nom aléatoire (§10 L1a)."""
+
+    def to_internal_value(self, data):
+        uploaded = super().to_internal_value(data)
+        try:
+            return sanitize_image(uploaded)
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError(list(exc.messages), code="invalid_image")
 
 
 # ========= UTIL READ-ONLY MINI SERIALIZERS =========
@@ -70,12 +93,17 @@ def absolute_media_url(request, field) -> Optional[str]:
 
 
 class PublicUserMiniSerializer(serializers.ModelSerializer):
-    """Identité minimale d'un artisan dans les payloads publics (sans email)."""
+    """Identité minimale d'un artisan dans les payloads publics (§0.6, L1a) :
+    jamais le nom complet, l'email, le rôle ni l'état de vérification du compte."""
+    display_name = serializers.SerializerMethodField()
 
     class Meta:
         model = User
-        fields = ["id", "first_name", "last_name", "user_type", "is_verified"]
+        fields = ["id", "first_name", "display_name"]
         read_only_fields = fields
+
+    def get_display_name(self, obj) -> str:
+        return public_display_name(obj)
 
 
 class PublicArtisanMiniSerializer(serializers.ModelSerializer):
@@ -139,8 +167,34 @@ class PublicReviewSerializer(serializers.ModelSerializer):
 
 # ========= USER =========
 
+SIGNUP_UNAVAILABLE_DETAIL = (
+    "Inscription impossible avec ces informations. "
+    "Si vous avez déjà un compte, connectez-vous."
+)
+PASSWORD_CHANGE_ENDPOINT_DETAIL = (
+    "Le mot de passe ne se modifie pas ici : utilisez la fonction dédiée."
+)
+
+
+def signup_unavailable() -> CodedAPIException:
+    # Volontairement sans `fields` : la réponse ne dit pas si c'est l'email ou le
+    # nom d'utilisateur qui est déjà pris (anti-énumération, §5.2).
+    return CodedAPIException("signup_unavailable", SIGNUP_UNAVAILABLE_DETAIL, status=400)
+
+
 class UserSerializer(serializers.ModelSerializer):
-    password = serializers.CharField(write_only=True, required=True)
+    """Compte utilisateur (`POST /users/` = inscription legacy, `PATCH /users/{id}/`).
+
+    Règles L1a (§4.12) :
+    - inscription : `validate_password`, rôle hors liste blanche refusé (y compris
+      `admin`, même pour le staff), `phone` IGNORÉ (enregistré à NULL, à prouver
+      ensuite par OTP), conflit d'email ou de username sous le code générique
+      `signup_unavailable` (aucun « existe déjà » par champ) ;
+    - mise à jour : `password` refusé (400 `password_change_endpoint`, aucun
+      stockage en clair), `user_type` en lecture seule.
+    """
+    password = serializers.CharField(write_only=True, required=False)
+    profile_picture = PublicImageField(required=False, allow_null=True)
 
     class Meta:
         model = User
@@ -154,28 +208,84 @@ class UserSerializer(serializers.ModelSerializer):
 
     # Rôles que l'on autorise à l'auto-inscription publique (jamais 'admin').
     SELF_SIGNUP_ROLES = {"client", "employeur", "handyman", "entreprise"}
+    _SIGNUP_UNIQUE_FIELDS = ("email", "username", "phone")
+
+    def get_fields(self):
+        fields = super().get_fields()
+        if self.instance is None:
+            # Inscription : mot de passe obligatoire ; téléphone ignoré (M-M5, S-S1).
+            fields["password"].required = True
+            fields["phone"].read_only = True
+            # Pas de « … existe déjà » par champ : le conflit est traité dans
+            # validate() sous un code générique (anti-énumération).
+            for name in self._SIGNUP_UNIQUE_FIELDS:
+                field = fields.get(name)
+                if field is not None:
+                    field.validators = [v for v in field.validators if not isinstance(v, UniqueValidator)]
+        else:
+            # `user_type` est déprécié (D14) : jamais modifié après la création.
+            fields["user_type"].read_only = True
+        return fields
+
+    def to_internal_value(self, data):
+        if self.instance is not None and isinstance(data, Mapping) and "password" in data:
+            # Auparavant : ModelSerializer.update faisait setattr(password) -> mot de
+            # passe stocké EN CLAIR et compte inutilisable.
+            raise CodedAPIException(
+                "password_change_endpoint", PASSWORD_CHANGE_ENDPOINT_DETAIL, status=400,
+                fields={"password": [field_error("password_change_endpoint", PASSWORD_CHANGE_ENDPOINT_DETAIL)]},
+            )
+        return super().to_internal_value(data)
 
     def validate_user_type(self, value):
-        """Empêche l'escalade de privilège : un compte créé via l'API publique
-        ne peut pas se déclarer 'admin' (ni un rôle hors liste blanche)."""
-        # En modification par un staff/admin authentifié, on laisse passer.
-        request = self.context.get("request")
-        is_admin = bool(request and request.user and request.user.is_staff)
-        if not is_admin and value not in self.SELF_SIGNUP_ROLES:
+        """Empêche l'escalade de privilège : un compte créé via l'API ne peut pas se
+        déclarer 'admin' ni un rôle hors liste blanche (staff compris)."""
+        if value not in self.SELF_SIGNUP_ROLES:
             raise serializers.ValidationError(
                 "Type de compte non autorisé à l'inscription."
             )
         return value
 
+    def validate_phone(self, value):
+        # '' -> NULL : deux chaînes vides violeraient l'unicité du numéro (erreur 500).
+        value = (value or "").strip()
+        return value or None
+
+    def validate(self, attrs):
+        if self.instance is None:
+            password = attrs.get("password")
+            candidate = User(**{k: attrs.get(k) or "" for k in ("username", "email", "first_name", "last_name")})
+            try:
+                validate_password(password, user=candidate)
+            except DjangoValidationError as exc:
+                raise serializers.ValidationError({"password": list(exc.messages)})
+            email = attrs.get("email") or ""
+            username = attrs.get("username") or ""
+            if User.objects.filter(Q(email__iexact=email) | Q(username__iexact=username)).exists():
+                raise signup_unavailable()
+        return attrs
+
     def create(self, validated_data):
         password = validated_data.pop('password')
+        validated_data.pop("phone", None)  # inscription legacy : numéro jamais enregistré
         user = User(**validated_data)
         # garde-fou : aucune création publique ne peut octroyer de privilèges Django
         user.is_staff = False
         user.is_superuser = False
         user.set_password(password)
-        user.save()
+        try:
+            with transaction.atomic():
+                user.save()
+        except IntegrityError:
+            # Course entre deux inscriptions concurrentes : même réponse générique.
+            raise signup_unavailable()
         return user
+
+    def update(self, instance, validated_data):
+        # Défense en profondeur : jamais d'écriture brute du mot de passe.
+        validated_data.pop("password", None)
+        validated_data.pop("user_type", None)
+        return super().update(instance, validated_data)
 
 class EmailOrUsernameTokenObtainPairSerializer(TokenObtainPairSerializer):
     def validate(self, attrs):
@@ -212,9 +322,18 @@ class EmailOrUsernameTokenObtainPairSerializer(TokenObtainPairSerializer):
 # ========= HANDYMAN PROFILE =========
 
 class HandymanProfileSerializer(serializers.ModelSerializer):
-    # Écriture: user (id), skills (ids), latitude/longitude
-    user = serializers.PrimaryKeyRelatedField(queryset=User.objects.all())
+    """Profil artisan, vu par son PROPRIÉTAIRE (ou le staff) uniquement.
+
+    Champs réservés en lecture seule (§0.6, L1a) : le compte rattaché (`user`),
+    l'approbation (`is_approved` : aucune auto-approbation possible), les
+    compteurs (`rating`, `completed_jobs`, `quality_score`), la présence
+    (`online` : uniquement via POST /handymen/presence/) et les numéros de pièce
+    et de licence (`cni_number`, `license_number` : collectés par le KYC).
+    """
+    # Écriture: skills (ids), latitude/longitude
+    user = serializers.PrimaryKeyRelatedField(read_only=True)
     skills = serializers.PrimaryKeyRelatedField(queryset=ServiceCategory.objects.all(), many=True, required=False)
+    photo = PublicImageField(required=False, allow_null=True)
     latitude = serializers.FloatField(write_only=True, required=False)
     longitude = serializers.FloatField(write_only=True, required=False)
 
@@ -236,6 +355,9 @@ class HandymanProfileSerializer(serializers.ModelSerializer):
             # géoloc
             "latitude", "longitude", "location",
         ]
+        # `quality_score` n'est pas exposé ici (donc jamais accepté en écriture).
+        read_only_fields = ["is_approved", "rating", "completed_jobs", "online",
+                            "cni_number", "license_number"]
 
     @extend_schema_field(OpenApiTypes.OBJECT)
     def get_location(self, obj):
@@ -271,16 +393,50 @@ class HandymanProfileSerializer(serializers.ModelSerializer):
 # ========= SERVICE / IMAGES =========
 
 class ServiceImageSerializer(serializers.ModelSerializer):
+    """Image d'un service. Écriture : uniquement sur SES services ; le service
+    d'une image n'est plus modifiable après sa création (IDOR, §0.6)."""
+    image = PublicImageField()
+
     class Meta:
         model = ServiceImage
         fields = ["id", "service", "image", "alt_text", "uploaded_at"]
         read_only_fields = ["uploaded_at"]
 
+    def get_fields(self):
+        fields = super().get_fields()
+        service = fields.get("service")
+        if service is not None and not service.read_only:
+            request = self.context.get("request")
+            user = getattr(request, "user", None)
+            # Le service d'autrui est traité comme inexistant (400 « pk invalide »),
+            # sans révéler son existence.
+            service.queryset = (Service.objects.filter(handyman=user)
+                                if user is not None and user.is_authenticated
+                                else Service.objects.none())
+        return fields
+
+    def validate_service(self, value):
+        if self.instance is not None and value.pk != self.instance.service_id:
+            raise serializers.ValidationError("Le service d'une image n'est pas modifiable.")
+        return value
+
+
+def _allowed_media_hosts():
+    return {h.strip().lower().rstrip(".") for h in getattr(settings, "MEDIA_PUBLIC_HOSTS", []) if h.strip()}
+
+
+def _invalid_image_url() -> CodedAPIException:
+    detail = "Adresse d'image refusée : seules les images https hébergées par Tratra sont acceptées."
+    return CodedAPIException("invalid_image_url", detail, status=400,
+                             fields={"image_url": [field_error("invalid_image_url", detail)]})
+
 
 class ServiceSerializer(serializers.ModelSerializer):
-    # écriture
-    handyman = serializers.PrimaryKeyRelatedField(queryset=User.objects.all())
+    # `handyman` est posé par le serveur (= request.user) : jamais au nom d'autrui,
+    # jamais de changement de propriétaire (§4.7).
+    handyman = serializers.PrimaryKeyRelatedField(read_only=True)
     category = serializers.PrimaryKeyRelatedField(queryset=ServiceCategory.objects.all())
+    banner = PublicImageField(required=False, allow_null=True)
     # lecture — /services/ est public : identité minimale SANS email.
     handyman_detail = PublicUserMiniSerializer(source="handyman", read_only=True)
     category_detail = ServiceCategorySerializer(source="category", read_only=True)
@@ -302,6 +458,22 @@ class ServiceSerializer(serializers.ModelSerializer):
             "images", "distance_km",
         ]
         read_only_fields = ["created_at", "updated_at"]
+
+    def validate_image_url(self, value):
+        """`https` vers un hôte de stockage du projet (MEDIA_PUBLIC_HOSTS) uniquement :
+        ni pixel de pistage tiers, ni http, ni identifiants dans l'URL."""
+        if not value:
+            return value
+        try:
+            parts = urlsplit(value)
+            hostname = (parts.hostname or "").lower().rstrip(".")
+            parts.port  # noqa: B018 - lève ValueError si le port est invalide
+        except ValueError:
+            raise _invalid_image_url()
+        if (parts.scheme.lower() != "https" or not hostname or parts.username is not None
+                or parts.password is not None or hostname not in _allowed_media_hosts()):
+            raise _invalid_image_url()
+        return value
 
     @extend_schema_field(PublicArtisanMiniSerializer(allow_null=True))
     def get_artisan(self, obj):
@@ -353,6 +525,38 @@ class BookingCreateSerializer(serializers.ModelSerializer):
         end = attrs.get("end_date")
         if start and end and end < start:
             raise serializers.ValidationError("end_date doit être >= booking_date.")
+        return self._validate_parties(attrs)
+
+    def _validate_parties(self, attrs):
+        """Cohérence service / artisan / client (§3.4, L1a ; la condition
+        « publiable » s'ajoute en L5a). Erreurs au format codé (§4.0)."""
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        service = attrs.get("service")
+        handyman = attrs.get("handyman")
+
+        if service is not None:
+            if not service.is_active or not service.handyman.is_active:
+                detail = "Cette prestation n'est plus disponible."
+                raise CodedAPIException("service_unavailable", detail, status=400,
+                                        fields={"service": [field_error("service_unavailable", detail)]})
+            if handyman is not None and handyman.pk != service.handyman_id:
+                detail = "L'artisan indiqué ne propose pas cette prestation."
+                raise CodedAPIException("handyman_mismatch", detail, status=400,
+                                        fields={"handyman": [field_error("handyman_mismatch", detail)]})
+            # Sans `handyman` explicite : celui de la prestation (auparavant : erreur 500).
+            attrs["handyman"] = handyman = service.handyman
+        elif handyman is None:
+            raise serializers.ValidationError({"handyman": ["Indiquez une prestation ou un artisan."]})
+        elif not handyman.is_active or not HandymanProfile.objects.filter(user=handyman).exists():
+            detail = "Cet artisan n'est pas disponible à la réservation."
+            raise CodedAPIException("handyman_unavailable", detail, status=400,
+                                    fields={"handyman": [field_error("handyman_unavailable", detail)]})
+
+        if user is not None and handyman.pk == user.pk:
+            detail = "Vous ne pouvez pas réserver votre propre prestation."
+            raise CodedAPIException("self_booking_forbidden", detail, status=400,
+                                    fields={"handyman": [field_error("self_booking_forbidden", detail)]})
         return attrs
 
     def create(self, validated_data):

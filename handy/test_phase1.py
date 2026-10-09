@@ -13,9 +13,10 @@ def api_client(db):
 
 @pytest.mark.django_db
 def test_inscription_entreprise_cree_profil(api_client):
+    # L1a : mot de passe conforme aux validateurs (« pass1234 » est désormais refusé).
     r = api_client.post(reverse("users-list"), {
         "username": "acme", "email": "acme@ex.com",
-        "password": "pass1234", "user_type": "entreprise",
+        "password": "Tr4tra!Essai-2026", "user_type": "entreprise",
     }, format="json")
     assert r.status_code == 201, r.content
     u = User.objects.get(username="acme")

@@ -25,6 +25,17 @@ export interface Category {
 
 export type PriceType = "hourly" | "fixed" | "quote";
 
+/**
+ * Identité publique minimale d'un artisan (`Service.handyman_detail`) :
+ * jamais le nom complet, l'email, le rôle ni l'état de vérification du compte.
+ */
+export interface PublicUserMini {
+  id: number;
+  first_name: string;
+  /** « Prénom N. » (ou « Membre Tratra »). */
+  display_name: string;
+}
+
 /** Résumé public d'un artisan embarqué dans un service (aucune donnée sensible). */
 export interface PublicArtisanMini {
   id: number;
@@ -97,7 +108,7 @@ export interface Service {
   category?: number | null;
   handyman?: number | null;
   category_detail?: Category | null;
-  handyman_detail?: (Partial<User> & { id?: number }) | null;
+  handyman_detail?: PublicUserMini | null;
   /** Profil public de l'artisan (note, commune, vérifié, en ligne). */
   artisan?: PublicArtisanMini | null;
   /** Distance en km — présent uniquement sur /services/nearby/. */

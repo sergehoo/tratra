@@ -305,7 +305,9 @@ def test_services_public_payload_hides_email_and_embeds_artisan(api_client):
     assert r.status_code == 200, r.content
     rows = {row["id"]: row for row in r.json()["results"]}
     row = rows[svc.id]
-    assert set(row["handyman_detail"].keys()) == {"id", "first_name", "last_name", "user_type", "is_verified"}
+    # L1a : identité publique minimale (plus de nom complet, de rôle ni d'is_verified).
+    assert set(row["handyman_detail"].keys()) == {"id", "first_name", "display_name"}
+    assert row["handyman_detail"]["display_name"] == "Awa K."
     assert row["artisan"]["display_name"] == "Awa K."
     assert row["artisan"]["is_verified"] is True
     assert row["artisan"]["commune"] == "Cocody"

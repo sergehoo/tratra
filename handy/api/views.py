@@ -2,9 +2,10 @@
 import hashlib
 import hmac
 import logging
+import math
+import re
 import secrets
 from datetime import timedelta
-import math
 from decimal import Decimal, InvalidOperation
 from math import radians, cos, sqrt, sin, asin
 from pathlib import Path
@@ -19,12 +20,12 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction, models
 from django.db.models import Avg, Count, Exists, F, OuterRef, Q
 from django.db.models.functions import Trim
-from django.http import FileResponse
+from django.http import FileResponse, Http404
 from django.utils import timezone
 
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import serializers as drf_serializers
-from rest_framework import viewsets, permissions, status, mixins
+from rest_framework import generics, viewsets, permissions, status, mixins
 from rest_framework.authentication import SessionAuthentication
 from rest_framework.decorators import action, api_view, authentication_classes, permission_classes
 from drf_spectacular.utils import (
@@ -45,6 +46,7 @@ from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework_simplejwt.authentication import JWTAuthentication
 
+from handy.api.errors import CodedAPIException
 from handy.eligibility import (
     can_receive_missions, not_on_timeoff, publishable, publishable_user_ids, published_services,
     restrict_public_services,
@@ -361,6 +363,9 @@ class UserViewSet(viewsets.ModelViewSet):
     queryset = User.objects.all().only("id", "email", "first_name", "last_name", "user_type", "is_verified")
     serializer_class = UserSerializer
     permission_classes = [permissions.IsAuthenticated]
+    # DELETE -> 405 (L1a) : la suppression effaçait le compte EN CASCADE (réservations,
+    # paiements…). La désactivation passera par POST /users/me/deactivate/ (L3b).
+    http_method_names = ["get", "post", "put", "patch", "head", "options"]
     filter_backends = [SearchFilter, OrderingFilter]
     search_fields = ["email", "first_name", "last_name"]
     ordering = ["-id"]
@@ -406,7 +411,35 @@ class UserViewSet(viewsets.ModelViewSet):
 
 
 # ---- Profils artisans ----
-class HandymanProfileViewSet(viewsets.ModelViewSet):
+def public_profile_queryset():
+    """Profils dont la carte publique peut être servie : artisans ÉLIGIBLES (compte actif, profil
+    approuvé, KYC approuvé, profil complet — handy/eligibility.py). Même règle que le catalogue,
+    /handymen/featured/ et la fiche publique. Annoté pour PublicArtisanSerializer."""
+    return (publishable()
+            .annotate(services_count=Count("user__services",
+                                           filter=Q(user__services__is_active=True),
+                                           distinct=True))
+            .select_related("user")
+            .prefetch_related("skills"))
+
+
+@extend_schema_view(
+    retrieve=extend_schema(description=(
+        "Propriétaire (ou staff) : profil complet. Tiers : 404, SAUF pont de compatibilité "
+        "(application mobile installée) : un artisan ÉLIGIBLE (compte actif, profil approuvé, KYC "
+        "approuvé, profil complet) est renvoyé sous sa forme PUBLIQUE (PublicArtisan, sans email, téléphone, pièce, "
+        "licence, assurance ni position).")),
+)
+class HandymanProfileViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
+                             mixins.UpdateModelMixin, viewsets.GenericViewSet):
+    """Profils artisans (L1a, §4.12).
+
+    - Liste et détail : le propriétaire seulement (le staff garde la lecture globale
+      jusqu'à L1b, où elle passera à la permission `view_all_records`).
+    - `POST /handymen/` et `DELETE /handymen/{id}/` : 405 (pas de mixin create/destroy) ;
+      le profil naît du signal `user_type='handyman'` puis de `PUT /users/me/handyman/` (L3b).
+    - `PATCH/PUT` : propriétaire, champs réservés en lecture seule (serializer).
+    """
     queryset = (
         HandymanProfile.objects.select_related("user")
         .prefetch_related("skills")
@@ -420,6 +453,30 @@ class HandymanProfileViewSet(viewsets.ModelViewSet):
     search_fields = ["user__first_name", "user__last_name", "commune", "quartier"]
     ordering = ["-rating", "-completed_jobs"]
     pagination_class = DefaultPageNumberPagination
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        user = self.request.user
+        if not (user and user.is_authenticated):
+            return qs.none()
+        if user.is_staff:
+            return qs  # L1b : remplacé par la permission view_all_records
+        # Auparavant : tout compte connecté lisait le CNI, la licence, l'assurance,
+        # la position exacte et l'email de tous les artisans.
+        return qs.filter(user=user)
+
+    def retrieve(self, request, *args, **kwargs):
+        try:
+            instance = self.get_object()
+        except Http404:
+            # Pont de compatibilité : l'écran Flutter `artisan_profile_screen` appelle
+            # GET /handymen/{id}/ pour afficher un artisan. Un tiers ne reçoit QUE la
+            # carte publique d'un profil approuvé et actif ; sinon le même 404
+            # (inexistant et non publiable indiscernables).
+            lookup = self.kwargs[self.lookup_url_kwarg or self.lookup_field]
+            public = generics.get_object_or_404(public_profile_queryset(), pk=lookup)
+            return Response(PublicArtisanSerializer(public, context=self.get_serializer_context()).data)
+        return Response(self.get_serializer(instance).data)
 
     @action(detail=False, methods=["post"], url_path="presence")
     def presence(self, request):
@@ -480,12 +537,7 @@ class HandymanProfileViewSet(viewsets.ModelViewSet):
 
         # services_count = prestations ACTIVES : le front n'affiche « Voir ses prestations »
         # que s'il y en a (un artisan vérifié peut ne travailler que via /match/).
-        qs = (publishable()
-              .annotate(services_count=Count("user__services",
-                                             filter=Q(user__services__is_active=True),
-                                             distinct=True))
-              .select_related("user")
-              .prefetch_related("skills"))
+        qs = public_profile_queryset()
 
         category_ids = _id_list(params.get("categories"))
         single = _id_list(params.get("category"), max_items=1)
@@ -539,15 +591,47 @@ class ServiceCategoryViewSet(viewsets.ModelViewSet):
 
 
 # ---- Services ----
+_CANONICAL_ID = re.compile(r"[1-9][0-9]{0,18}")
+
+
+def strict_id_param(params, name):
+    """Identifiant en égalité STRICTE : `None` si absent ou vide, `-1` (aucun
+    résultat) si la valeur n'est pas un entier canonique unique (« 08 », « 8.0 »,
+    « 8abc », plusieurs valeurs…), l'entier sinon. Jamais d'oracle d'existence."""
+    values = [v for v in params.getlist(name) if v != ""]
+    if not values:
+        return None
+    if len(values) != 1 or not _CANONICAL_ID.fullmatch(values[0]) or int(values[0]) > _MAX_PK:
+        return -1
+    return int(values[0])
+
+
+def handyman_profile_required(user) -> HandymanProfile:
+    profile = HandymanProfile.objects.filter(user=user).first() if user.is_authenticated else None
+    if profile is None:
+        raise CodedAPIException(
+            "handyman_profile_required",
+            "Un profil artisan est nécessaire pour proposer un service.",
+            status=status.HTTP_403_FORBIDDEN,
+        )
+    return profile
+
+
 @extend_schema_view(
     list=extend_schema(parameters=_PUBLIC_SERVICE_FILTER_PARAMS + [
         OpenApiParameter("sort", OpenApiTypes.STR,
                          enum=list(SERVICE_SORTS.keys()),
                          description="Tri public : recent | price_asc | price_desc | rating "
                                      "(ignoré si ?ordering= est fourni)."),
+        OpenApiParameter("handyman", OpenApiTypes.INT,
+                         description="Id utilisateur de l'artisan (égalité stricte ; valeur "
+                                     "invalide ou inconnue = liste vide)."),
     ]),
 )
 class ServiceViewSet(viewsets.ModelViewSet):
+    """Catalogue des services. Lecture publique ; écriture par l'artisan propriétaire
+    uniquement : `handyman` = request.user, profil artisan requis (403
+    `handyman_profile_required`), aucun changement de propriétaire (L1a, §4.7)."""
     queryset = (
         Service.objects.select_related("handyman", "category", "handyman__handyman_profile")
         .prefetch_related("images")
@@ -557,7 +641,9 @@ class ServiceViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticatedOrReadOnly, IsOwnerOrAdmin]
     owner_lookup = "handyman"
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ["category", "is_active", "price_type", "handyman"]
+    # `handyman` est filtré à part (égalité stricte, cf. strict_id_param) : le filtre
+    # django-filter renvoyait 400 pour un id inconnu (oracle d'existence des comptes).
+    filterset_fields = ["category", "is_active", "price_type"]
     # category__* : « plomberie », « ménage » (nom) ou « electricite » (slug sans accent)
     # trouvent le métier. Category est une FK : pas de doublon.
     search_fields = ["title", "description", "category__name", "category__slug",
@@ -570,14 +656,39 @@ class ServiceViewSet(viewsets.ModelViewSet):
         # artisan éligible) — sauf pour son propriétaire (et le staff). Sinon : 404.
         return published_services(super().get_queryset(), self.request.user)
 
+    def perform_create(self, serializer):
+        handyman_profile_required(self.request.user)
+        serializer.save(handyman=self.request.user)
+
+    def perform_update(self, serializer):
+        user = self.request.user
+        handyman_profile_required(user)
+        if serializer.instance.handyman_id != user.pk:
+            # Staff compris : modifier le service d'autrui reviendrait à se l'approprier.
+            raise PermissionDenied("Seul l'artisan propriétaire peut modifier ce service.")
+        serializer.save(handyman=user)
+
+    def perform_destroy(self, instance):
+        # Un service déjà réservé est désactivé plutôt que supprimé : les réservations
+        # (Booking.service, SET_NULL) gardent leur prestation (M-S1).
+        if instance.bookings.exists():
+            if instance.is_active:
+                instance.is_active = False
+                instance.save(update_fields=["is_active", "updated_at"])
+            return
+        instance.delete()
+
     def filter_queryset(self, queryset):
         queryset = super().filter_queryset(queryset)
         if getattr(self, "action", None) != "list":
             return queryset
         params = self.request.query_params
+        handyman_id = strict_id_param(params, "handyman")
+        if handyman_id is not None:
+            # L5a : le filtre « public() » ne sera levé que si handyman_id == request.user.pk.
+            queryset = queryset.filter(handyman_id=handyman_id)
         # Un artisan qui filtre sur SON propre id voit tous ses services ; tout autre cas : publiés.
-        user = self.request.user
-        own = user.is_authenticated and str(params.get("handyman") or "") == str(user.pk)
+        own = handyman_id is not None and self.request.user.is_authenticated and handyman_id == self.request.user.pk
         queryset = apply_public_service_filters(queryset, params, restrict=not own)
         # ?ordering= (DRF) reste prioritaire ; ?sort= ne s'applique qu'en son absence.
         sort = SERVICE_SORTS.get(str(params.get("sort") or "").strip().lower())
@@ -642,10 +753,14 @@ class ServiceViewSet(viewsets.ModelViewSet):
         return self.get_paginated_response(ser.data)
 
 
-class ServiceImageViewSet(viewsets.ModelViewSet):
-    queryset = ServiceImage.objects.select_related("service").all()
+class ServiceImageViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
+    """Images des services de l'artisan courant (L1a). Auparavant : queryset global,
+    tout compte connecté pouvait modifier, déplacer ou supprimer l'image d'autrui.
+    Un tiers reçoit 404 ; le staff garde la lecture globale jusqu'à L1b."""
+    queryset = ServiceImage.objects.select_related("service").order_by("-uploaded_at", "-id")
     serializer_class = ServiceImageSerializer
     permission_classes = [permissions.IsAuthenticated]
+    owner_lookups = ("service__handyman",)
     pagination_class = DefaultPageNumberPagination
 
 

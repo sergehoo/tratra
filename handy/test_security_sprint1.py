@@ -25,6 +25,11 @@ def api_client(db):
     return APIClient()
 
 
+# L1a : l'inscription API applique AUTH_PASSWORD_VALIDATORS ; « pass1234 » (trop
+# courant) y est refusé. Les comptes créés par l'ORM (_user) ne sont pas concernés.
+SIGNUP_PASSWORD = "Tr4tra!Essai-2026"
+
+
 def _user(username, utype="client"):
     return User.objects.create_user(
         username=username, email=f"{username}@ex.com",
@@ -47,9 +52,11 @@ def test_signup_rejette_role_admin(api_client):
     url = reverse("users-list")
     res = api_client.post(url, {
         "username": "evil", "email": "evil@ex.com",
-        "password": "pass1234", "user_type": "admin",
+        "password": SIGNUP_PASSWORD, "user_type": "admin",
     }, format="json")
     assert res.status_code == 400
+    # Refus dû au RÔLE (mot de passe valide) : l'escalade reste bloquée en soi.
+    assert "user_type" in res.json(), res.content
     assert not User.objects.filter(username="evil").exists()
 
 
@@ -58,7 +65,7 @@ def test_signup_client_ok_sans_privilege(api_client):
     url = reverse("users-list")
     res = api_client.post(url, {
         "username": "alice", "email": "alice@ex.com",
-        "password": "pass1234", "user_type": "client",
+        "password": SIGNUP_PASSWORD, "user_type": "client",
     }, format="json")
     assert res.status_code == 201, res.content
     u = User.objects.get(username="alice")
