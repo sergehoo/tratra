@@ -89,3 +89,7 @@ seulement (404 en production, `noindex`).
 3. **Mobile d'abord** : cible tactile ≥ 44 px, gouttière 16 px, navigation basse en mobile, tableaux en cartes.
 4. **Animations discrètes** : ≤ 420 ms (900 ms réservé au hero), `prefers-reduced-motion` respecté (règle globale + `MotionConfig`).
 5. **Un seul `<h1>` par page**, fourni par `PageHeader` ; focus visible partout.
+
+## Validation
+
+Résultats et points ouverts de la dernière passe de QA : [QA.md](./QA.md).
