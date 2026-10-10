@@ -1632,6 +1632,12 @@ class SubscriptionViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
         plan = SubscriptionPlan.objects.filter(pk=request.data.get("plan"), active=True).first()
         if not plan:
             return Response({"detail": "Plan introuvable ou inactif."}, status=status.HTTP_400_BAD_REQUEST)
+        # Un abonnement PAYANT ne s'active jamais sans paiement confirmé : aucun parcours de paiement d'abonnement n'est
+        # branché pour l'instant, donc seul un plan gratuit s'active ici (402 : paiement requis).
+        if plan.price and plan.price > 0:
+            return Response({"code": "payment_required",
+                             "detail": "Ce plan est payant : le paiement en ligne des abonnements n'est pas encore disponible. "
+                                       "Contactez l'équipe Tratra pour l'activer."}, status=status.HTTP_402_PAYMENT_REQUIRED)
         sub = Subscription.subscribe(request.user, plan)
         return Response(SubscriptionSerializer(sub).data, status=status.HTTP_201_CREATED)
 

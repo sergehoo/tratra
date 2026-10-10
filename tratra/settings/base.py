@@ -91,6 +91,7 @@ INSTALLED_APPS = [
     'handy',
     'trust',
     'live',
+    'business',
     # Libs
     'allauth',
     'allauth.account',
@@ -426,6 +427,11 @@ CELERY_BEAT_SCHEDULE = {
     'trust-reevaluate-profiles': {
         'task': 'trust.tasks.reevaluate_all_profiles',
         'schedule': 3600.0,
+    },
+    # Tratra Business : génération quotidienne des maintenances préventives échues (et rappels).
+    'business-run-preventive': {
+        'task': 'business.tasks.run_preventive_plans',
+        'schedule': 86400.0,
     },
     # Suivi en direct : purge des positions (historique minimal, expiration).
     'live-purge-positions': {

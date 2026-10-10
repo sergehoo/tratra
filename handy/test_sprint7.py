@@ -71,15 +71,22 @@ def test_payout_account_upsert(api_client):
 
 @pytest.mark.django_db
 def test_souscription_cycle(api_client):
-    plan = SubscriptionPlan.objects.create(
+    paid = SubscriptionPlan.objects.create(
         name="Pro", slug="pro", audience="handyman",
         price=Decimal("5000"), interval="monthly", active=True,
         features=["mise en avant", "0% commission première mission"])
+    plan = SubscriptionPlan.objects.create(name="Essentiel", slug="essentiel", audience="handyman",
+                                           price=Decimal("0"), interval="monthly", active=True)
     h = _user("h_sub", "handyman")
     api_client.force_authenticate(user=h)
 
     plans = api_client.get(reverse("subscription-plans-list"))
     assert plans.status_code == 200
+
+    # Un plan PAYANT ne s'active jamais sans paiement : 402, aucun abonnement créé.
+    refused = api_client.post(reverse("subscriptions-list"), {"plan": paid.id}, format="json")
+    assert refused.status_code == 402 and refused.json()["code"] == "payment_required"
+    assert not Subscription.objects.filter(user=h).exists()
 
     r = api_client.post(reverse("subscriptions-list"), {"plan": plan.id}, format="json")
     assert r.status_code == 201, r.content

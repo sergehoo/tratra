@@ -919,6 +919,9 @@ class Notification(models.Model):
         ('booking_status', 'Changement de statut de réservation'),
         ('live_en_route', 'Artisan en route'),
         ('live_arrived', 'Artisan arrivé'),
+        ('business_request', "Demande d'intervention à valider"),
+        ('business_update', "Mise à jour d'une demande d'intervention"),
+        ('business_reminder', 'Rappel de maintenance'),
     ]
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notifications', db_index=True)
     notification_type = models.CharField(max_length=50, choices=TYPES, db_index=True)

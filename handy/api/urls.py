@@ -71,5 +71,6 @@ urlpatterns = [
 
     path('', include('trust.urls')),  # Tratra Trust / Tratra ID
     path('', include('live.urls')),   # Tratra Live : suivi en direct des missions
+    path('', include('business.urls')),  # Tratra Business : organisations, interventions, budgets
     path('', include(router.urls)),
 ]
