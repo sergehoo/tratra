@@ -104,6 +104,14 @@ def test_kyc_approval_awards_verifie_and_ends_nouveau():
     assert {"badge.awarded", "badge.revoked"} <= set(events.values_list("action", flat=True))
 
 
+def test_verified_identity_always_carries_a_date_even_without_review_timestamp():
+    from trust import passport
+    art = artisan("t_kyc_date", eligible=True)
+    profile = art.handyman_profile
+    HandymanDocument.objects.filter(handyman=profile).update(reviewed_at=None)
+    assert passport._kyc_verified_on(profile) is not None
+
+
 def test_verifie_depends_only_on_kyc_never_on_declaration():
     art = artisan("t_decl", eligible=False)
     p = art.handyman_profile

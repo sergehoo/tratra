@@ -1,4 +1,5 @@
 """Tratra Live : suivi GPS consenti, limité à la mission, contrôlé côté serveur, temps réel et purge."""
+import json
 from datetime import timedelta
 from urllib.parse import quote
 
@@ -442,3 +443,33 @@ def test_ticket_endpoint_is_for_participants_and_short_lived():
     assert t["path"] == f"/ws/live/{b.id}/" and t["expires_in"] == 60
     assert realtime.read_ticket(t["ticket"]) == (cli.id, b.id)
     assert realtime.read_ticket(t["ticket"] + "x") is None
+
+
+@pytest.mark.django_db(transaction=True)
+def test_websocket_pushes_never_carry_a_position_outside_the_authorized_phase():
+    """Flux temps réel d'un client : position pendant le trajet, plus aucune coordonnée après l'arrivée ou la clôture."""
+    art, cli = artisan("lv_wsl_art"), _client("lv_wsl_cli")
+    b = mission(art, cli)
+
+    def coords(state):
+        return json.dumps(state)
+
+    async def scenario():
+        comm, ok, _ = await _connect(f"/ws/live/{b.id}/?ticket={quote(realtime.make_ticket(cli.id, b.id), safe='')}")
+        assert ok
+        first = (await comm.receive_json_from())["state"]
+        assert first["artisan"]["position"] is None and first["route"] is None            # rien avant « en route »
+        await database_sync_to_async(lambda: api(art).post(url(b, "en-route/"), {"consent": True}, format="json"))()
+        await comm.receive_json_from()
+        await database_sync_to_async(lambda: api(art).post(url(b, "position/"), ping(NEARBY), format="json"))()
+        live_state = (await comm.receive_json_from())["state"]
+        assert live_state["artisan"]["position"]["lat"] == pytest.approx(NEARBY[0])         # pendant le trajet : oui
+        await database_sync_to_async(lambda: api(art).post(url(b, "arrived/")))()
+        after = (await comm.receive_json_from())["state"]
+        assert after["phase"] == "arrived" and "5.37" not in coords(after) and after["artisan"]["position"] is None
+        await database_sync_to_async(lambda: Booking.objects.get(pk=b.pk).transition_to("in_progress"))()
+        started = (await comm.receive_json_from())["state"]
+        assert "5.37" not in coords(started) and started["phase"] == "in_progress"
+        await comm.disconnect()
+
+    async_to_sync(scenario)()

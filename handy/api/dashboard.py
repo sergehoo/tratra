@@ -20,6 +20,7 @@ from rest_framework import permissions, status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 
+from handy.api.serializers import absolute_media_url
 from handy.eligibility import is_publishable, profile_checklist
 from handy.models import (
     Booking, CompanyProfile, Conversation, HandymanDocument, HandymanProfile, Message, Notification, Review, Service,
@@ -92,8 +93,16 @@ def _provider_block(user, profile, now) -> dict:
     upcoming = (missions.filter(status__in=ACTIVE_STATUSES)
                 .select_related("client", "service", "service__category")
                 .order_by("booking_date", "id")[:LIST_SIZE])
+    from trust.engine import evaluate_profile
+    from trust.models import BadgeAward
+
+    if profile.trust_evaluated_at is None:  # profil antérieur à Tratra Trust : première évaluation à la demande
+        evaluate_profile(profile, trigger="dashboard")
     return {
         "profile_id": profile.id,
+        # Badges Tratra Trust ACTUELS (NOUVEAU tant que l'identité n'est pas vérifiée) et score s'il est calculable.
+        "badges": [{"code": c, "label": BadgeAward.LABELS[c]} for c in (profile.trust_badges or []) if c in BadgeAward.LABELS],
+        "trust_score": profile.trust_score,
         "online": bool(profile.online),
         "is_approved": bool(profile.is_approved),
         "publishable": is_publishable(profile),
@@ -364,7 +373,8 @@ def me_reviews(request):
         item = {"id": r.id, "rating": r.rating, "comment": r.comment or "", "created_at": r.created_at.isoformat(),
                 "booking_id": r.booking_id, "service": service.title if service else None,
                 "criteria": {k: getattr(r, k) for k in Review.CRITERIA if getattr(r, k) is not None},
-                "photos": [m.image.url for m in r.media.all() if m.image],
+                # URL ABSOLUE : relative, elle serait résolue contre l'origine du site web (404) hors stockage objet.
+                "photos": [u for u in (absolute_media_url(request, m.image) for m in r.media.all()) if u],
                 "reply": ({"text": r.reply_text, "at": r.reply_at.isoformat() if r.reply_at else None}
                           if (r.reply_text or "").strip() else None),
                 "author" if other == "client" else "artisan": public_name(

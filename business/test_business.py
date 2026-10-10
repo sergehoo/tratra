@@ -602,3 +602,91 @@ def test_audit_log_records_who_did_what_and_stays_inside_the_organization():
     assert all(e["actor"] for e in log)
     assert not any(e["detail"].get("number") == "INT-0001" for e in log)
     assert {e["target_id"] for e in log if e["target_type"] == "interventionrequest"} == {r["id"]}
+
+
+# ---- Matrices exhaustives : organisations et rôles ------------------------------------------------------------------------
+
+def _endpoints(c, req_id, member_id, invitation_id, rule_id, contract_id, plan_id, budget_id, invoice_id):
+    """(méthode, chemin, capacité requise, charge utile) pour TOUTES les routes d'une organisation."""
+    site, eq = c.site, c.equipment
+    ok_request = {"site": site, "title": "Matrice", "priority": "low"}
+    return [
+        ("get", "", "view.structure", None), ("patch", "", "org.manage", {"name": "Renommée"}),
+        ("get", "sites/", "view.structure", None), ("post", "sites/", "sites.manage", {"name": "Site matrice"}),
+        ("get", f"sites/{site}/", "view.structure", None), ("patch", f"sites/{site}/", "sites.manage", {"notes": "x"}),
+        ("get", "buildings/", "view.structure", None), ("post", "buildings/", "sites.manage", {"site": site, "name": "Bât M"}),
+        ("get", "equipment/", "view.structure", None), ("post", "equipment/", "equipment.manage", {"site": site, "name": "Eq M"}),
+        ("get", f"equipment/{eq}/", "view.structure", None), ("patch", f"equipment/{eq}/", "equipment.manage", {"notes": "x"}),
+        ("get", f"equipment/{eq}/qr.png", "view.structure", None),
+        ("get", "members/", "members.manage", None), ("patch", f"members/{member_id}/", "members.manage", {"role": "viewer"}),
+        ("get", "invitations/", "members.manage", None), ("post", "invitations/", "members.manage", {"role": "viewer"}),
+        ("delete", f"invitations/{invitation_id}/", "members.manage", None),
+        ("get", "approval-rules/", "approval_rules.manage", None), ("post", "approval-rules/", "approval_rules.manage", {"name": "R", "steps": ["admin"]}),
+        ("patch", f"approval-rules/{rule_id}/", "approval_rules.manage", {"is_active": True}),
+        ("get", "contracts/", "view.structure", None), ("post", "contracts/", "contracts.manage", {"name": "C", "starts_on": "2026-01-01"}),
+        ("patch", f"contracts/{contract_id}/", "contracts.manage", {"notes": "x"}),
+        ("get", "preventive-plans/", "view.structure", None),
+        ("post", "preventive-plans/", "preventive.manage", {"equipment": eq, "title": "P", "frequency_days": 30, "next_due_on": "2030-01-01"}),
+        ("patch", f"preventive-plans/{plan_id}/", "preventive.manage", {"title": "P2"}), ("post", "preventive-plans/run/", "preventive.manage", None),
+        ("get", "budgets/", "reports.view", None), ("post", "budgets/", "budgets.manage", {"name": "B", "period_start": "2026-01-01", "period_end": "2026-12-31", "amount": "1"}),
+        ("patch", f"budgets/{budget_id}/", "budgets.manage", {"name": "B2"}),
+        ("get", "invoices/", "invoices.manage", None), ("get", f"invoices/{invoice_id}/", "invoices.manage", None),
+        ("get", f"invoices/{invoice_id}/export.csv", "invoices.manage", None),
+        ("post", "invoices/generate/", "invoices.manage", {"start": "2026-01-01", "end": "2026-01-02"}),
+        ("get", "dashboard/", "reports.view", None), ("get", "reports/requests.csv", "reports.view", None), ("get", "audit/", "audit.view", None),
+        ("post", "requests/", "requests.create", ok_request),
+        ("get", f"requests/{req_id}/suggestions/", "requests.dispatch", None), ("post", f"requests/{req_id}/dispatch/", "requests.dispatch", {}),
+        ("post", f"requests/{req_id}/decide/", "requests.approve", {"approve": True}),
+    ]
+
+
+def _fixture_org(prefix):
+    from business.models import ConsolidatedInvoice
+    c = Company(prefix.title(), prefix)
+    viewer = c.member("viewer")
+    member_id = Membership.objects.get(organization_id=c.id, user=viewer).id
+    inv = c.post("invitations/", {"role": "viewer"}).json()["id"]
+    rule_id = c.post("approval-rules/", {"name": "R0", "steps": ["admin"], "min_amount": "999999999"}).json()["id"]
+    contract = c.post("contracts/", {"name": "C0", "starts_on": "2026-01-01"}).json()["id"]
+    plan = c.post("preventive-plans/", {"equipment": c.equipment, "title": "P0", "frequency_days": 30, "next_due_on": "2030-01-01"}).json()["id"]
+    budget = c.post("budgets/", {"name": "B0", "period_start": "2026-01-01", "period_end": "2026-12-31", "amount": "1"}).json()["id"]
+    org = Organization.objects.get(pk=c.id)
+    invoice = ConsolidatedInvoice.objects.create(organization=org, number="FAC-TEST-001", period_start="2026-01-01", period_end="2026-01-02")
+    req = c.request().json()["id"]
+    return c, dict(req_id=req, member_id=member_id, invitation_id=inv, rule_id=rule_id, contract_id=contract, plan_id=plan, budget_id=budget, invoice_id=invoice.id)
+
+
+def _call(user, c, method, path, payload):
+    client = api(user)
+    kw = {"format": "json"} if payload is not None else {}
+    return getattr(client, method)(c.url(path), payload, **kw) if method in ("post", "patch") else getattr(client, method)(c.url(path))
+
+
+def test_every_route_of_an_organization_is_invisible_to_other_organizations_and_non_members():
+    a, ids = _fixture_org("matrixa")
+    b = Company("B", "matrixb")
+    stranger = _client("matrix_stranger")
+    before = (Site.objects.count(), InterventionRequest.objects.count(), Membership.objects.count())
+    for method, path, _cap, payload in _endpoints(a, **ids):
+        for who, label in ((b.owner, "propriétaire d'une autre organisation"), (stranger, "compte sans organisation")):
+            r = _call(who, a, method, path, payload)
+            assert r.status_code == 404, f"{method.upper()} {path} ({label}) → {r.status_code}"
+        assert _call(None, a, method, path, payload).status_code == 401, f"{method.upper()} {path} (anonyme)"
+    assert (Site.objects.count(), InterventionRequest.objects.count(), Membership.objects.count()) == before   # rien n'a été écrit
+    assert Organization.objects.get(pk=a.id).name == "Matrixa"
+
+
+@pytest.mark.parametrize("role", ["admin", "site_manager", "approver", "requester", "finance", "viewer"])
+def test_every_route_enforces_exactly_the_capabilities_of_the_role(role):
+    from business import rbac
+    c, ids = _fixture_org(f"caps{role}".replace("_", ""))
+    user = c.member(role)
+    caps = rbac.ROLE_CAPS[role]
+    for method, path, cap, payload in _endpoints(c, **ids):
+        r = _call(user, c, method, path, payload)
+        if cap in caps:
+            assert r.status_code not in (401, 403, 404) or (r.status_code == 404 and method == "delete"), f"{role}: {method.upper()} {path} refusé alors que « {cap} » est accordée → {r.status_code}"
+        else:
+            assert r.status_code == 403, f"{role}: {method.upper()} {path} aurait dû être refusé (« {cap} ») → {r.status_code}"
+        if method == "patch" and path == "":  # ne renomme pas pour de bon l'organisation pour les rôles suivants
+            Organization.objects.filter(pk=c.id).update(name=c.prefix)

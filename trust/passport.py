@@ -8,6 +8,7 @@ La version publique n'expose ni document, ni email, ni téléphone, ni position,
 """
 from typing import Dict
 
+from django.db.models import F
 from django.utils import timezone
 
 from handy.api.serializers import absolute_media_url, public_display_name
@@ -34,8 +35,9 @@ def badges_of(profile) -> list:
 
 def _kyc_verified_on(profile):
     doc = (HandymanDocument.objects.filter(handyman=profile, document_type__in=sorted(profile.REQUIRED_KYC_DOCS),
-                                           status="approved").order_by("-reviewed_at").first())
-    return doc.reviewed_at if doc else None
+                                           status="approved").order_by(F("reviewed_at").desc(nulls_last=True), "-uploaded_at").first())
+    # Un justificatif approuvé avant l'horodatage de revue garde une date (dépôt) : jamais « non vérifiée » à tort.
+    return (doc.reviewed_at or doc.uploaded_at) if doc else None
 
 
 def _certifications(profile) -> list:
