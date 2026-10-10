@@ -22,6 +22,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import ServiceCard from "@/components/market/ServiceCard";
+import { TrustBadges, TrustScorePill } from "@/components/trust/TrustBadge";
 import {
   Alert,
   Badge,
@@ -184,6 +185,13 @@ function ProfileCard({ data }: { data: DashboardData }) {
         icon={<ShieldCheck className="h-5 w-5" />}
         action={<Badge tone={p.publishable ? "success" : "gray"} dot>{p.publishable ? "Publié" : "Non publié"}</Badge>}
       />
+      {p.badges?.length ? (
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          <TrustBadges badges={p.badges} />
+          {p.trust_score != null ? <TrustScorePill score={p.trust_score} /> : null}
+          <Link href="/dashboard/reputation" className="text-xs font-semibold text-primaryDark hover:underline">Ma réputation</Link>
+        </div>
+      ) : null}
       <div className="mb-1 flex items-baseline justify-between">
         <span className="text-sm font-semibold text-ink">Progression</span>
         <span className="font-display text-lg font-extrabold text-primaryDark">{p.completion.percent}%</span>

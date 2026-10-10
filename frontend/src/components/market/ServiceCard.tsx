@@ -98,7 +98,7 @@ export default function ServiceCard({ service }: { service: Service }) {
             {artisan?.badges?.length ? <TrustBadges badges={artisan.badges} className="mt-1" /> : null}
             <p className="flex flex-wrap items-center gap-x-2 text-xs text-ash">
               <RatingStars rating={artisan?.rating} />
-              {artisan && artisan.completed_jobs > 0 ? <span>{artisan.completed_jobs} missions</span> : null}
+              {artisan && artisan.completed_jobs > 0 ? <span>{artisan.completed_jobs} mission{artisan.completed_jobs > 1 ? "s" : ""}</span> : null}
               {artisan?.commune ? <span className="truncate">{artisan.commune}</span> : null}
               {artisan?.online ? (
                 <Badge tone="success" pulse>

@@ -128,7 +128,7 @@ export function formatCriterion(c: Criterion): string {
   const fmt = (v: number | null) => {
     if (v == null) return "—";
     if (c.unit === "%") return `${Math.round(v * 100)} %`;
-    return `${String(v).replace(".", ",")}${c.unit ? ` ${c.unit}` : ""}`;
+    return `${String(v).replace(".", ",")}${c.unit ? (c.unit.startsWith("/") ? c.unit : ` ${c.unit}`) : ""}`;
   };
   return `${fmt(c.current)} · ${c.higher_better ? "minimum" : "maximum"} ${fmt(c.required)}`;
 }

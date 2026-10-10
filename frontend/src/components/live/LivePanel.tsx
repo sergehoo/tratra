@@ -53,7 +53,8 @@ export function LivePanel({ state, realtime, offline, viewer }: { state: LiveSta
   const artisan = state.artisan.position;
   const client = state.client.position;
   const route = state.route;
-  const showMap = state.phase === "en_route" || state.phase === "arrived" || (state.phase === "confirmed" && (client || state.destination));
+  // Pas de carte vide : elle n'apparaît que s'il y a au moins un repère réel à y placer.
+  const showMap = Boolean(artisan || client || state.destination);
   const lost = artisan?.stale === true;
   return (
     <div className="space-y-4">

@@ -36,6 +36,9 @@ export type KycStatus = "none" | "pending" | "approved" | "rejected";
 
 export interface ProviderBlock {
   profile_id: number;
+  /** Badges Tratra Trust actuels (NOUVEAU tant que l'identité n'est pas vérifiée). */
+  badges?: { code: "NOUVEAU" | "VERIFIE" | "EXPERT" | "SUR"; label: string }[];
+  trust_score?: number | null;
   online: boolean;
   is_approved: boolean;
   publishable: boolean;

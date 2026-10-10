@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { Clock, SearchX } from "lucide-react";
+import { Clock, LocateFixed, SearchX } from "lucide-react";
 import { apiErrorMessage, get, post } from "@/lib/api";
 import { ESCROW_ENABLED, PAYMENT_METHODS, type PaymentMethod } from "@/lib/config";
 import {
@@ -79,6 +79,10 @@ export default function ServiceDetailPage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [form, setForm] = useState({ booking_date: "", address: "", city: "", postal_code: "", description: "" });
+  // Coordonnées FACULTATIVES du lieu (position de l'appareil, avec accord du navigateur) : alimentent l'heure d'arrivée du suivi.
+  const [coords, setCoords] = useState<{ lat: number; lng: number; accuracy: number } | null>(null);
+  const [locating, setLocating] = useState(false);
+  const [locateError, setLocateError] = useState("");
   const [pay, setPay] = useState(true);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>(PAYMENT_METHODS[0].value);
   const [createdBookingId, setCreatedBookingId] = useState<number | null>(null);
@@ -181,6 +185,7 @@ export default function ServiceDetailPage() {
           postal_code: form.postal_code || "00000",
           description: form.description,
           type: "scheduled",
+          ...(coords ? { lat: coords.lat, lng: coords.lng } : {}),
           minutes: 60,
           category_id: svc.category ?? svc.category_detail?.id,
         });
@@ -361,6 +366,40 @@ export default function ServiceDetailPage() {
                   required
                   disabled={bookingCreated}
                 />
+                <div className="space-y-1.5">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    loading={locating}
+                    disabled={bookingCreated}
+                    leftIcon={<LocateFixed aria-hidden className="h-4 w-4" />}
+                    onClick={() => {
+                      setLocateError("");
+                      if (!navigator.geolocation) return setLocateError("La localisation n’est pas disponible sur cet appareil.");
+                      setLocating(true);
+                      navigator.geolocation.getCurrentPosition(
+                        (p) => {
+                          setCoords({ lat: p.coords.latitude, lng: p.coords.longitude, accuracy: Math.round(p.coords.accuracy) });
+                          setLocating(false);
+                        },
+                        () => {
+                          setLocating(false);
+                          setLocateError("Position introuvable ou refusée : vous pouvez réserver sans elle.");
+                        },
+                        { enableHighAccuracy: true, timeout: 15000 },
+                      );
+                    }}
+                  >
+                    {coords ? "Mettre à jour ma position" : "Localiser le lieu avec ma position"}
+                  </Button>
+                  {coords ? (
+                    <p className="text-xs text-successInk">Lieu localisé (±{coords.accuracy} m) : l’heure d’arrivée de l’artisan sera calculée.</p>
+                  ) : (
+                    <p className="text-xs text-ash">Facultatif : permet d’afficher l’heure d’arrivée estimée de l’artisan. Utilisez-le seulement si vous êtes sur le lieu.</p>
+                  )}
+                  {locateError ? <p className="text-xs text-dangerInk">{locateError}</p> : null}
+                </div>
                 <div className="grid grid-cols-2 gap-3">
                   <TextField
                     label="Ville"
