@@ -114,7 +114,7 @@ onglet *Environment* : coller le contenu de `.env.staging.example` complété (D
 ## 7. Vérification
 
 ```bash
-scripts/staging/verify.sh                                   # conteneurs, TLS, 19 routes, WebSocket, ASGI, migrations, Celery/Beat, Redis, MinIO, FCM
+scripts/staging/verify.sh                                   # conteneurs, TLS, 19 routes, WebSocket, ASGI, migrations, Celery/Beat (CHAQUE tâche planifiée, lue dans les settings), Redis, MinIO, FCM
 python3 scripts/staging/ws_check.py --api https://api-staging.example.com/handy          # WebSocket : 403 sans billet
 TRATRA_TOKEN=<jeton d'accès d'un participant> python3 scripts/staging/ws_check.py --api https://api-staging.example.com/handy --booking <ID>   # 101 + état + pong
 ```
@@ -147,10 +147,21 @@ $DC exec tratraweb-stg python manage.py migrate handy 0016        # dernier éta
 
 ## 9. Migrations
 
-23 nouvelles migrations par rapport à `origin/main` : `handy` 0017→0034 (18), `business` 0001–0002, `live` 0001, `trust` 0001–0002.
-Aucune opération destructive (ni suppression ni renommage) ; données : plans d'abonnement (0026), nettoyage des fonctionnalités de plan (0028),
-rattachement des entreprises (`business` 0002). Répétition faite (base jetable PostGIS 16) : schéma `origin/main` → HEAD **OK**, retour complet à
-`handy 0016` **OK**, nouvel aller vers HEAD **OK**, `makemigrations --check` propre.
+34 migrations par rapport à `origin/main` : `handy` 0017→0039 (23), `backoffice` 0001–0003, `business` 0001–0002, `trust` 0001–0002, `announcements` 0001,
+`continuity` 0001, `engagements` 0001, `live` 0001. Seules deux opérations destructives existent, toutes deux HISTORIQUES et déjà déployées
+(`handy` 0014 `RemoveField deposit_balance`, 0015 `RenameField related_id`) ; aucune des 34 nouvelles n'en contient. Données : plans d'abonnement
+(0026), nettoyage des fonctionnalités de plan (0028), rattachement des entreprises (`business` 0002), catégorie des notifications (0036).
+Les ajouts de colonnes sur des tables existantes sont NULLABLES ou ont une valeur par défaut (ex. `handy` 0039 : `provider_verified_at`,
+`provider_checked_at`, `provider_status`, `provider_session`) : l'ancienne version du code tourne sur le schéma migré pendant le déploiement.
+
+**Cliquet automatique** : `handy/test_migration_safety.py` fait échouer la suite si une migration supprime ou renomme, si un `RunPython` n'a pas de
+retour arrière, si un `RunSQL` contient `DROP`/`TRUNCATE`/`DELETE`, ou si une colonne obligatoire sans valeur par défaut est ajoutée à une table
+existante — sauf dérogation écrite dans `REVIEWED` après revue. Il vérifie aussi `makemigrations --check`.
+
+Répétitions (base jetable PostGIS 16) : schéma `origin/main` → HEAD **OK**, retour à `handy 0016` **OK** (voir § 8 : destructif), nouvel aller **OK** ;
+et, le 10 oct. 2026, retour des DEUX derniers lots (`handy` 0039 + `engagements` + `handy` 0038 + `backoffice` 0003 — paiements, engagements, MFA)
+puis ré-application **OK**, `makemigrations --check` propre. Un retour de ces lots supprime les tables `engagements_*` et `backoffice_staffmfa` :
+préférer la restauration du dump (§ 8).
 
 Répétition sur une copie de la production (opérateur autorisé ; **anonymiser** : téléphones, e-mails, documents KYC) :
 ```bash
@@ -159,7 +170,22 @@ cat prod.dump | $DC exec -T tratradb pg_restore -U "$(sed -n 's/^DB_USER=//p' .e
 $DC exec tratraweb-stg python manage.py migrate --plan | tail -30
 ```
 
-## 10. Nettoyage du staging
+## 10. Check-list de mise en service (staging puis production)
+
+Dans l'ordre ; chaque étape a sa procédure détaillée.
+
+1. **Sauvegarde** : `scripts/staging/backup.sh` (§ 8) AVANT toute migration ; garder `backups/LAST`.
+2. **Variables** (§ 3, `.env.staging.example`) : `BACKOFFICE_MFA_REQUIRED=1`, `LEGACY_STAFF_BYPASS=0` (défauts de production), `MFA_ENCRYPTION_KEY`, secrets de
+   webhook distincts, prestataires de paiement **vides** tant qu'ils ne sont pas qualifiés (`docs/paiements.md`).
+3. **Déploiement** (§ 5) puis `scripts/staging/verify.sh` : 0 anomalie.
+4. **Administrateurs** (`docs/securite-admin.md`) : `manage.py assign_legacy_staff_roles` (liste) → `--assign ID=ROLE` pour chacun → chaque administrateur
+   active sa double authentification → `manage.py security_preflight --strict`.
+5. **Celery** : `manage.py celery_check --db` (noms, cadences, files écoutées, base du beat) — `verify.sh` le fait aussi pour le worker.
+6. **Push** (§ 4, `docs/push-fcm.md`) : `manage.py push_check --token`, puis `--user <id> --send` avec l'application FERMÉE sur un vrai téléphone.
+7. **Paiements** (`docs/paiements.md`) : `manage.py payments_check --ping`, puis la procédure de qualification prestataire par prestataire ; espèces inchangées.
+8. **Retour arrière** : `scripts/staging/rollback.sh "$(cat backups/LAST)" --with-objects` testé une fois sur le staging avant la production.
+
+## 11. Nettoyage du staging
 
 ```bash
 docker compose -p tratra-staging -f docker-compose.staging.yml down            # arrête, conserve les volumes
@@ -172,4 +198,10 @@ docker compose -p tratra-staging -f docker-compose.staging.yml down -v         #
 - Réglages de production chargés avec les valeurs du gabarit : `check --deploy` sans erreur, `ASGI = http, websocket`, `/healthz` 200 avec l'hôte API + `X-Forwarded-Proto`.
 - 21 routes sondées sous réglages de production (statuts attendus dans `verify.sh`) ; WebSocket réel : 403 sans billet, 101 + `state` + `pong` avec billet.
 - Migrations : voir § 9. Tests : `handy/test_deploy_config.py` (file Celery, collisions Traefik, variables documentées, secrets hors Git/image, `PUBLIC_WEB_URL`).
-- **Non exécuté** : `docker build`, démarrage de la pile, certificats Let's Encrypt, Firebase réel, SMS réel, passage Wi-Fi → données mobiles.
+- Celery : `celery_check` + `handy/test_celery_wiring.py` (chaque tâche planifiée existe, cadence valide, file écoutée par le worker des deux compose). Scripts `scripts/staging/*.sh` : `bash -n` OK.
+- Appareil Android réel (Galaxy S10+, Android 12, copie de recette `com.tratra.recette`, pile jetable supprimée ensuite) : contrat d'engagement, **PDF lu dans l'application**,
+  copie temporaire du PDF présente pendant la lecture puis **supprimée** à la fermeture ET, si l'application est tuée pendant la lecture, au démarrage suivant ;
+  session conservée après arrêt brutal, activité reprise ; sans serveur au démarrage, la dernière activité connue reste accessible, signalée « hors ligne, non vérifié » ;
+  retour du serveur : resynchronisation automatique de l'activité, « Réessayer » recharge le tableau de bord.
+- **Non exécuté** : `docker build`, démarrage de la pile, certificats Let's Encrypt, Firebase réel (aucun projet Firebase de Tratra), SMS réel, appels réels aux prestataires de paiement
+  (aucun identifiant), passage Wi-Fi → données mobiles, build iOS natif.

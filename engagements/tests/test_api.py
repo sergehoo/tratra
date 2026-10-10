@@ -54,6 +54,10 @@ def posting_body(**over):
     return body
 
 
+# Types d'objets que l'application mobile sait ouvrir (miroir de `_kind` dans lib/core/deep_links.dart).
+APP_DEEPLINK_KINDS = {"booking", "mission", "conversation", "reviews", "kyc", "business_request", "announcement", "contract", "posting", "replacements", "notifications"}
+
+
 def test_anonymous_requests_are_refused_everywhere():
     anon = client()
     for path in ("rules/", "me/overview/", "postings/", "contracts/", "me/experience/", "contracts/1/", "evidence/payment/1/"):
@@ -143,6 +147,13 @@ def test_full_journey_posting_to_confirmed_payment_over_http(monkeypatch):
     assert history["count"] >= 6 and history["results"][0]["at"] >= history["results"][-1]["at"]
     assert "payment_confirmed" in [e["type"] for e in history["results"]]
     assert s.get(BASE + f"contracts/{cid}/history/").status_code == 404
+    # Liens profonds : chaque notification du parcours désigne un écran que les applications connaissent (lib/core/deep_links.dart de
+    # l'application Flutter) ; un nouveau « kind » côté serveur exige d'abord son écran côté application.
+    from handy.notifications import deeplink
+
+    notifications = list(Notification.objects.filter(data__has_key="kind"))
+    assert notifications and {n.data["kind"] for n in notifications} <= APP_DEEPLINK_KINDS
+    assert all(deeplink(n.data).startswith(f"tratra://{n.data['kind']}/") for n in notifications if n.data.get("id") is not None)
 
 
 def test_validation_errors_are_typed_json_and_unknown_routes_never_leak():

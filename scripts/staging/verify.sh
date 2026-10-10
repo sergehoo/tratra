@@ -109,8 +109,11 @@ case "$(val KYC)" in *S3*) pass "stockage KYC privé : $(val KYC) (bucket distin
 [ "${out:+x}" = "x" ] && [ -n "$(val MIGRATIONS)" ] && pass "migrations appliquées : $(val MIGRATIONS) lignes" || fail "table django_migrations illisible"
 [ "$(val CHANNELS)" = "7" ] && pass "couche de canaux Redis : aller-retour de groupe OK (diffusion WebSocket multi-processus)" || fail "couche de canaux Redis : $(val CHANNELS)"
 [ "$(val FCM)" = "configured" ] && pass "FCM : identifiants chargés" || note "FCM absent : aucun push (la notification in-app reste fiable)"
-for t in trust.tasks.reevaluate_all_profiles business.tasks.run_preventive_plans live.tasks.purge_positions; do
-  case ",$(val BEAT)," in *",${t},"*) pass "beat : ${t}" ;; *) fail "beat : ${t} absente (le conteneur beat a-t-il démarré après les migrations ?)" ;; esac
+# La liste vient de la planification elle-même (settings) : une tâche ajoutée plus tard est vérifiée sans toucher à ce script.
+beat_tasks="$(dc exec -T tratraweb-stg python manage.py celery_check --names 2>/dev/null || true)"
+[ -n "$beat_tasks" ] && pass "planification lue : $(printf '%s\n' "$beat_tasks" | wc -l | tr -d ' ') tâche(s) périodique(s)" || fail "celery_check --names : aucune tâche planifiée lue"
+for t in $beat_tasks; do
+  case ",$(val BEAT)," in *",${t},"*) pass "beat : ${t}" ;; *) fail "beat : ${t} absente (le conteneur beat a-t-il redémarré après ce déploiement ?)" ;; esac
 done
 
 say "6. Migrations et Celery"
@@ -118,7 +121,12 @@ dc exec -T tratraweb-stg python manage.py migrate --check >/dev/null 2>&1 && pas
 dc exec -T tratraweb-stg python manage.py makemigrations --check --dry-run >/dev/null 2>&1 && pass "makemigrations --check : modèles et migrations alignés" || fail "makemigrations --check"
 dc exec -T worker celery -A tratra inspect ping --timeout 8 2>/dev/null | grep -q pong && pass "worker Celery : pong" || fail "worker Celery : pas de réponse"
 dc exec -T worker celery -A tratra inspect active_queues --timeout 8 2>/dev/null | grep -q "'name': 'default'\|\"name\": \"default\"\|name: default" && pass "worker : écoute la file default" || fail "worker : file default non écoutée"
-dc exec -T worker celery -A tratra inspect registered --timeout 8 2>/dev/null | grep -q "handy.tasks.send_push" && pass "worker : tâche handy.tasks.send_push enregistrée" || fail "worker : send_push absente"
+dc exec -T tratraweb-stg python manage.py celery_check --db >/dev/null 2>&1 && pass "celery_check : noms, cadences, files écoutées et base du beat cohérents" || fail "celery_check --db (relancer sans >/dev/null pour le détail)"
+registered="$(dc exec -T worker celery -A tratra inspect registered --timeout 8 2>/dev/null || true)"
+printf '%s' "$registered" | grep -q "handy.tasks.send_push" && pass "worker : tâche handy.tasks.send_push enregistrée" || fail "worker : send_push absente"
+for t in $beat_tasks; do
+  printf '%s' "$registered" | grep -q "$t" && pass "worker : ${t} enregistrée" || fail "worker : ${t} absente du registre"
+done
 
 say "Résultat : ${ERR} anomalie(s), ${WARNS} avertissement(s)"
 [ "$ERR" -eq 0 ] || exit 1
