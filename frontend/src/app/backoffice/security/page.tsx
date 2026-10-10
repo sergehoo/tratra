@@ -77,7 +77,7 @@ function StaffTab({ roles }: { roles: Roles | null }) {
     <>
       {notice ? <Alert tone="success" className="mb-4">{notice}</Alert> : null}
       <Section title="Personnel d’administration" actions={<Button size="sm" leftIcon={<Plus aria-hidden className="h-4 w-4" />} onClick={() => { setSel([]); setPick(null); setQ(""); setError(""); setFieldErr({}); setAdd(true); }}>Ajouter un administrateur</Button>}>
-        <p className="mb-3 text-xs text-ash">Vous ne pouvez pas modifier vos propres rôles ni retirer votre propre accès : il reste ainsi toujours un super administrateur. Aucune double authentification n’est encore disponible : limitez les comptes au strict nécessaire.</p>
+        <p className="mb-3 text-xs text-ash">Vous ne pouvez pas modifier vos propres rôles ni retirer votre propre accès : il reste ainsi toujours un super administrateur. La double authentification est exigée de chaque compte d’administration ; un appareil perdu se réinitialise par un autre super administrateur, après vérification de l’identité. Limitez les comptes au strict nécessaire.</p>
         <ListView list={list} columns={columns} rowKey={(r) => r.id} caption="Personnel d’administration" empty="Aucun compte d’administration." />
       </Section>
       {roles ? (
