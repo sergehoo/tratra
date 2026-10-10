@@ -18,15 +18,13 @@ def _resolve_msisdn(user_id):
 
 
 def _send_fcm(user_id, title, body, data=None):
-    """Push via django-push-notifications. No-op gracieux si non configuré
-    (pas de credentials FCM) ou si l'utilisateur n'a aucun device actif."""
+    """Push mobile (FCM HTTP v1, appareils enregistrés via /devices/). Jamais bloquant : sans identifiants FCM ou sans
+    appareil, rien n'est envoyé et aucune erreur n'est levée (la notification in-app reste la source fiable)."""
     try:
-        from push_notifications.models import GCMDevice
-        devices = GCMDevice.objects.filter(user_id=user_id, active=True)
-        if devices.exists():
-            devices.send_message(body, title=title, extra=data or {})
-    except Exception:
-        logger.warning("Push FCM non envoyé (non configuré ou erreur).", exc_info=True)
+        send_push.apply_async(args=(user_id, title, body, data or {}), retry=False)
+    except Exception:  # broker indisponible : envoi direct (best-effort)
+        from handy import push
+        push.send_to_user(user_id, title, body, data)
 
 
 def _send_sms(msisdn, message):
@@ -41,6 +39,12 @@ def _send_sms(msisdn, message):
 
 
 # ---------- Tâches ----------
+
+@shared_task
+def send_push(user_id, title, body, data=None):
+    from handy import push
+    return push.send_to_user(user_id, title, body, data)
+
 
 @shared_task
 def send_profile_completion_reminders():

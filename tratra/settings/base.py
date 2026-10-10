@@ -404,6 +404,11 @@ PUBLIC_WEB_URL = config('PUBLIC_WEB_URL', default='http://localhost:3000').rstri
 ROUTING_OSRM_URL = config('ROUTING_OSRM_URL', default='')
 ROUTING_TIMEOUT = config('ROUTING_TIMEOUT', default=3, cast=int)
 
+# Push mobile (FCM HTTP v1) : voir handy/push.py. Sans identifiants, aucun push n'est envoyé (jamais d'erreur).
+FCM_CREDENTIALS_FILE = config('FCM_CREDENTIALS_FILE', default='')
+FCM_CREDENTIALS_JSON = config('FCM_CREDENTIALS_JSON', default='')
+FCM_PROJECT_ID = config('FCM_PROJECT_ID', default='')
+
 # === CHANNELS ===
 ASGI_APPLICATION = 'tratra.asgi.application'
 
