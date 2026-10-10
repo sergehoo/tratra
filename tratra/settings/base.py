@@ -462,6 +462,10 @@ CELERY_BEAT_SCHEDULE = {
     },
 }
 
+# Personnel HISTORIQUE sans rôle Back-Office : garde son ancien accès global à l'API tant que ce réglage est vrai. Une fois les
+# rôles attribués (manage.py assign_legacy_staff_roles), le mettre à False ferme définitivement ce passe-droit.
+LEGACY_STAFF_BYPASS = env_bool('LEGACY_STAFF_BYPASS', True)
+
 # === DJSTRIPE ===
 DJSTRIPE_WEBHOOK_SECRET = config('STRIPE_WEBHOOK_SECRET', default='')
 DJSTRIPE_FOREIGN_KEY_TO_FIELD = 'id'

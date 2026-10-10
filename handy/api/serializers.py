@@ -21,6 +21,7 @@ from drf_spectacular.types import OpenApiTypes
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 from handy.api.errors import CodedAPIException, field_error
+from handy.api.staff_access import staff_may
 from handy.media.sanitize import sanitize_image
 from handy.sms import SMSError, normalize_msisdn
 from handy.models import (
@@ -1052,7 +1053,7 @@ class PaymentInitSerializer(serializers.Serializer):
             raise serializers.ValidationError({"booking_id": "Réservation introuvable."})
 
         user = self.context["request"].user
-        if not user.is_staff and booking.client_id != user.id:
+        if not staff_may(user, "finance.manage") and booking.client_id != user.id:
             raise serializers.ValidationError({"booking_id": "Vous ne pouvez payer que vos propres réservations."})
         if booking.status == "cancelled":
             raise serializers.ValidationError({"booking_id": "Une réservation annulée ne peut pas être payée."})

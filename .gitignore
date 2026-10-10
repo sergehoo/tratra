@@ -193,3 +193,6 @@ secrets/*
 !secrets/.gitkeep
 backups/
 
+
+# Pièces KYC stockées localement (développement) : ne jamais versionner des pièces d'identité.
+private_kyc/

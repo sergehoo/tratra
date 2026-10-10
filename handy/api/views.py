@@ -49,6 +49,7 @@ from rest_framework_simplejwt.authentication import JWTAuthentication
 
 from continuity.idempotency import run_idempotent
 from handy.api.errors import CodedAPIException
+from handy.api.staff_access import staff_may
 from handy.media.sanitize import sanitize_image
 from handy.eligibility import (
     can_receive_missions, not_on_timeoff, publishable, publishable_user_ids, published_services,
@@ -87,7 +88,7 @@ class IsOwnerOrAdmin(permissions.BasePermission):
         user = request.user
         if not (user and user.is_authenticated):
             return False
-        if user.is_staff:
+        if staff_may(user, getattr(view, "staff_write_permission", None) or getattr(view, "staff_permission", None)):
             return True
         lookups = getattr(view, "owner_lookups", None) or (getattr(view, "owner_lookup", "user"),)
         for lookup in lookups:
@@ -108,13 +109,18 @@ class OwnerScopedQuerysetMixin:
     """
 
     owner_lookups = ("user",)
+    # Droits Back-Office qui ouvrent la vue « staff voit tout » : lecture, puis écriture (par défaut : celui de lecture).
+    # Sans droit déclaré, seuls les comptes du personnel historiques sans rôle gardent ce passe-droit (voir staff_access).
+    staff_permission = None
+    staff_write_permission = None
 
     def get_queryset(self):
         qs = super().get_queryset()
         user = self.request.user
         if not (user and user.is_authenticated):
             return qs.none()
-        if user.is_staff:
+        write = self.request.method not in permissions.SAFE_METHODS
+        if staff_may(user, (self.staff_write_permission if write else None) or self.staff_permission):
             return qs
         q = Q()
         for lookup in self.owner_lookups:
@@ -394,8 +400,10 @@ class UserViewSet(viewsets.ModelViewSet):
         # Un utilisateur non-staff ne voit/modifie que son propre compte (anti-IDOR).
         qs = super().get_queryset()
         user = self.request.user
-        if user and user.is_authenticated and not user.is_staff:
-            return qs.filter(pk=user.pk)
+        if user and user.is_authenticated:
+            needed = "users.view" if self.request.method in permissions.SAFE_METHODS else "users.manage"
+            if not staff_may(user, needed):
+                return qs.filter(pk=user.pk)
         return qs
 
     def get_permissions(self):
@@ -478,7 +486,7 @@ class HandymanProfileViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
         user = self.request.user
         if not (user and user.is_authenticated):
             return qs.none()
-        if user.is_staff:
+        if staff_may(user, "kyc.review"):
             return qs  # L1b : remplacé par la permission view_all_records
         # Auparavant : tout compte connecté lisait le CNI, la licence, l'assurance,
         # la position exacte et l'email de tous les artisans.
@@ -811,6 +819,7 @@ class ServiceImageViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
     """Images des services de l'artisan courant (L1a). Auparavant : queryset global,
     tout compte connecté pouvait modifier, déplacer ou supprimer l'image d'autrui.
     Un tiers reçoit 404 ; le staff garde la lecture globale jusqu'à L1b."""
+    staff_permission = "services.moderate"
     queryset = ServiceImage.objects.select_related("service").order_by("-uploaded_at", "-id")
     serializer_class = ServiceImageSerializer
     permission_classes = [permissions.IsAuthenticated]
@@ -820,6 +829,8 @@ class ServiceImageViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
 
 # ---- Booking ----
 class BookingViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
+    staff_permission = "bookings.view"
+    staff_write_permission = "bookings.manage"
     queryset = (
         # service__handyman__handyman_profile : champ `artisan` de service_detail sans N+1.
         Booking.objects.select_related("client", "handyman", "service", "service__category",
@@ -1004,6 +1015,7 @@ class BookingViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
 
 # ---- Paiements ----
 class PaymentViewSet(OwnerScopedQuerysetMixin, viewsets.ReadOnlyModelViewSet):
+    staff_permission = "finance.view"
     queryset = Payment.objects.select_related(
         "booking", "booking__client", "booking__handyman",
         "booking__service__category", "booking__service__handyman__handyman_profile",
@@ -1018,6 +1030,7 @@ class PaymentViewSet(OwnerScopedQuerysetMixin, viewsets.ReadOnlyModelViewSet):
 
 
 class PaymentLogViewSet(OwnerScopedQuerysetMixin, viewsets.ReadOnlyModelViewSet):
+    staff_permission = "finance.view"
     queryset = PaymentLog.objects.select_related("payment", "payment__booking").all()
     serializer_class = PaymentLogSerializer
     permission_classes = [permissions.IsAuthenticated]
@@ -1030,6 +1043,8 @@ class PaymentLogViewSet(OwnerScopedQuerysetMixin, viewsets.ReadOnlyModelViewSet)
 class PayoutViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
     """L'artisan consulte ses retraits et en demande de nouveaux.
     Le montant est contrôlé contre les gains disponibles, SOUS VERROU."""
+    staff_permission = "finance.view"
+    staff_write_permission = "finance.manage"
     queryset = Payout.objects.select_related("handyman").order_by("-requested_at")
     serializer_class = PayoutSerializer
     permission_classes = [permissions.IsAuthenticated]
@@ -1064,6 +1079,8 @@ class PayoutViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
 class DisputeViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
     """Ouverture/consultation de litiges par les parties d'une réservation ;
     résolution réservée au staff (déclenche refund/release de l'escrow)."""
+    staff_permission = "bookings.view"
+    staff_write_permission = "bookings.manage"
     queryset = Dispute.objects.select_related(
         "booking", "booking__client", "booking__handyman", "reporter"
     ).all()
@@ -1077,16 +1094,20 @@ class DisputeViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
     def perform_create(self, serializer):
         booking = serializer.validated_data.get("booking")
         user = self.request.user
-        if not user.is_staff and booking.client_id != user.id and booking.handyman_id != user.id:
+        if not staff_may(user, "bookings.manage") and booking.client_id != user.id and booking.handyman_id != user.id:
             raise PermissionDenied("Vous n'êtes pas partie à cette réservation.")
         serializer.save(reporter=user, status="open")
 
     @action(detail=True, methods=["post"], permission_classes=[permissions.IsAdminUser])
     def resolve(self, request, pk=None):
-        """POST { "action": "refund_client|release_artisan|none|reject", "resolution": "..." }"""
+        """POST { "action": "refund_client|release_artisan|none|reject", "resolution": "..." }
+        Réservé au personnel autorisé : « bookings.manage », et « finance.manage » pour un mouvement d'argent."""
         dispute = self.get_object()
         action_type = request.data.get("action")
         resolution = request.data.get("resolution", "")
+        if not staff_may(request.user, "bookings.manage") or (
+                action_type in ("refund_client", "release_artisan") and not staff_may(request.user, "finance.manage")):
+            return Response({"detail": "Droits insuffisants pour cette décision."}, status=status.HTTP_403_FORBIDDEN)
         try:
             if action_type == "reject":
                 dispute.reject(by=request.user, resolution=resolution)
@@ -1123,6 +1144,7 @@ class TimeOffViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
 
 # ---- Avis / Chat / Notifications / Docs / Reports / Devices ----
 class ReviewViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
+    staff_permission = "reviews.moderate"
     queryset = Review.objects.select_related(
         "booking", "booking__client", "booking__handyman",
         "booking__service__category", "booking__service__handyman__handyman_profile",
@@ -1293,13 +1315,14 @@ class MessageViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         conv = serializer.validated_data.get("conversation")
-        if (conv and not self.request.user.is_staff
+        if (conv and not staff_may(self.request.user, None)
                 and not conv.participants.filter(pk=self.request.user.pk).exists()):
             raise PermissionDenied("Vous ne participez pas à cette conversation.")
         serializer.save(sender=self.request.user)
 
 
 class HandymanDocumentViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
+    staff_permission = "kyc.review"
     queryset = HandymanDocument.objects.select_related("handyman", "handyman__user").all()
     serializer_class = HandymanDocumentSerializer
     permission_classes = [permissions.IsAuthenticated]
@@ -1319,7 +1342,7 @@ class HandymanDocumentViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
         serializer.save(handyman=profile, status="pending")
 
     def perform_destroy(self, instance):
-        if instance.status != "pending" and not self.request.user.is_staff:
+        if instance.status != "pending" and not staff_may(self.request.user, "kyc.review"):
             raise PermissionDenied("Un document déjà traité ne peut pas être supprimé.")
         instance.delete()
 
@@ -1352,7 +1375,9 @@ class HandymanDocumentViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
 
     @action(detail=True, methods=["post"], permission_classes=[permissions.IsAdminUser])
     def review(self, request, pk=None):
-        """POST { "action": "approve|reject", "reason": "..." } — revue KYC (admin)."""
+        """POST { "action": "approve|reject", "reason": "..." } — revue KYC (personnel autorisé : « kyc.review »)."""
+        if not staff_may(request.user, "kyc.review"):
+            return Response({"detail": "Droits insuffisants pour la revue KYC."}, status=status.HTTP_403_FORBIDDEN)
         doc = self.get_object()
         action_type = request.data.get("action")
         if action_type == "approve":
@@ -1366,6 +1391,7 @@ class HandymanDocumentViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
 
 
 class ReportViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
+    staff_permission = "reviews.moderate"
     queryset = Report.objects.select_related("reporter", "review", "message").all()
     serializer_class = ReportSerializer
     permission_classes = [permissions.IsAuthenticated]
@@ -1682,6 +1708,8 @@ class SubscriptionPlanViewSet(viewsets.ReadOnlyModelViewSet):
 
 
 class SubscriptionViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
+    staff_permission = "finance.view"
+    staff_write_permission = "finance.manage"
     queryset = Subscription.objects.select_related('plan', 'user').order_by('-started_at')
     serializer_class = SubscriptionSerializer
     permission_classes = [permissions.IsAuthenticated]
