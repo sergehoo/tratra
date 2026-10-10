@@ -197,6 +197,22 @@ def test_openapi_schema_documents_the_engagement_routes():
     from drf_spectacular.generators import SchemaGenerator
 
     schema = SchemaGenerator().get_schema(request=None, public=True)
-    paths = [p for p in schema["paths"] if "/engagements/" in p]
+    paths = [p for p in schema["paths"] if p.startswith("/handy/engagements/")]
     assert len(paths) >= 40
     assert all(any("Engagements" in (op.get("tags") or []) for op in schema["paths"][p].values() if isinstance(op, dict)) for p in paths)
+
+
+def test_worker_search_returns_only_verified_professionals_with_public_names_and_a_minimum_query():
+    me, verified, unverified = person("ws_me"), pro("ws_marie"), pro("ws_mario")
+    verified.first_name, verified.last_name = "Marie", "Kouassi"
+    verified.save()
+    from handy.testing import make_eligible  # noqa: F401
+    from handy.models import HandymanProfile
+    unverified.first_name = "Marius"
+    unverified.save()
+    HandymanProfile.objects.filter(user=unverified).update(is_approved=False)
+    c = client(me)
+    assert c.get(BASE + "workers/?q=m").data["results"] == []                                       # 2 caractères minimum
+    rows = c.get(BASE + "workers/?q=mar").data["results"]
+    assert [r["name"] for r in rows] == ["Marie K."] and set(rows[0]) == {"id", "name", "commune"}   # jamais de téléphone ni d'e-mail ; non vérifié exclu
+    assert client(verified).get(BASE + "workers/?q=marie").data["results"] == []                    # on ne se propose pas soi-même

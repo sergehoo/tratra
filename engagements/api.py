@@ -31,7 +31,8 @@ from engagements.services import planning as planning_svc
 from engagements.services import postings as posting_svc
 from engagements.services.common import EngagementError, contracts_for, managed_org_ids, party_of
 from engagements.services.experience import experience_for
-from handy.eligibility import is_user_publishable
+from handy.eligibility import is_user_publishable, publishable
+from handy.models import HandymanProfile
 
 TAG = "Engagements"
 
@@ -132,6 +133,17 @@ def me_overview(request):
 @endpoint(["GET"], "Mon expérience professionnelle vérifiable")
 def me_experience(request):
     return Response(experience_for(request.user))
+
+
+@endpoint(["GET"], "Rechercher un professionnel vérifié (contrat direct, remplaçant)")
+def workers(request):
+    """Nom public, commune et métier seulement ; uniquement des professionnels vérifiés (KYC approuvé) ; minimum 2 caractères."""
+    q = (request.query_params.get("q") or "").strip()[:60]
+    if len(q) < 2:
+        return Response({"results": []})
+    profiles = (publishable(HandymanProfile.objects.exclude(user=request.user)).filter(Q(user__first_name__icontains=q) | Q(user__last_name__icontains=q))
+                .select_related("user").order_by("user__first_name", "user__last_name")[:10])
+    return Response({"results": [{"id": p.user_id, "name": S.public_name(p.user), "commune": p.commune or p.user.city or ""} for p in profiles]})
 
 
 @endpoint(["GET"], "Remplacements qui me sont proposés ou confirmés")

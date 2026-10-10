@@ -53,6 +53,8 @@ def test_organization_members_act_for_the_organization_only_with_the_engagement_
     terms = client(worker).get(BASE + f"contracts/{cid}/").data["terms_hash"]
     assert client(worker).post(BASE + f"contracts/{cid}/accept/", {"terms_hash": terms}, format="json").data["status"] == "accepted"
     assert len(client(admin).get(BASE + "contracts/?role=principal").data["results"]) == 1
+    assert client(admin).get(BASE + "me/overview/").data["organizations"] == [{"id": org.pk, "name": "Résidence Les Palmiers"}]
+    assert client(requester).get(BASE + "me/overview/").data["organizations"] == []                 # sans habilitation : aucune organisation proposée
     # Un membre retiré perd immédiatement l'accès.
     Membership.objects.filter(organization=org, user=admin).update(is_active=False)
     assert client(admin).get(BASE + f"contracts/{cid}/").status_code == 404

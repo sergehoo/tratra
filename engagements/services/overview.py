@@ -79,9 +79,16 @@ def todo_for(user) -> list:
     return items[:CAP]
 
 
+def organizations_for(user) -> list:
+    """Organisations au nom desquelles `user` peut publier un besoin ou engager un contrat (adhésion active + capacité)."""
+    from business.models import Organization
+
+    return [{"id": o.pk, "name": o.name} for o in Organization.objects.filter(pk__in=managed_org_ids(user), is_active=True).order_by("name")]
+
+
 def overview(user) -> dict:
     mine = contracts_for(user)
     counts = {s: mine.filter(status=s).count() for s in ("pending_acceptance", "active", "suspended", "notice")}
     todo = todo_for(user)
-    return {"counts": counts, "todo_count": len(todo), "todo": todo,
+    return {"counts": counts, "todo_count": len(todo), "todo": todo, "organizations": organizations_for(user),
             "postings_open": EngagementPosting.objects.filter(Q(publisher=user, organization__isnull=True) | Q(organization_id__in=managed_org_ids(user)), status="open").count(), "applications_active": user.engagement_applications.filter(status__in=("submitted", "shortlisted", "interview", "selected")).count()}

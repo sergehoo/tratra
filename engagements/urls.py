@@ -7,6 +7,7 @@ urlpatterns = [
     path("engagements/me/overview/", api.me_overview, name="engagements-overview"),
     path("engagements/me/experience/", api.me_experience, name="engagements-experience"),
     path("engagements/me/replacements/", api.me_replacements, name="engagements-replacements"),
+    path("engagements/workers/", api.workers, name="engagements-workers"),
     # Besoins, candidatures, entretiens
     path("engagements/postings/", api.postings, name="engagements-postings"),
     path("engagements/postings/mine/", api.postings_mine, name="engagements-postings-mine"),
