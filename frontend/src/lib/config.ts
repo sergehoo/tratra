@@ -57,5 +57,5 @@ export const HOME_BY_ROLE: Record<string, string> = {
   employeur: "/dashboard",
   handyman: "/dashboard",
   entreprise: "/dashboard",
-  admin: "/admin",
+  admin: "/backoffice",
 };

@@ -8,6 +8,8 @@ const AREA_ROLES: Record<string, UserType[]> = {
   // Espace entreprise = capacité du compte unique (organisation liée) : accessible à tout compte non admin.
   "/company": ["client", "employeur", "entreprise", "handyman"],
   "/admin": ["admin"],
+  // Back-Office : tout compte connecté peut ouvrir la page ; le serveur décide par rôle (403 sans rôle d'administration).
+  "/backoffice": ["client", "employeur", "entreprise", "handyman", "admin"],
 };
 
 export const PROTECTED_PREFIXES = Object.keys(AREA_ROLES);
