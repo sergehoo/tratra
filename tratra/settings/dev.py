@@ -61,3 +61,8 @@ if not config('REDIS_URL', default=''):
     CELERY_TASK_ALWAYS_EAGER = True
     CELERY_BROKER_URL = 'memory://'
     CELERY_RESULT_BACKEND = 'cache+memory://'
+
+# Développement et tests : couche de canaux EN MÉMOIRE (suivi en direct dans un seul processus daphne, sans Redis).
+# CHANNELS_USE_REDIS=1 conserve la couche Redis de base.py (production : prod.py ne passe pas par ici).
+if not config('CHANNELS_USE_REDIS', default=False, cast=bool):
+    CHANNEL_LAYERS = {'default': {'BACKEND': 'channels.layers.InMemoryChannelLayer'}}

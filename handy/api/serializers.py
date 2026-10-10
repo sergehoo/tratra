@@ -648,6 +648,9 @@ class BookingCreateSerializer(serializers.ModelSerializer):
     # champs annexes côté pricing/matching (NON stockés sur Booking, retirés avant create)
     category_id = serializers.IntegerField(write_only=True, required=False)
     minutes = serializers.IntegerField(write_only=True, required=False, default=60)
+    # Coordonnées facultatives du lieu d'intervention (alimentent l'ETA du suivi en direct) : jamais exigées.
+    lat = serializers.FloatField(write_only=True, required=False, min_value=-90, max_value=90)
+    lng = serializers.FloatField(write_only=True, required=False, min_value=-180, max_value=180)
 
     class Meta:
         model = Booking
@@ -658,7 +661,7 @@ class BookingCreateSerializer(serializers.ModelSerializer):
             "description", "proposed_price", "handyman_comment",
             "response_date", "status", "type", "is_immediate",
             # auxiliaires (write_only)
-            "category_id", "minutes",
+            "category_id", "minutes", "lat", "lng",
         ]
         read_only_fields = ["client", "status", "response_date", "is_immediate"]
 
@@ -706,6 +709,9 @@ class BookingCreateSerializer(serializers.ModelSerializer):
         # retirer les champs auxiliaires non persistés sur Booking
         validated_data.pop("category_id", None)
         validated_data.pop("minutes", None)
+        lat, lng = validated_data.pop("lat", None), validated_data.pop("lng", None)
+        if lat is not None and lng is not None:
+            validated_data["job_location"] = Point(lng, lat, srid=4326)
         validated_data["client"] = request.user
         # tarification non gérée ici : c'est le rôle de /payments/initiate/
         return super().create(validated_data)

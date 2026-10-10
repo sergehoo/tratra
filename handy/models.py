@@ -917,6 +917,8 @@ class Notification(models.Model):
         ('review_reply', "Réponse à un avis"),
         ('message_received', 'Message reçu'),
         ('booking_status', 'Changement de statut de réservation'),
+        ('live_en_route', 'Artisan en route'),
+        ('live_arrived', 'Artisan arrivé'),
     ]
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notifications', db_index=True)
     notification_type = models.CharField(max_length=50, choices=TYPES, db_index=True)

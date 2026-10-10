@@ -149,12 +149,18 @@ def test_presence_active_le_matching(api_client):
 
 @pytest.mark.django_db
 def test_api_transition_et_status_readonly(api_client):
-    c = _user("c_api")
-    b = _booking(c, _user("h_api", "handyman"))
-    api_client.force_authenticate(user=c)
-
+    c, h = _user("c_api"), _user("h_api", "handyman")
+    b = _booking(c, h)
     url = reverse("bookings-transition", kwargs={"pk": b.pk})
-    # transition invalide -> 400
+
+    # le client ne fait pas avancer la mission (seul l'artisan confirme / démarre / termine) : 403
+    api_client.force_authenticate(user=c)
+    assert api_client.post(url, {"status": "confirmed"}, format="json").status_code == 403
+    b.refresh_from_db()
+    assert b.status == "pending"
+
+    # côté artisan : transition invalide -> 400
+    api_client.force_authenticate(user=h)
     bad = api_client.post(url, {"status": "completed"}, format="json")
     assert bad.status_code == 400
 

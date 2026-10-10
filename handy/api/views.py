@@ -872,28 +872,12 @@ class BookingViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
 
     @action(detail=True, methods=["post"])
     def track(self, request, pk=None):
-        """
-        POST: { "lat": ..., "lng": ..., "speed": 5.2, "heading": 120 }
-        Crée un point JobTracking et met à jour l’ETA.
-        """
-        booking = self.get_object()
-        lat = request.data.get("lat")
-        lng = request.data.get("lng")
-        speed = request.data.get("speed")
-        heading = request.data.get("heading")
-
-        if lat is None or lng is None:
-            return Response({"detail": "lat et lng requis."}, status=status.HTTP_400_BAD_REQUEST)
-
-        jt = JobTracking.objects.create(
-            booking=booking,
-            handyman=booking.handyman,
-            loc=Point(float(lng), float(lat), srid=4326),
-            speed=float(speed) if speed is not None else None,
-            heading=float(heading) if heading is not None else None,
-        )
-        update_eta_from_last_point(booking)
-        return Response({"ok": True, "ts": jt.ts}, status=status.HTTP_201_CREATED)
+        """Retiré : cette route laissait n'importe quel participant enregistrer une position sans consentement ni
+        contrôle de la mission. Le suivi passe par POST /bookings/{id}/live/position/ (Tratra Live)."""
+        self.get_object()  # 404 pour un tiers
+        return Response(
+            {"detail": "Route retirée : utilisez /bookings/{id}/live/position/ (consentement et mission active requis)."},
+            status=status.HTTP_410_GONE)
 
     @action(detail=True, methods=["get"])
     def eta(self, request, pk=None):
@@ -919,6 +903,11 @@ class BookingViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
         new_status = request.data.get("status")
         if not new_status:
             return Response({"detail": "status requis."}, status=status.HTTP_400_BAD_REQUEST)
+        # Le client peut seulement annuler ; confirmer, démarrer et terminer la mission est le rôle de l'artisan
+        # (sinon un client pourrait « terminer » une mission et déclencher la libération du paiement).
+        if booking.client_id == request.user.id and new_status != "cancelled":
+            return Response({"detail": "Seul l'artisan peut faire avancer la mission."},
+                            status=status.HTTP_403_FORBIDDEN)
         try:
             booking.transition_to(new_status, actor=request.user)
         except DjangoValidationError as e:

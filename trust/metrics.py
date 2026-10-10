@@ -28,14 +28,20 @@ def completed_missions(user_id, since=None):
 
 
 def actual_start(booking) -> Optional["timezone.datetime"]:
-    """Heure réelle d'arrivée/démarrage : arrivée enregistrée par le suivi (si disponible), sinon premier
-    passage au statut « en cours »."""
-    session = getattr(booking, "tracking_session", None) if hasattr(booking, "tracking_session") else None
-    arrived = getattr(session, "arrived_at", None) if session is not None else None
-    if arrived:
-        return arrived
-    entry = (BookingTimeline.objects.filter(booking=booking, status="in_progress").order_by("at").first())
-    return entry.at if entry else None
+    """Heure réelle de présence sur les lieux : le plus tôt de (arrivée déclarée par l'artisan — ignorée si elle a
+    été déclarée à plus de 500 m du lieu connu —, vérification d'identité par le client, premier passage « en cours »)."""
+    candidates = []
+    session = getattr(booking, "tracking_session", None)
+    if session is not None and session.arrived_at and (session.arrival_distance_m is None
+                                                       or session.arrival_distance_m <= 500):
+        candidates.append(session.arrived_at)
+    check = booking.identity_checks.order_by("verified_at").first() if booking.pk else None
+    if check is not None:
+        candidates.append(check.verified_at)
+    entry = BookingTimeline.objects.filter(booking=booking, status="in_progress").order_by("at").first()
+    if entry:
+        candidates.append(entry.at)
+    return min(candidates) if candidates else None
 
 
 def punctuality(profile, config, now=None) -> Dict:

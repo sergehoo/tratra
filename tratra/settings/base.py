@@ -90,6 +90,7 @@ INSTALLED_APPS = [
 
     'handy',
     'trust',
+    'live',
     # Libs
     'allauth',
     'allauth.account',
@@ -396,6 +397,12 @@ AUTH_USER_MODEL = 'handy.User'  # Remplacez 'handy' par le nom de votre app
 # URL publique du site web (QR Tratra ID : <PUBLIC_WEB_URL>/verify/<code>).
 PUBLIC_WEB_URL = config('PUBLIC_WEB_URL', default='http://localhost:3000').rstrip('/')
 
+# Suivi en direct (Tratra Live) : service d'itinéraire OSRM facultatif (ex. http://osrm:5000). Sans lui,
+# l'ETA est une estimation à vol d'oiseau étiquetée comme telle. N'utilisez pas le serveur de démonstration public
+# d'OSRM en production.
+ROUTING_OSRM_URL = config('ROUTING_OSRM_URL', default='')
+ROUTING_TIMEOUT = config('ROUTING_TIMEOUT', default=3, cast=int)
+
 # === CHANNELS ===
 ASGI_APPLICATION = 'tratra.asgi.application'
 
@@ -418,6 +425,11 @@ CELERY_BEAT_SCHEDULE = {
     # d'un profil est configurable dans l'administration : TrustConfig.reevaluation_hours).
     'trust-reevaluate-profiles': {
         'task': 'trust.tasks.reevaluate_all_profiles',
+        'schedule': 3600.0,
+    },
+    # Suivi en direct : purge des positions (historique minimal, expiration).
+    'live-purge-positions': {
+        'task': 'live.tasks.purge_positions',
         'schedule': 3600.0,
     },
 }

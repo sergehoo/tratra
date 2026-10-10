@@ -69,6 +69,7 @@ urlpatterns = [
     path('me/reviews/', me_reviews, name='me-reviews'),
     path('me/notifications/read-all/', me_notifications_read_all, name='me-notifications-read-all'),
 
-    path('', include('trust.urls')),  # Tratra Trust : me/trust/
+    path('', include('trust.urls')),  # Tratra Trust / Tratra ID
+    path('', include('live.urls')),   # Tratra Live : suivi en direct des missions
     path('', include(router.urls)),
 ]
