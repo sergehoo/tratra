@@ -178,7 +178,7 @@ Dans l'ordre ; chaque étape a sa procédure détaillée.
 2. **Variables** (§ 3, `.env.staging.example`) : `BACKOFFICE_MFA_REQUIRED=1`, `LEGACY_STAFF_BYPASS=0` (défauts de production), `MFA_ENCRYPTION_KEY`, secrets de
    webhook distincts, prestataires de paiement **vides** tant qu'ils ne sont pas qualifiés (`docs/paiements.md`).
 3. **Déploiement** (§ 5) puis `scripts/staging/verify.sh` : 0 anomalie.
-4. **Administrateurs** (`docs/securite-admin.md`) : `manage.py assign_legacy_staff_roles` (liste) → `--assign ID=ROLE` pour chacun → chaque administrateur
+4. **Administrateurs** (`docs/securite-admin.md`) : `manage.py assign_legacy_staff_roles` (liste, simulation) → `--assign ID=ROLE` (répétable) `--apply` → chaque administrateur
    active sa double authentification → `manage.py security_preflight --strict`.
 5. **Celery** : `manage.py celery_check --db` (noms, cadences, files écoutées, base du beat) — `verify.sh` le fait aussi pour le worker.
 6. **Push** (§ 4, `docs/push-fcm.md`) : `manage.py push_check --token`, puis `--user <id> --send` avec l'application FERMÉE sur un vrai téléphone.
