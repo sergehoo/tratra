@@ -87,13 +87,15 @@ def _stringify(data: Optional[Dict]) -> Dict[str, str]:
 
 
 def send_to_user(user_id: int, title: str, body: str, data: Optional[Dict] = None, *, channel: Optional[str] = None,
-                 collapse_key: Optional[str] = None, badge: Optional[int] = None, ttl_seconds: int = 86400) -> Dict:
+                 collapse_key: Optional[str] = None, badge: Optional[int] = None, ttl_seconds: int = 86400,
+                 validate_only: bool = False) -> Dict:
     """Envoie la notification à TOUS les appareils mobiles du compte. Ne lève jamais d'exception.
 
     Retour : {"sent": n, "removed": n, "failed": n, "devices": n, "skipped": None|"not_configured"|"no_device"|"no_access_token"}.
     `failed` ne compte que les échecs TRANSITOIRES (réseau, 5xx, 429) : l'appelant peut réessayer. Un jeton refusé par FCM
     comme périmé est supprimé (`removed`). `collapse_key` remplace la notification précédente de même clé (ex. messages d'une
-    conversation) ; `badge` (iOS) = nombre de notifications non lues."""
+    conversation) ; `badge` (iOS) = nombre de notifications non lues. `validate_only` : FCM valide le message (jeton, charge utile,
+    droits du compte de service) SANS le remettre à l'appareil — contrôle de configuration (`manage.py push_check`)."""
     result = {"sent": 0, "removed": 0, "failed": 0, "devices": 0, "skipped": None}
     try:
         if not is_configured():
@@ -124,6 +126,8 @@ def send_to_user(user_id: int, title: str, body: str, data: Optional[Dict] = Non
         for device in devices:
             message = {"message": {"token": device.device_token, "notification": {"title": title, "body": body},
                                    "data": _stringify(data), "android": android, "apns": apns}}
+            if validate_only:
+                message["validate_only"] = True
             try:
                 r = requests.post(url, json=message, headers={"Authorization": f"Bearer {token}"}, timeout=TIMEOUT)
                 if r.status_code == 401:  # jeton expiré côté Google : un seul nouvel essai

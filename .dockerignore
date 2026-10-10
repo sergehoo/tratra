@@ -42,3 +42,14 @@ secrets/
 backups/
 scripts/staging/
 
+# Identifiants Firebase / Apple / signature : JAMAIS versionnés (fournis au build ou déposés sur le serveur dans ./secrets)
+google-services.json
+GoogleService-Info.plist
+*firebase-adminsdk*.json
+*service-account*.json
+fcm-*.json
+*.p8
+*.p12
+*.mobileprovision
+*.jks
+*.keystore
