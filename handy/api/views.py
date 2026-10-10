@@ -1329,15 +1329,23 @@ class ReportViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
 
 
 class DeviceViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
-    queryset = Device.objects.select_related("user").all()
+    queryset = Device.objects.select_related("user").order_by("-last_active", "-id")
     serializer_class = DeviceSerializer
     permission_classes = [permissions.IsAuthenticated]
     owner_lookups = ("user",)
     ordering = ["-last_active"]
     pagination_class = DefaultPageNumberPagination
 
-    def perform_create(self, serializer):
-        serializer.save(user=self.request.user)
+    def create(self, request, *args, **kwargs):
+        """Enregistrement idempotent d'un appareil : un jeton appartient toujours au DERNIER compte connecté
+        sur ce téléphone (jamais de push d'un compte vers l'appareil d'un autre)."""
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        device, created = Device.objects.update_or_create(
+            device_token=serializer.validated_data["device_token"],
+            defaults={"user": request.user, "device_type": serializer.validated_data["device_type"]},
+        )
+        return Response(self.get_serializer(device).data, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
 
 
 # ---- Endpoints “métier” complémentaires ----

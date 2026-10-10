@@ -95,6 +95,7 @@ def test_with_credentials_android_and_ios_devices_receive_the_exact_payload(serv
     msg = kw["json"]["message"]
     assert msg["notification"] == {"title": "Moussa est en route", "body": "Suivez son arrivée."}
     assert msg["data"] == {"t": "live", "id": "12"}   # valeurs converties en texte (exigence FCM)
+    assert msg["android"] == {"priority": "high", "notification": {"channel_id": "tratra_default"}}
     # le jeton OAuth est signé par le compte de service (vérifiable avec sa clé publique)
     oauth = next(kw for url, kw in http.calls if url == "https://oauth.test/token")
     claims = jwt.decode(oauth["data"]["assertion"], public, algorithms=["RS256"], audience="https://oauth.test/token")
@@ -164,3 +165,53 @@ def test_live_notifications_use_registered_devices_and_keep_the_in_app_record(se
     assert Notification.objects.filter(user=cli, notification_type="live_en_route").exists()
     sent = [kw["json"]["message"] for url, kw in http.calls if "fcm.googleapis.com" in url]
     assert len(sent) == 1 and sent[0]["token"] == "tok-client" and sent[0]["data"]["k"] == "en_route"
+
+
+# ── Enregistrement des appareils : idempotent et toujours rattaché au dernier compte connecté ──
+
+def _login(username):
+    from rest_framework.test import APIClient
+    from handy.test_booking_regression import _client
+    _client(username)
+    r = APIClient().post("/handy/auth/login/", {"username": username, "password": "pass1234"}, format="json")
+    assert r.status_code == 200, r.content
+    c = APIClient()
+    c.credentials(HTTP_AUTHORIZATION=f"Bearer {r.json()['access']}")
+    return c
+
+
+def test_device_registration_needs_no_user_id_and_is_idempotent():
+    a = _login("push_reg_a")
+    r = a.post("/handy/devices/", {"device_token": "tok-reg", "device_type": "android"}, format="json")
+    assert r.status_code == 201, r.content
+    again = a.post("/handy/devices/", {"device_token": "tok-reg", "device_type": "android"}, format="json")
+    assert again.status_code == 200 and again.json()["id"] == r.json()["id"]
+    assert Device.objects.filter(device_token="tok-reg").count() == 1
+
+
+def test_a_token_follows_the_last_account_signed_in_on_the_phone():
+    a, b = _login("push_swap_a"), _login("push_swap_b")
+    a.post("/handy/devices/", {"device_token": "tok-shared", "device_type": "android"}, format="json")
+    r = b.post("/handy/devices/", {"device_token": "tok-shared", "device_type": "android"}, format="json")
+    assert r.status_code == 200
+    assert Device.objects.get(device_token="tok-shared").user.username == "push_swap_b"
+    # l'ancien compte ne voit plus l'appareil, ne peut pas le supprimer, et ne reçoit plus de push dessus
+    assert a.get("/handy/devices/").json()["results"] == []
+    assert a.delete(f"/handy/devices/{r.json()['id']}/").status_code == 404
+    assert [d.device_token for d in Device.objects.filter(user__username="push_swap_a")] == []
+
+
+def test_registration_cannot_target_another_user_and_logout_removes_the_device():
+    a, b = _login("push_own_a"), _login("push_own_b")
+    other = b.get("/handy/users/me/").json()["id"]
+    r = a.post("/handy/devices/", {"device_token": "tok-own", "device_type": "android", "user": other}, format="json")
+    assert r.status_code == 201 and Device.objects.get(device_token="tok-own").user.username == "push_own_a"
+    assert a.delete(f"/handy/devices/{r.json()['id']}/").status_code == 204
+    assert not Device.objects.filter(device_token="tok-own").exists()
+
+
+def test_registration_rejects_unknown_platforms_and_requires_authentication():
+    from rest_framework.test import APIClient
+    a = _login("push_val_a")
+    assert a.post("/handy/devices/", {"device_token": "tok-x", "device_type": "toaster"}, format="json").status_code == 400
+    assert APIClient().post("/handy/devices/", {"device_token": "tok-y", "device_type": "android"}, format="json").status_code == 401

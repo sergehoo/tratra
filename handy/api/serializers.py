@@ -996,7 +996,10 @@ class DeviceSerializer(serializers.ModelSerializer):
     class Meta:
         model = Device
         fields = ["id", "user", "user_detail", "device_token", "device_type", "last_active", "created_at"]
-        read_only_fields = ["last_active", "created_at"]
+        read_only_fields = ["user", "last_active", "created_at"]
+        # Le jeton FCM est propre à l'installation : s'il existe déjà (changement de compte sur le même téléphone),
+        # l'enregistrement le rattache au compte courant au lieu d'échouer (voir DeviceViewSet.create).
+        extra_kwargs = {"device_token": {"validators": []}}
 
 
 # ========= EXTRA SERIALIZERS (matching, pricing, payments) =========

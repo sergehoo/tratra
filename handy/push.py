@@ -20,6 +20,8 @@ from django.conf import settings
 logger = logging.getLogger(__name__)
 
 SCOPE = "https://www.googleapis.com/auth/firebase.messaging"
+# Canal de notification créé par l'application Android au démarrage (importance haute : alerte visible).
+ANDROID_CHANNEL = "tratra_default"
 TIMEOUT = 5
 _lock = threading.Lock()
 _token: Dict[str, object] = {"value": None, "exp": 0.0}
@@ -104,7 +106,8 @@ def send_to_user(user_id: int, title: str, body: str, data: Optional[Dict] = Non
         url = f"https://fcm.googleapis.com/v1/projects/{project_id()}/messages:send"
         for device in devices:
             message = {"message": {"token": device.device_token, "notification": {"title": title, "body": body},
-                                   "data": _stringify(data), "android": {"priority": "high"},
+                                   "data": _stringify(data),
+                                   "android": {"priority": "high", "notification": {"channel_id": ANDROID_CHANNEL}},
                                    "apns": {"headers": {"apns-priority": "10"}}}}
             r = requests.post(url, json=message, headers={"Authorization": f"Bearer {token}"}, timeout=TIMEOUT)
             if r.status_code == 401:  # jeton expiré côté Google : un seul nouvel essai
