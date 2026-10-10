@@ -217,6 +217,7 @@ REST_FRAMEWORK = {
         'login': config('THROTTLE_LOGIN', default='10/min'),
         'recovery': config('THROTTLE_RECOVERY', default='20/hour'),
         'webhook': config('THROTTLE_WEBHOOK', default='120/min'),
+        'verify': config('THROTTLE_VERIFY', default='60/min'),  # vérification publique d'un QR Tratra ID
     },
 }
 
@@ -391,6 +392,9 @@ WHITENOISE_MANIFEST_STRICT = False
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 AUTH_USER_MODEL = 'handy.User'  # Remplacez 'handy' par le nom de votre app
+
+# URL publique du site web (QR Tratra ID : <PUBLIC_WEB_URL>/verify/<code>).
+PUBLIC_WEB_URL = config('PUBLIC_WEB_URL', default='http://localhost:3000').rstrip('/')
 
 # === CHANNELS ===
 ASGI_APPLICATION = 'tratra.asgi.application'

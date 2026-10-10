@@ -127,3 +127,59 @@ def audit(action: str, *, actor=None, target=None, target_type: str = "", target
         target_id = target_id if target_id is not None else target.pk
     return AuditEvent.objects.create(actor=actor, action=action, target_type=target_type, target_id=target_id,
                                      organization_id=organization_id, data=data)
+
+
+class ProfessionalId(models.Model):
+    """Identifiant professionnel Tratra ID d'un artisan : unique, permanent, sans donnée sensible.
+
+    Le code (« TR-XXXX-XXXX ») est la seule chose encodée dans le QR permanent (sous forme d'URL de
+    vérification). La VALIDITÉ n'est jamais stockée : elle est recalculée à chaque vérification à partir de
+    la règle d'éligibilité (KYC approuvé, compte actif, profil validé) — une suspension révoque donc le badge
+    immédiatement, sans délai ni cache."""
+    profile = models.OneToOneField("handy.HandymanProfile", on_delete=models.CASCADE, related_name="professional_id")
+    code = models.CharField(max_length=14, unique=True, editable=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Tratra ID"
+        verbose_name_plural = "Tratra ID"
+
+    def __str__(self):
+        return self.code
+
+
+class BookingPass(models.Model):
+    """QR temporaire lié à UNE réservation : l'artisan l'affiche à son arrivée, le client le scanne.
+
+    Court (quelques minutes), à usage unique, révoqué par un nouveau QR. Seul l'empreinte SHA-256 du jeton est
+    conservée : un accès à la base ne permet pas de reconstituer un QR valide."""
+    booking = models.ForeignKey("handy.Booking", on_delete=models.CASCADE, related_name="identity_passes")
+    token_hash = models.CharField(max_length=64, unique=True)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, related_name="+")
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    used_at = models.DateTimeField(null=True, blank=True)
+    used_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+                                related_name="+")
+    revoked_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        indexes = [models.Index(fields=["booking", "-created_at"])]
+
+    def __str__(self):
+        return f"QR mission #{self.booking_id}"
+
+
+class IdentityCheck(models.Model):
+    """Vérification d'identité réussie à l'arrivée : le client a scanné le QR de mission de l'artisan attendu."""
+    booking = models.ForeignKey("handy.Booking", on_delete=models.CASCADE, related_name="identity_checks")
+    professional = models.ForeignKey(ProfessionalId, on_delete=models.PROTECT, related_name="checks")
+    checked_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, related_name="+")
+    verified_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-verified_at"]
+        indexes = [models.Index(fields=["booking", "-verified_at"])]
+
+    def __str__(self):
+        return f"Vérification #{self.pk} — mission #{self.booking_id}"

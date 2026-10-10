@@ -197,6 +197,11 @@ def evaluate_profile(profile: HandymanProfile, *, trigger: str = "signal", actor
             BadgeAward.objects.create(profile=profile, code=code, start_reason=info["reason"], snapshot=snap)
             awarded.append(code)
             audit("badge.awarded", actor=actor, target=profile, badge=code, reason=info["reason"], trigger=trigger)
+    # Tratra ID : le badge d'identité suit exactement VERIFIE (trace dédiée pour l'audit des suspensions).
+    if BadgeAward.VERIFIE in revoked:
+        audit("tratra_id.suspended", actor=actor, target=profile, trigger=trigger)
+    if BadgeAward.VERIFIE in awarded:
+        audit("tratra_id.activated", actor=actor, target=profile, trigger=trigger)
     codes = [c for c in BadgeAward.ORDER if c in wanted]
     HandymanProfile.objects.filter(pk=profile.pk).update(
         trust_score=score["score"], trust_badges=codes, trust_evaluated_at=now)
