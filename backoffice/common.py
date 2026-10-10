@@ -9,6 +9,7 @@ import csv
 import io
 import re
 from datetime import datetime, time, timedelta
+from decimal import Decimal
 from typing import Callable, Iterable, Optional
 
 from django.http import HttpResponse
@@ -125,6 +126,11 @@ def csv_response(filename: str, header: Iterable[str], rows: Iterable[Iterable])
     response["Content-Disposition"] = f'attachment; filename="{filename}"'
     response["Cache-Control"] = "private, no-store"
     return response
+
+
+def money(value) -> str:
+    """Montant en texte à 2 décimales, quel que soit l'état en mémoire (absent → « 0.00 »)."""
+    return str((Decimal(value) if value is not None else Decimal("0")).quantize(Decimal("0.01")))
 
 
 def bad_request(code: str, detail: str, status: int = 400) -> Response:

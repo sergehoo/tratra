@@ -2,7 +2,7 @@ from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
 from announcements.api import AnnouncementAdminViewSet
-from backoffice import api_core, api_ops, api_people
+from backoffice import api_core, api_money, api_ops, api_people
 
 router = DefaultRouter()
 router.register("announcements", AnnouncementAdminViewSet, basename="bo-announcements")
@@ -57,5 +57,24 @@ urlpatterns = [
     path("reviews/<int:pk>/", api_ops.ReviewDetail.as_view(), name="bo-review"),
     path("reviews/<int:pk>/hide/", api_ops.ReviewHide.as_view(), name="bo-review-hide"),
     path("reviews/<int:pk>/restore/", api_ops.ReviewRestore.as_view(), name="bo-review-restore"),
+    # Tratra Business (supervision)
+    path("business/organizations/", api_money.OrganizationList.as_view(), name="bo-organizations"),
+    path("business/organizations/<int:pk>/", api_money.OrganizationDetail.as_view(), name="bo-organization"),
+    path("business/organizations/<int:pk>/suspend/", api_money.OrganizationSuspend.as_view(), name="bo-organization-suspend"),
+    path("business/organizations/<int:pk>/reactivate/", api_money.OrganizationReactivate.as_view(), name="bo-organization-reactivate"),
+    path("business/requests/", api_money.BusinessRequestList.as_view(), name="bo-business-requests"),
+    path("business/invoices/", api_money.BusinessInvoiceList.as_view(), name="bo-business-invoices"),
+    # Finances
+    path("finance/summary/", api_money.FinanceSummary.as_view(), name="bo-finance-summary"),
+    path("finance/payments/", api_money.PaymentList.as_view(), name="bo-payments"),
+    path("finance/payments/<int:pk>/", api_money.PaymentDetail.as_view(), name="bo-payment"),
+    path("finance/payments/<int:pk>/refund/", api_money.PaymentRefund.as_view(), name="bo-payment-refund"),
+    path("finance/payouts/", api_money.PayoutList.as_view(), name="bo-payouts"),
+    path("finance/payouts/<int:pk>/<str:op>/", api_money.PayoutDecision.as_view(), name="bo-payout-decision"),
+    path("finance/invoices/", api_money.InvoiceList.as_view(), name="bo-invoices"),
+    # Support
+    path("support/queue/", api_money.SupportQueue.as_view(), name="bo-support-queue"),
+    path("support/users/<int:pk>/", api_money.SupportOverview.as_view(), name="bo-support-user"),
+    path("support/users/<int:pk>/notes/", api_money.SupportNotes.as_view(), name="bo-support-notes"),
     path("", include(router.urls)),
 ]

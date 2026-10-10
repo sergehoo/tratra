@@ -1,6 +1,5 @@
 """Socle du Back-Office : identité et droits de l'utilisateur connecté, tableau de bord (indicateurs réels)."""
 from datetime import timedelta
-from decimal import Decimal
 
 from django.db.models import Count, Sum
 from django.db.models.functions import TruncDate
@@ -10,7 +9,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 
 from backoffice import rbac
-from backoffice.common import BOView, last_days, public_name
+from backoffice.common import BOView, last_days, money, public_name
 from backoffice.modules import modules_for
 from business.models import InterventionRequest
 from handy.models import (
@@ -80,12 +79,12 @@ class DashboardView(BOView):
             pending = Payout.objects.filter(status="pending").aggregate(n=Count("id"), total=Sum("amount"))
             out["kpis"]["finance"] = {
                 "currency": "XOF",
-                "gmv_30d": str(agg["gmv"] or Decimal("0")),
-                "commission_30d": str(agg["fee"] or Decimal("0")),
-                "refunded_30d": str(Payment.objects.filter(refunded_amount__gt=0, updated_at__gte=d30).aggregate(t=Sum("refunded_amount"))["t"] or Decimal("0")),
-                "escrow_held": str(Payment.objects.filter(status="held").aggregate(t=Sum("amount"))["t"] or Decimal("0")),
+                "gmv_30d": money(agg["gmv"]),
+                "commission_30d": money(agg["fee"]),
+                "refunded_30d": money(Payment.objects.filter(refunded_amount__gt=0, updated_at__gte=d30).aggregate(t=Sum("refunded_amount"))["t"]),
+                "escrow_held": money(Payment.objects.filter(status="held").aggregate(t=Sum("amount"))["t"]),
                 "payouts_pending": pending["n"] or 0,
-                "payouts_pending_amount": str(pending["total"] or Decimal("0")),
+                "payouts_pending_amount": money(pending["total"]),
             }
 
         if "live.view" in perms:
