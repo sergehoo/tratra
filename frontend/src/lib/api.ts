@@ -1,4 +1,5 @@
 import { API_BASE } from "./config";
+import { wipeContinuity } from "./localVault";
 import type { User } from "./types";
 
 const ACCESS = "tratra_access";
@@ -282,6 +283,9 @@ export async function logout(): Promise<void> {
     /* best-effort */
   }
   tokens.clear();
+  // Déconnexion VOLONTAIRE : brouillons, file hors ligne et dernier état des activités sont effacés de cet appareil.
+  // (Une session expirée ne purge rien : l'utilisateur retrouve ses brouillons à la reconnexion.)
+  wipeContinuity();
 }
 
 function collectErrorMessages(data: unknown): string[] {

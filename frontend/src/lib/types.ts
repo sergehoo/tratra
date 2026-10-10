@@ -136,6 +136,8 @@ export interface Booking {
   client_detail?: Partial<User> | null;
   handyman_detail?: Partial<User> | null;
   proposed_price?: string | number | null;
+  /** Version vue : renvoyée avec chaque changement de statut pour détecter une écriture concurrente. */
+  version?: number;
 }
 
 export interface Paginated<T> {

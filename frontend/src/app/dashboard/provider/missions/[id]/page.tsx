@@ -14,7 +14,8 @@ import {
   Zap,
   type LucideIcon,
 } from "lucide-react";
-import { ApiError, get, post } from "@/lib/api";
+import { ApiError, apiJson, get } from "@/lib/api";
+import { isNetworkFailure, isVersionConflict, randomHex } from "@/lib/continuity";
 import {
   Alert,
   Button,
@@ -146,11 +147,24 @@ export default function MissionDetailPage() {
     setError("");
     setNotice("");
     try {
-      await post(`/bookings/${id}/transition/`, { status });
+      // Version vue par CET écran : modifiée ailleurs (autre appareil, client) → « conflit » au lieu d'un écrasement.
+      await apiJson(`/bookings/${id}/transition/`, {
+        method: "POST",
+        headers: { "Idempotency-Key": `tr-${randomHex(12)}` },
+        body: JSON.stringify({ status, ...(b?.version ? { expected_version: b.version } : {}) }),
+      });
       setNotice(`Mission mise à jour : ${statusView("booking", status).label}.`);
       load();
-    } catch {
-      setError("Transition impossible.");
+    } catch (requestError) {
+      if (isVersionConflict(requestError)) {
+        setError("Cette mission a été modifiée entre-temps (autre appareil ou autre partie). État actualisé : vérifiez-le avant de continuer.");
+        load();
+      } else if (isNetworkFailure(requestError)) {
+        // Rien n'a été confirmé : l'action n'est JAMAIS présentée comme réussie.
+        setError("Action non envoyée : connexion indisponible. Le statut n’a pas changé ; réessayez une fois connecté.");
+      } else {
+        setError("Transition impossible.");
+      }
     } finally {
       setBusy(false);
       setPendingStatus(null);

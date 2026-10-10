@@ -3,11 +3,13 @@ import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { Megaphone } from "lucide-react";
 import { apiErrorMessage } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 import { Alert, Button, EmptyState, PageHeader, SkeletonList } from "@/components/ds";
 import { AnnouncementCard, signalAnnouncement, useAnnouncements, useSeenOnce } from "../_components/Announcements";
 
 /** Annonces de Tratra : le serveur décide de la visibilité (audience, expiration, consentement marketing). */
 function AnnouncementsList() {
+  const { user } = useAuth();
   const params = useSearchParams();
   const focus = Number(params.get("a")) || null;
   const { items, error, reload, dismiss } = useAnnouncements();
@@ -19,11 +21,11 @@ function AnnouncementsList() {
 
   useEffect(() => {
     // Une notification touchée vers cette annonce compte comme une ouverture.
-    if (focus && !opened.current && items?.some((a) => a.id === focus)) {
+    if (user && focus && !opened.current && items?.some((a) => a.id === focus)) {
       opened.current = true;
-      void signalAnnouncement(focus, "open");
+      void signalAnnouncement(user.id, focus, "open");
     }
-  }, [focus, items]);
+  }, [user, focus, items]);
 
   return (
     <>

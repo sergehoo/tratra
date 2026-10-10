@@ -3,7 +3,17 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { Clock, LocateFixed, SearchX } from "lucide-react";
-import { apiErrorMessage, get, post } from "@/lib/api";
+import { apiErrorMessage, apiJson, get, post } from "@/lib/api";
+import {
+  bookingIdempotencyKey,
+  discardDraft,
+  duplicateBookingId,
+  isNetworkFailure,
+  loadDraft,
+  randomHex,
+  saveDraft,
+  type BookingDraft,
+} from "@/lib/continuity";
 import { ESCROW_ENABLED, PAYMENT_METHODS, type PaymentMethod } from "@/lib/config";
 import {
   Alert,
@@ -90,6 +100,12 @@ export default function ServiceDetailPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [dateError, setDateError] = useState("");
+  // Brouillon : la saisie survit à une fermeture, un plantage ou une coupure (stockage local par compte, effacé après
+  // confirmation du serveur et à la déconnexion volontaire).
+  const draftBase = useRef(randomHex(12));
+  const [draftRestored, setDraftRestored] = useState(false);
+  const [duplicateId, setDuplicateId] = useState<number | null>(null);
+  const draftReady = useRef(false);
   const dateRef = useRef<HTMLInputElement>(null);
   const feedbackRef = useRef<HTMLDivElement>(null);
   const bookingCreated = createdBookingId !== null;
@@ -114,6 +130,28 @@ export default function ServiceDetailPage() {
   useEffect(() => {
     void loadService();
   }, [loadService]);
+
+  // Restauration du brouillon une fois le compte et le service connus (jamais celui d'un autre compte).
+  useEffect(() => {
+    if (!user || !svc || draftReady.current) return;
+    draftReady.current = true;
+    const d = loadDraft(user.id, svc.id);
+    if (!d) return;
+    draftBase.current = d.base;
+    setForm({ booking_date: d.booking_date, address: d.address, city: d.city, postal_code: d.postal_code, description: d.description });
+    setDraftRestored(true);
+  }, [user, svc]);
+
+  const currentDraft = useCallback(
+    (): BookingDraft => ({ base: draftBase.current, ...form, updated_at: new Date().toISOString() }),
+    [form],
+  );
+
+  useEffect(() => {
+    if (!user || !svc || !draftReady.current || createdBookingId !== null) return;
+    const timer = setTimeout(() => saveDraft(user.id, svc.id, currentDraft()), 600);
+    return () => clearTimeout(timer);
+  }, [user, svc, form, createdBookingId, currentDraft]);
 
   // Le retour d'une action (erreur, paiement enregistré) doit rester visible même quand le bouton est collé en bas d'écran.
   useReveal(feedbackRef, error || paymentNotice);
@@ -176,21 +214,30 @@ export default function ServiceDetailPage() {
 
     try {
       if (!bookingId) {
-        const booking = await post<{ id: number }>("/bookings/", {
-          service: svc.id,
-          handyman: svc.handyman ?? svc.handyman_detail?.id,
-          booking_date: scheduledAt.toISOString(),
-          address: form.address,
-          city: form.city,
-          postal_code: form.postal_code || "00000",
-          description: form.description,
-          type: "scheduled",
-          ...(coords ? { lat: coords.lat, lng: coords.lng } : {}),
-          minutes: 60,
-          category_id: svc.category ?? svc.category_detail?.id,
+        // Le brouillon (et donc la clé) est écrit AVANT l'envoi : un plantage pendant la requête ne perd rien, et le
+        // renvoi retrouve la même réservation si le serveur l'avait déjà créée.
+        const draft = currentDraft();
+        if (user) saveDraft(user.id, svc.id, draft);
+        const booking = await apiJson<{ id: number }>("/bookings/", {
+          method: "POST",
+          headers: { "Idempotency-Key": bookingIdempotencyKey(svc.id, draft) },
+          body: JSON.stringify({
+            service: svc.id,
+            handyman: svc.handyman ?? svc.handyman_detail?.id,
+            booking_date: scheduledAt.toISOString(),
+            address: form.address,
+            city: form.city,
+            postal_code: form.postal_code || "00000",
+            description: form.description,
+            type: "scheduled",
+            ...(coords ? { lat: coords.lat, lng: coords.lng } : {}),
+            minutes: 60,
+            category_id: svc.category ?? svc.category_detail?.id,
+          }),
         });
         bookingId = booking.id;
         setCreatedBookingId(booking.id);
+        if (user) discardDraft(user.id, svc.id); // confirmée par le serveur : le brouillon n'a plus lieu d'être
       }
 
       if (pay) {
@@ -199,6 +246,18 @@ export default function ServiceDetailPage() {
         router.push(`/dashboard/bookings/${bookingId}`);
       }
     } catch (requestError) {
+      const existing = duplicateBookingId(requestError);
+      if (existing !== null && !bookingId) {
+        // Doublon (double clic, renvoi) : la réservation existe déjà, on la montre au lieu d'en créer une autre.
+        setDuplicateId(existing);
+        if (user && svc) discardDraft(user.id, svc.id);
+        return;
+      }
+      if (!bookingId && isNetworkFailure(requestError)) {
+        // Rien n'est confirmé : jamais présentée comme réussie ; le brouillon reste.
+        setError("Réservation non envoyée : connexion indisponible. Votre saisie est conservée, vous pourrez réessayer.");
+        return;
+      }
       const message = apiErrorMessage(requestError, "La réservation n'a pas pu être finalisée.");
       setError(
         bookingId
@@ -479,6 +538,33 @@ export default function ServiceDetailPage() {
               </div>
 
               <div ref={feedbackRef} className="space-y-3 empty:hidden">
+                {draftRestored && !bookingCreated ? (
+                  <Alert
+                    tone="info"
+                    onDismiss={() => setDraftRestored(false)}
+                    action={
+                      <button
+                        type="button"
+                        className="text-sm font-semibold underline"
+                        onClick={() => {
+                          if (user && svc) discardDraft(user.id, svc.id);
+                          draftBase.current = randomHex(12);
+                          setForm({ booking_date: "", address: "", city: "", postal_code: "", description: "" });
+                          setDraftRestored(false);
+                        }}
+                      >
+                        Effacer le brouillon
+                      </button>
+                    }
+                  >
+                    Votre brouillon a été retrouvé : vérifiez les informations puis envoyez votre demande.
+                  </Alert>
+                ) : null}
+                {duplicateId !== null ? (
+                  <Alert tone="info" title="Cette réservation existe déjà">
+                    <ButtonLink href={`/dashboard/bookings/${duplicateId}`} variant="outline" size="sm">Voir la réservation existante</ButtonLink>
+                  </Alert>
+                ) : null}
                 {error ? <Alert tone="danger">{error}</Alert> : null}
                 {paymentNotice ? <Alert tone="success" title="Réservation enregistrée">{paymentNotice}</Alert> : null}
                 {bookingCreated ? (

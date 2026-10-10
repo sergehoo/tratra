@@ -3,7 +3,9 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { Bell, CheckCheck, SlidersHorizontal } from "lucide-react";
-import { apiErrorMessage, get, patch, post } from "@/lib/api";
+import { apiErrorMessage, get, post } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
+import { enqueueSafe } from "@/lib/offlineQueue";
 import { useDashboard } from "@/lib/dashboard";
 import { NOTIFICATION_CATEGORIES, notificationHref, type Notif, type UnreadCount } from "@/lib/notifications";
 import type { Paginated } from "@/lib/types";
@@ -14,6 +16,7 @@ import { formatDateTimeShort } from "../_components/dates";
 export default function NotificationsPage() {
   const router = useRouter();
   const dash = useDashboard();
+  const { user } = useAuth();
   const [category, setCategory] = useState<string | null>(null);
   const [items, setItems] = useState<Notif[] | null>(null);
   const [counts, setCounts] = useState<UnreadCount>({ unread: 0, by_category: {} });
@@ -54,13 +57,12 @@ export default function NotificationsPage() {
   }
 
   async function open(n: Notif) {
-    if (!n.is_read) {
-      try {
-        await patch(`/notifications/${n.id}/`, { is_read: true });
-        void Promise.all([load(), dash.reload()]);
-      } catch {
-        /* non bloquant : l'état se resynchronise au prochain chargement */
-      }
+    if (!n.is_read && user) {
+      // Accusé de lecture : action sûre, persistée dans la file hors ligne et rejouée au retour du réseau. La navigation
+      // n'attend pas le serveur ; les compteurs se rechargent une fois l'accusé envoyé.
+      void enqueueSafe(user.id, "PATCH", `/notifications/${n.id}/`, { is_read: true })
+        .then(() => Promise.all([load(), dash.reload()]))
+        .catch(() => undefined);
     }
     const href = notificationHref(n);
     if (href) router.push(href);

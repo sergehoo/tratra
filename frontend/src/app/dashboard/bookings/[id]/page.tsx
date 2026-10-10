@@ -12,7 +12,8 @@ import {
   Wallet,
   XCircle,
 } from "lucide-react";
-import { ApiError, apiErrorMessage, get, post } from "@/lib/api";
+import { ApiError, apiErrorMessage, apiJson, get, post } from "@/lib/api";
+import { isNetworkFailure, isVersionConflict, randomHex } from "@/lib/continuity";
 import {
   Alert,
   Button,
@@ -105,11 +106,25 @@ export default function BookingDetailPage() {
     setActionError("");
     setNotice("");
     try {
-      await post(`/bookings/${id}/transition/`, { status: "cancelled" });
+      // Version vue par CET écran : si la réservation a changé ailleurs (autre appareil, artisan), le serveur répond
+      // « conflit » au lieu d'écraser. La clé d'idempotence rend un renvoi après coupure sans effet double.
+      await apiJson(`/bookings/${id}/transition/`, {
+        method: "POST",
+        headers: { "Idempotency-Key": `cx-${randomHex(12)}` },
+        body: JSON.stringify({ status: "cancelled", ...(b?.version ? { expected_version: b.version } : {}) }),
+      });
       setNotice("Votre réservation a été annulée.");
       await load();
     } catch (requestError) {
-      setActionError(apiErrorMessage(requestError, "La réservation n’a pas pu être annulée."));
+      if (isVersionConflict(requestError)) {
+        setActionError("Cette réservation a été modifiée entre-temps (autre appareil ou artisan). Son état vient d’être actualisé : vérifiez-le avant d’annuler.");
+        await load();
+      } else if (isNetworkFailure(requestError)) {
+        // Rien n'a été confirmé : jamais présenté comme réussi.
+        setActionError("Annulation non envoyée : connexion indisponible. La réservation n’a pas changé ; réessayez une fois connecté.");
+      } else {
+        setActionError(apiErrorMessage(requestError, "La réservation n’a pas pu être annulée."));
+      }
     } finally {
       setBusy(false);
       setConfirmCancel(false);

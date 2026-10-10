@@ -51,11 +51,17 @@ export function useLive(bookingId: number, enabled = true) {
       void refresh();
     }, every);
     const onOnline = () => void refresh();
+    // Retour sur l'onglet (téléphone déverrouillé, changement d'application) : état resynchronisé sans attendre le prochain tick.
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void refresh();
+    };
     window.addEventListener("online", onOnline);
+    document.addEventListener("visibilitychange", onVisible);
     return () => {
       alive.current = false;
       window.clearInterval(id);
       window.removeEventListener("online", onOnline);
+      document.removeEventListener("visibilitychange", onVisible);
     };
   }, [enabled, refresh, realtime, state?.phase]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -100,9 +106,21 @@ export function useLive(bookingId: number, enabled = true) {
       }
     }
     void open();
+    // Retour sur l'onglet / réseau rétabli : si le flux direct est coupé, on se reconnecte tout de suite au lieu
+    // d'attendre le délai progressif (les minuteurs des onglets en arrière-plan sont ralentis par le navigateur).
+    const reopen = () => {
+      if (closed || (document.visibilityState !== "visible") || socket.current?.readyState === WebSocket.OPEN || socket.current?.readyState === WebSocket.CONNECTING) return;
+      if (retry) window.clearTimeout(retry);
+      attempt = 0;
+      void open();
+    };
+    document.addEventListener("visibilitychange", reopen);
+    window.addEventListener("online", reopen);
     return () => {
       closed = true;
       if (retry) window.clearTimeout(retry);
+      document.removeEventListener("visibilitychange", reopen);
+      window.removeEventListener("online", reopen);
       socket.current?.close();
     };
   }, [bookingId, enabled]);

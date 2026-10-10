@@ -44,6 +44,7 @@ import { formatFCFA } from "@/lib/format";
 import { iconForCategory } from "@/lib/trades";
 import type { Category, Paginated, Service } from "@/lib/types";
 import { useData } from "@/lib/useData";
+import { ActivityBanner } from "./_components/ActivityBanner";
 import { AnnouncementsBanner } from "./_components/Announcements";
 import { formatDateTimeShort } from "./_components/dates";
 
@@ -385,6 +386,9 @@ export default function DashboardHome() {
 
   return (
     <div className="space-y-8">
+      {/* Activité en cours (reprise après fermeture, coupure, déconnexion ou changement d'appareil) */}
+      <ActivityBanner />
+
       {/* Hero personnalisé */}
       <section aria-labelledby="titre-dashboard" className="relative isolate overflow-hidden rounded-card bg-night px-5 py-7 text-white shadow-strong sm:px-8 sm:py-9">
         <div aria-hidden className="absolute inset-0 -z-10 bg-[radial-gradient(60%_90%_at_0%_0%,rgba(46,139,87,0.55),transparent_70%),radial-gradient(45%_70%_at_100%_100%,rgba(246,201,14,0.16),transparent_70%)]" />

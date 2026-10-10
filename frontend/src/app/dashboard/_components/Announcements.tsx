@@ -3,15 +3,20 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Megaphone, X } from "lucide-react";
 import { apiErrorMessage, get, post } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
+import { enqueueSafe } from "@/lib/offlineQueue";
 import { resolveAnnouncementAction, type AnnouncementEvent, type FeedAnnouncement } from "@/lib/announcements";
 import { Badge, ButtonLink, Card, cx } from "@/components/ds";
 import { useImageFallback } from "@/components/ds";
 import { formatDateTimeShort } from "./dates";
 
-/** « Vue » / « ouverte » / « écartée » : jamais bloquant (une statistique manquée ne gêne pas l'utilisateur). */
-export async function signalAnnouncement(id: number, event: AnnouncementEvent): Promise<void> {
+/**
+ * « Vue » / « ouverte » : passent par la file hors ligne persistante (action sûre, rejouée au retour du réseau) ;
+ * jamais bloquant (une statistique manquée ne gêne pas l'utilisateur).
+ */
+export async function signalAnnouncement(userId: number, id: number, event: Exclude<AnnouncementEvent, "dismiss">): Promise<void> {
   try {
-    await post(`/me/announcements/${id}/${event}/`, {});
+    await enqueueSafe(userId, "POST", `/me/announcements/${id}/${event}/`);
   } catch {
     /* non bloquant */
   }
@@ -45,13 +50,15 @@ export function useAnnouncements() {
 
 /** Compte chaque annonce affichée comme « vue » une seule fois par chargement de page. */
 export function useSeenOnce(ids: number[]) {
+  const { user } = useAuth();
   const sent = useRef(new Set<number>());
   const key = ids.join(",");
   useEffect(() => {
+    if (!user) return;
     for (const id of ids) {
       if (!sent.current.has(id)) {
         sent.current.add(id);
-        void signalAnnouncement(id, "seen");
+        void signalAnnouncement(user.id, id, "seen");
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -59,9 +66,12 @@ export function useSeenOnce(ids: number[]) {
 }
 
 function ActionButton({ a, size = "sm" }: { a: FeedAnnouncement; size?: "sm" | "md" }) {
+  const { user } = useAuth();
   const action = resolveAnnouncementAction(a);
   if (!action) return null;
-  const onClick = () => void signalAnnouncement(a.id, "open");
+  const onClick = () => {
+    if (user) void signalAnnouncement(user.id, a.id, "open");
+  };
   return action.external ? (
     <a
       href={action.href}
