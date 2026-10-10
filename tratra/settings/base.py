@@ -426,6 +426,10 @@ INTERNAL_IPS = ['127.0.0.1']
 # === CELERY ===
 CELERY_BROKER_URL = config('REDIS_URL', default='redis://redis:6379/0')
 CELERY_RESULT_BACKEND = CELERY_BROKER_URL
+# File par défaut des tâches : DOIT figurer dans --queues du worker (docker-compose*.yml). Sans cette ligne, Celery
+# publie dans la file « celery » que le worker (--queues=default,notifications) n'écoute pas : aucune tâche ne
+# s'exécute (notifications, push FCM, réévaluation des badges, purge GPS).
+CELERY_TASK_DEFAULT_QUEUE = 'default'
 CELERY_BEAT_SCHEDULE = {
     # Tratra Trust : réévaluation périodique des badges et des scores (la durée mini entre deux évaluations
     # d'un profil est configurable dans l'administration : TrustConfig.reevaluation_hours).

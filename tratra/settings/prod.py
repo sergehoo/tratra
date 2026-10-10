@@ -40,6 +40,12 @@ if not AWS_S3_ENDPOINT_URL.lower().startswith('https://'):
 if not AWS_S3_VERIFY:
     raise ImproperlyConfigured('AWS_S3_VERIFY must remain enabled in production.')
 
+# URL publique du site web : encodée dans les QR (Tratra ID, QR de mission, équipements). Sans elle, les QR pointeraient
+# vers http://localhost:3000 (valeur par défaut de base.py) et seraient inutilisables.
+_require_production_setting('PUBLIC_WEB_URL')
+if not PUBLIC_WEB_URL.lower().startswith('https://'):
+    raise ImproperlyConfigured('PUBLIC_WEB_URL must use HTTPS in production.')
+
 # SMS (OTP) : en production, uniquement un fournisseur RÉEL avec ses identifiants — jamais le
 # journal « console » ni la boîte « locmem » (voir handy/sms.py).
 SMS_BACKEND = config('SMS_BACKEND', default='').strip().lower()
