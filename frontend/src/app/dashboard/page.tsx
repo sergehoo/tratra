@@ -44,6 +44,7 @@ import { formatFCFA } from "@/lib/format";
 import { iconForCategory } from "@/lib/trades";
 import type { Category, Paginated, Service } from "@/lib/types";
 import { useData } from "@/lib/useData";
+import { AnnouncementsBanner } from "./_components/Announcements";
 import { formatDateTimeShort } from "./_components/dates";
 
 const itemHref = (i: DashItem) => (i.role === "handyman" ? `/dashboard/provider/missions/${i.id}` : `/dashboard/bookings/${i.id}`);
@@ -418,6 +419,9 @@ export default function DashboardHome() {
           </ButtonLink>
         </div>
       </section>
+
+      {/* Annonces Tratra (rien si aucune) */}
+      <AnnouncementsBanner />
 
       {/* Indicateurs réels */}
       <section aria-label="Indicateurs" className={cx("grid grid-cols-1 gap-4 sm:grid-cols-2", kpis.length === 3 ? "lg:grid-cols-3" : "lg:grid-cols-4")}>{kpis.slice(0, 4)}</section>

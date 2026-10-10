@@ -9,6 +9,7 @@ import {
   Compass,
   IdCard,
   LayoutDashboard,
+  Megaphone,
   MessageSquare,
   PlusCircle,
   ShieldCheck,
@@ -41,6 +42,7 @@ function Shell({ children }: { children: ReactNode }) {
       { href: "/dashboard/wallet", label: "Portefeuille", icon: Wallet },
       { href: "/dashboard/reviews", label: "Avis", icon: Star },
       { href: "/dashboard/notifications", label: "Notifications", icon: Bell, badge: data?.unread.notifications },
+      { href: "/dashboard/announcements", label: "Annonces", icon: Megaphone },
       { href: "/dashboard/profile", label: "Mon profil et KYC", icon: ShieldCheck },
     );
     if (business || company) items.push({ href: "/dashboard/business", label: "Tratra Business", icon: Building2, primary: false });
