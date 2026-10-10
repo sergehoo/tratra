@@ -9,6 +9,7 @@ import {
 import { RoleGuard } from "@/components/RoleGuard";
 import { Alert, AppShell, Button, ButtonLink, EmptyState, SkeletonPage, type NavItem } from "@/components/ds";
 import { BoProvider, useBo } from "@/lib/BoProvider";
+import { MfaGate } from "./_components/MfaGate";
 
 const ICONS: Record<string, LucideIcon> = {
   "layout-dashboard": LayoutDashboard, users: Users, "shield-check": ShieldCheck, award: Award, "id-card": IdCard, briefcase: Briefcase,
@@ -46,6 +47,8 @@ function Shell({ children }: { children: ReactNode }) {
       </div>
     );
   }
+  // Double authentification exigée et non vérifiée : aucun module n'est ouvert (le serveur refuse de toute façon chaque appel).
+  if (me.mfa?.required && !me.mfa.verified) return <MfaGate mfa={me.mfa} onVerified={() => void reload()} />;
   // Module non autorisé pour ce rôle (lien direct, signet) : état explicite plutôt qu'une page vide ou des squelettes sans fin.
   // Le serveur refuse de toute façon chaque appel : ceci n'est qu'une explication.
   const segment = pathname.split("/")[2];

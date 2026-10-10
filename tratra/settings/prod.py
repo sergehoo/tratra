@@ -61,6 +61,13 @@ if SMS_BACKEND == 'twilio' and not any(config(n, default='').strip() for n in (
         'TWILIO_MESSAGING_SERVICE_SID', 'TWILIO_FROM', 'TWILIO_PHONE_NUMBER')):
     raise ImproperlyConfigured('TWILIO_MESSAGING_SERVICE_SID or TWILIO_FROM is required in production.')
 
+# Double authentification des comptes d'administration : OBLIGATOIRE en production (Back-Office, /admin/, droits « personnel » de
+# l'ancienne API). La désactiver exige BACKOFFICE_MFA_REQUIRED=0 explicite ; `check --deploy` le signale alors par un avertissement.
+BACKOFFICE_MFA_REQUIRED = env_bool('BACKOFFICE_MFA_REQUIRED', True)
+# Personnel historique sans rôle : le passe-droit global de l'ancienne API est FERMÉ par défaut en production
+# (attribuer d'abord les rôles : manage.py assign_legacy_staff_roles ; voir docs/securite-admin.md).
+LEGACY_STAFF_BYPASS = env_bool('LEGACY_STAFF_BYPASS', False)
+
 # Derrière Traefik (terminaison TLS) : on force HTTPS et on fait confiance à
 # l'en-tête de proto transmis par le reverse proxy.
 SECURE_SSL_REDIRECT = True

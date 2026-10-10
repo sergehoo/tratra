@@ -17,7 +17,7 @@ from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from rest_framework.response import Response
 
-from backoffice import rbac, services
+from backoffice import mfa, rbac, services
 from backoffice.common import (
     BOView, apply_range, audit_op, bad_request, csv_response, day_bounds, last_days, mask_email, money, ordering, paginate, public_name,
 )
@@ -554,7 +554,7 @@ class CouponUpdate(BOView):
 
 def _staff_row(u: User) -> dict:
     return {"id": u.pk, "name": public_name(u), "email": mask_email(u.email), "is_active": u.is_active, "is_superuser": u.is_superuser,
-            "roles": sorted(rbac.user_roles(u)), "last_login": u.last_login, "date_joined": u.date_joined}
+            "roles": sorted(rbac.user_roles(u)), "last_login": u.last_login, "date_joined": u.date_joined, "mfa_enrolled": mfa.confirmed_device(u) is not None}
 
 
 def _super_admins():
@@ -621,6 +621,27 @@ class StaffRoles(BOView):
             return bad_request("last_super_admin", "Il doit rester au moins un super administrateur actif.", 409)
         audit_op(request, "security.roles_changed", u, before=before, after=sorted(roles))
         return Response(_staff_row(u))
+
+
+class StaffMfaReset(BOView):
+    """Réinitialise la double authentification d'un compte d'administration (appareil perdu) : motif obligatoire, journalisé,
+    jetons déjà vérifiés invalidés. Jamais sur soi-même (un autre super administrateur doit le faire)."""
+    bo_permission = "security.manage"
+
+    @transaction.atomic
+    def post(self, request, pk):
+        u = User.objects.filter(pk=pk, is_staff=True).first()
+        if u is None:
+            return bad_request("not_found", "Compte d'administration introuvable.", 404)
+        if u.pk == request.user.pk:
+            return bad_request("self", "Vous ne pouvez pas réinitialiser votre propre double authentification.", 409)
+        try:
+            reason = _reason(request)
+        except ValidationError as exc:
+            return bad_request(exc.code, exc.messages[0])
+        had = mfa.reset(u, by=request.user, reason=reason)
+        revoked = services.revoke_all_sessions(u)
+        return Response({"id": u.pk, "mfa_enrolled": False, "had_device": had, "sessions_revoked": revoked})
 
 
 class StaffRemove(BOView):

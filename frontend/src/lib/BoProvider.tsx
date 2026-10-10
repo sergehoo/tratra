@@ -1,7 +1,7 @@
 "use client";
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { ApiError } from "./api";
-import { bo, type BoMe } from "./bo";
+import { bo, MFA_EVENT, type BoMe } from "./bo";
 import { useAuth } from "./auth";
 
 interface BoState {
@@ -41,6 +41,13 @@ export function BoProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (user) void reload();
   }, [user, reload]);
+
+  // Vérification en deux étapes expirée pendant la session : on recharge l'identité (le serveur renvoie `verified: false`).
+  useEffect(() => {
+    const onMfa = () => void reload();
+    window.addEventListener(MFA_EVENT, onMfa);
+    return () => window.removeEventListener(MFA_EVENT, onMfa);
+  }, [reload]);
 
   const value = useMemo<BoState>(
     () => ({ me, loading, forbidden, error, reload, can: (p) => Boolean(me?.permissions.includes(p)) }),

@@ -3,12 +3,27 @@ import { ApiError, apiErrorMessage, apiJson } from "./api";
 /** Client du Back-Office : `/handy/backoffice/…`. Les droits sont appliqués par le serveur ; l'interface ne fait que les refléter. */
 const root = (path: string) => `/backoffice${path.startsWith("/") ? path : `/${path}`}`;
 
+export const MFA_EVENT = "tratra:bo-mfa";
+
+/** Une vérification expirée (403 `mfa_required`) en cours de session ramène à l'écran de double authentification. */
+async function guarded<T>(call: Promise<T>): Promise<T> {
+  try {
+    return await call;
+  } catch (e) {
+    const data = e instanceof ApiError ? (e.data as { code?: unknown } | null) : null;
+    if (e instanceof ApiError && e.status === 403 && (data?.code === "mfa_required" || data?.code === "mfa_enrollment_required") && typeof window !== "undefined") {
+      window.dispatchEvent(new Event(MFA_EVENT));
+    }
+    throw e;
+  }
+}
+
 export const bo = {
-  get: <T>(path: string) => apiJson<T>(root(path)),
-  post: <T>(path: string, body?: unknown) => apiJson<T>(root(path), { method: "POST", body: JSON.stringify(body ?? {}) }),
-  put: <T>(path: string, body?: unknown) => apiJson<T>(root(path), { method: "PUT", body: JSON.stringify(body ?? {}) }),
-  patch: <T>(path: string, body?: unknown) => apiJson<T>(root(path), { method: "PATCH", body: JSON.stringify(body ?? {}) }),
-  delete: <T = unknown>(path: string) => apiJson<T>(root(path), { method: "DELETE" }),
+  get: <T>(path: string) => guarded(apiJson<T>(root(path))),
+  post: <T>(path: string, body?: unknown) => guarded(apiJson<T>(root(path), { method: "POST", body: JSON.stringify(body ?? {}) })),
+  put: <T>(path: string, body?: unknown) => guarded(apiJson<T>(root(path), { method: "PUT", body: JSON.stringify(body ?? {}) })),
+  patch: <T>(path: string, body?: unknown) => guarded(apiJson<T>(root(path), { method: "PATCH", body: JSON.stringify(body ?? {}) })),
+  delete: <T = unknown>(path: string) => guarded(apiJson<T>(root(path), { method: "DELETE" })),
 };
 
 export interface BoModule {
@@ -24,6 +39,8 @@ export interface BoMe {
   roles: string[];
   permissions: string[];
   modules: BoModule[];
+  /** Double authentification du personnel : tant que `required && !verified`, le Back-Office n'ouvre aucun module. */
+  mfa: { required: boolean; enrolled: boolean; verified: boolean; backup_codes_remaining: number; locked_until: string | null };
 }
 
 export interface Page<T> {

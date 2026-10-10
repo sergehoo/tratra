@@ -147,14 +147,14 @@ _PROD_ENV = {
 }
 
 
-def _load_prod_settings(**extra):
+def _load_prod_settings(code=None, **extra):
     env = {k: v for k, v in os.environ.items() if k in ("PATH", "HOME", "LANG", "LC_ALL", "GDAL_LIBRARY_PATH", "GEOS_LIBRARY_PATH")}
     for name in ("GDAL_LIBRARY_PATH", "GEOS_LIBRARY_PATH"):          # développement macOS : chemins Homebrew déduits par dev.py
         if name not in env and getattr(settings, name, None):
             env[name] = str(getattr(settings, name))
     env.update(_PROD_ENV)
     env.update(extra)
-    code = "import django; django.setup(); from django.conf import settings; print('PUBLIC_WEB_URL=' + settings.PUBLIC_WEB_URL)"
+    code = code or "import django; django.setup(); from django.conf import settings; print('PUBLIC_WEB_URL=' + settings.PUBLIC_WEB_URL)"
     return subprocess.run([sys.executable, "-c", code], cwd=ROOT, env=env, capture_output=True, text=True, timeout=120)
 
 
@@ -172,3 +172,21 @@ def test_production_accepts_an_https_public_web_url():
     r = _load_prod_settings(PUBLIC_WEB_URL="https://app.example.test/")
     assert r.returncode == 0, r.stderr[-400:]
     assert "PUBLIC_WEB_URL=https://app.example.test" in r.stdout          # barre finale retirée
+
+
+_ADMIN_SECURITY_CODE = ("import django; django.setup(); from django.conf import settings; "
+                        "print('MFA=%s BYPASS=%s' % (settings.BACKOFFICE_MFA_REQUIRED, settings.LEGACY_STAFF_BYPASS))")
+
+
+def test_production_requires_admin_mfa_and_closes_the_legacy_staff_bypass_by_default():
+    r = _load_prod_settings(code=_ADMIN_SECURITY_CODE, PUBLIC_WEB_URL="https://app.example.test")
+    assert r.returncode == 0, r.stderr[-400:]
+    assert "MFA=True BYPASS=False" in r.stdout
+
+
+def test_production_relaxation_must_be_explicit_and_is_reported_by_the_deploy_check():
+    r = _load_prod_settings(code=_ADMIN_SECURITY_CODE, PUBLIC_WEB_URL="https://app.example.test", BACKOFFICE_MFA_REQUIRED="0", LEGACY_STAFF_BYPASS="1")
+    assert r.returncode == 0 and "MFA=False BYPASS=True" in r.stdout
+    check = ("import django; django.setup(); from backoffice.checks import admin_security; print(sorted(w.id for w in admin_security(None)))")
+    r = _load_prod_settings(code=check, PUBLIC_WEB_URL="https://app.example.test", BACKOFFICE_MFA_REQUIRED="0", LEGACY_STAFF_BYPASS="1")
+    assert "tratra.W001" in r.stdout and "tratra.W002" in r.stdout

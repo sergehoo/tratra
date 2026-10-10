@@ -77,6 +77,11 @@ def test_every_backoffice_endpoint_declares_the_right_it_requires():
             # `me` : identité, ouverte à tout connecté (403 sans rôle) ; racine du routeur : simple index des routes.
             if cls is None or cls.__name__ in ("me", "APIRootView"):
                 continue
+            # Routes de double authentification : accessibles AVANT vérification (sinon l'activation serait impossible), mais
+            # réservées aux comptes d'administration par `IsStaffAccount`, limitées et journalisées (voir test_mfa.py).
+            if cls.__name__.startswith("MFA"):
+                assert [pc.__name__ for pc in cls.permission_classes] == ["IsStaffAccount"], prefix + str(p.pattern)
+                continue
             if not getattr(cls, "bo_permission", None):
                 missing.append(prefix + str(p.pattern))
 

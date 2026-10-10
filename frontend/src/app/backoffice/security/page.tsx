@@ -7,7 +7,7 @@ import { useBo } from "@/lib/BoProvider";
 import { useBoList, useDebounced } from "@/lib/useBoList";
 import { DateRange, FilterBar, FilterSelect, ListView, ReasonModal, SearchBox, Section, dt, postTo, useNotice, useTabParam } from "../_components/ui";
 
-interface Staff { id: number; name: string; email: string | null; is_active: boolean; is_superuser: boolean; roles: string[]; last_login: string | null; date_joined: string }
+interface Staff { id: number; name: string; email: string | null; is_active: boolean; is_superuser: boolean; roles: string[]; last_login: string | null; date_joined: string; mfa_enrolled: boolean }
 interface RoleInfo { id: string; members: number; permissions: string[] }
 interface Roles { roles: RoleInfo[]; permissions: Record<string, string> }
 interface SessionRow { id: number; user_id: number; user: string; is_staff: boolean; created_at: string; expires_at: string; fingerprint: string; revoked: boolean; expired: boolean }
@@ -39,6 +39,7 @@ function StaffTab({ roles }: { roles: Roles | null }) {
   const [pick, setPick] = useState<UserHit | null>(null);
   const [hits, setHits] = useState<UserHit[]>([]);
   const [remove, setRemove] = useState<Staff | null>(null);
+  const [resetMfa, setResetMfa] = useState<Staff | null>(null);
   const [error, setError] = useState("");
   const [fieldErr, setFieldErr] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
@@ -68,7 +69,8 @@ function StaffTab({ roles }: { roles: Roles | null }) {
     { key: "roles", header: "Rôles", cell: (r) => <span className="flex flex-wrap gap-1.5">{r.roles.map((x) => <Badge key={x} tone={x === "super_admin" ? "accent" : "primary"}>{ROLE_FR[x] ?? x}</Badge>)}{!r.roles.length ? <Badge tone="warning">Aucun rôle</Badge> : null}{r.is_superuser ? <Badge tone="night">Superutilisateur</Badge> : null}</span> },
     { key: "login", header: "Dernière connexion", hideOnMobile: true, cell: (r) => dt(r.last_login) },
     { key: "state", header: "Statut", cell: (r) => <Badge tone={r.is_active ? "success" : "danger"}>{r.is_active ? "Actif" : "Suspendu"}</Badge> },
-    { key: "act", header: "", align: "right", cell: (r) => (r.id !== me?.user.id ? <span className="flex justify-end gap-2"><Button size="sm" variant="outline" onClick={() => { setSel(r.roles); setError(""); setFieldErr({}); setEdit(r); }}>Rôles</Button><Button size="sm" variant="danger" onClick={() => setRemove(r)}>Retirer</Button></span> : null) },
+    { key: "mfa", header: "Double authentification", hideOnMobile: true, cell: (r) => (r.mfa_enrolled ? <Badge tone="success">Activée</Badge> : <Badge tone="warning">Non activée</Badge>) },
+    { key: "act", header: "", align: "right", cell: (r) => (r.id !== me?.user.id ? <span className="flex justify-end gap-2"><Button size="sm" variant="outline" onClick={() => { setSel(r.roles); setError(""); setFieldErr({}); setEdit(r); }}>Rôles</Button>{r.mfa_enrolled ? <Button size="sm" variant="outline" onClick={() => setResetMfa(r)}>Réinit. MFA</Button> : null}<Button size="sm" variant="danger" onClick={() => setRemove(r)}>Retirer</Button></span> : null) },
   ];
 
   return (
@@ -109,6 +111,8 @@ function StaffTab({ roles }: { roles: Roles | null }) {
       </Modal>
       <ReasonModal open={Boolean(remove)} title={`Retirer l’accès de ${remove?.name ?? ""} ?`} description="Le compte utilisateur est conservé ; il perd son accès d’administration et toutes ses sessions sont révoquées." confirmLabel="Retirer l’accès" tone="danger" onClose={() => setRemove(null)}
         request={postTo(`/security/staff/${remove?.id}/remove/`)} onDone={() => { setRemove(null); setNotice("Accès retiré."); list.reload(); }} />
+      <ReasonModal open={Boolean(resetMfa)} title={`Réinitialiser la double authentification de ${resetMfa?.name ?? ""} ?`} description="À faire après vérification de l’identité (appareil perdu). L’appareil est supprimé, toutes ses sessions sont révoquées : il devra activer un nouvel appareil à sa prochaine connexion." confirmLabel="Réinitialiser" tone="danger"
+        onClose={() => setResetMfa(null)} request={postTo(`/security/staff/${resetMfa?.id}/mfa-reset/`)} onDone={() => { setResetMfa(null); setNotice("Double authentification réinitialisée."); list.reload(); }} />
     </>
   );
 }

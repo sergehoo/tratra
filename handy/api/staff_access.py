@@ -25,6 +25,10 @@ def _perms(user):
 def staff_may(user, permission: Optional[str] = None) -> bool:
     if not (user and getattr(user, "is_authenticated", False) and getattr(user, "is_staff", False)):
         return False
+    from backoffice import mfa
+
+    if not mfa.satisfied(user):          # double authentification exigée : sans preuve, aucun droit « personnel » (même superutilisateur)
+        return False
     if user.is_superuser:
         return True
     has_role, perms = _perms(user)

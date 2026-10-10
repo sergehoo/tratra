@@ -8,7 +8,7 @@ from rest_framework import permissions
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 
-from backoffice import rbac
+from backoffice import mfa, rbac
 from backoffice.common import BOView, last_days, money, public_name
 from backoffice.modules import modules_for
 from business.models import InterventionRequest
@@ -30,6 +30,7 @@ def me(request):
         "roles": roles,
         "permissions": sorted(rbac.user_permissions(request.user)),
         "modules": modules_for(request.user),
+        "mfa": mfa.status(request.user),
     })
 
 

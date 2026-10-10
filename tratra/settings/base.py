@@ -162,6 +162,7 @@ MIDDLEWARE = [
 
     'axes.middleware.AxesMiddleware',
     'handy.middleware.IPBlacklistMiddleware',
+    'backoffice.admin_mfa.AdminMFAMiddleware',   # /admin/ exige la double authentification du personnel (si exigée)
 
 ]
 
@@ -207,7 +208,7 @@ ACCOUNT_UNIQUE_EMAIL = True  # Empêche les doublons
 
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
-        'rest_framework_simplejwt.authentication.JWTAuthentication',  # ✅ plus de SessionAuthentication
+        'backoffice.mfa.MFAJWTAuthentication',  # JWT + preuve de double authentification du personnel (✅ plus de SessionAuthentication)
     ),
     # Sécurisé par défaut : il faut être authentifié. Les endpoints publics
     # (inscription, /nearby, /price-estimate, /slides) déclarent AllowAny explicitement.
@@ -230,6 +231,7 @@ REST_FRAMEWORK = {
         'recovery': config('THROTTLE_RECOVERY', default='20/hour'),
         'webhook': config('THROTTLE_WEBHOOK', default='120/min'),
         'verify': config('THROTTLE_VERIFY', default='60/min'),  # vérification publique d'un QR Tratra ID
+        'mfa': config('THROTTLE_MFA', default='20/min'),  # codes de double authentification du personnel
     },
 }
 
@@ -477,6 +479,15 @@ CELERY_BEAT_SCHEDULE = {
 # Personnel HISTORIQUE sans rôle Back-Office : garde son ancien accès global à l'API tant que ce réglage est vrai. Une fois les
 # rôles attribués (manage.py assign_legacy_staff_roles), le mettre à False ferme définitivement ce passe-droit.
 LEGACY_STAFF_BYPASS = env_bool('LEGACY_STAFF_BYPASS', True)
+
+# Double authentification (TOTP) des comptes d'administration — voir backoffice/mfa.py. Désactivée par défaut en développement ;
+# la production l'exige (prod.py). Durée de validité d'une vérification : 12 h ; clé de chiffrement des secrets dédiée (sinon SECRET_KEY).
+BACKOFFICE_MFA_REQUIRED = env_bool('BACKOFFICE_MFA_REQUIRED', False)
+BACKOFFICE_MFA_MAX_AGE = int(config('BACKOFFICE_MFA_MAX_AGE', default='43200'))
+MFA_ISSUER = config('MFA_ISSUER', default='Tratra')
+MFA_ENCRYPTION_KEY = config('MFA_ENCRYPTION_KEY', default='')
+MFA_MAX_FAILURES = int(config('MFA_MAX_FAILURES', default='5'))
+MFA_LOCK_SECONDS = int(config('MFA_LOCK_SECONDS', default='900'))
 
 # === DJSTRIPE ===
 DJSTRIPE_WEBHOOK_SECRET = config('STRIPE_WEBHOOK_SECRET', default='')

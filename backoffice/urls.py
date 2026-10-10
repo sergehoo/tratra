@@ -2,13 +2,18 @@ from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
 from announcements.api import AnnouncementAdminViewSet
-from backoffice import api_core, api_engagements, api_money, api_ops, api_people, api_system
+from backoffice import api_core, api_engagements, api_mfa, api_money, api_ops, api_people, api_system
 
 router = DefaultRouter()
 router.register("announcements", AnnouncementAdminViewSet, basename="bo-announcements")
 
 urlpatterns = [
     path("me/", api_core.me, name="bo-me"),
+    # Double authentification du personnel (accessibles avant vérification : sinon l'activation serait impossible)
+    path("mfa/status/", api_mfa.MFAStatus.as_view(), name="bo-mfa-status"),
+    path("mfa/setup/", api_mfa.MFASetup.as_view(), name="bo-mfa-setup"),
+    path("mfa/confirm/", api_mfa.MFAConfirm.as_view(), name="bo-mfa-confirm"),
+    path("mfa/verify/", api_mfa.MFAVerify.as_view(), name="bo-mfa-verify"),
     path("dashboard/", api_core.DashboardView.as_view(), name="bo-dashboard"),
     # Utilisateurs
     path("users/", api_people.UserList.as_view(), name="bo-users"),
@@ -115,6 +120,7 @@ urlpatterns = [
     path("security/staff/", api_system.StaffList.as_view(), name="bo-staff"),
     path("security/staff/<int:pk>/roles/", api_system.StaffRoles.as_view(), name="bo-staff-roles"),
     path("security/staff/<int:pk>/remove/", api_system.StaffRemove.as_view(), name="bo-staff-remove"),
+    path("security/staff/<int:pk>/mfa-reset/", api_system.StaffMfaReset.as_view(), name="bo-staff-mfa-reset"),
     path("security/sessions/", api_system.SessionList.as_view(), name="bo-sessions"),
     path("security/sessions/<int:pk>/revoke/", api_system.SessionRevoke.as_view(), name="bo-session-revoke"),
     path("security/users/<int:pk>/revoke-sessions/", api_system.UserSessionsRevoke.as_view(), name="bo-user-sessions-revoke"),

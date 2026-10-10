@@ -1,7 +1,7 @@
 """Classes de permission DRF du Back-Office : `bo_permission = "module.action"` sur la vue (ou un dict {action|méthode: code})."""
 from rest_framework.permissions import BasePermission
 
-from backoffice import rbac
+from backoffice import mfa, rbac
 
 
 class HasBackOfficePermission(BasePermission):
@@ -18,4 +18,9 @@ class HasBackOfficePermission(BasePermission):
         required = self._required(request, view)
         if not required:  # une vue du Back-Office sans droit déclaré est refusée (jamais ouverte par oubli)
             return False
-        return rbac.has_permission(request.user, required)
+        if not rbac.has_permission(request.user, required):
+            return False
+        if not mfa.satisfied(request.user):        # rôle suffisant mais double authentification non vérifiée : refus explicite et codé
+            self.message = mfa.denial(request.user)
+            return False
+        return True

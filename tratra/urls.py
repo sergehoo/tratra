@@ -11,6 +11,8 @@ from django.db import connections
 from django.http import JsonResponse
 from django.urls import path, include
 
+from backoffice.admin_mfa import admin_mfa_view
+
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView, SpectacularRedocView
 
 logger = logging.getLogger(__name__)
@@ -59,6 +61,7 @@ urlpatterns = [
     path("healthz", healthz, name="healthz"),
     path("readyz", readyz, name="readyz"),
     path("", api_root, name="api-root"),
+    path("admin/mfa/", admin_mfa_view, name="admin-mfa"),
     path("admin/", admin.site.urls),
 
     # API métier

@@ -15,3 +15,19 @@ class SupportNote(models.Model):
 
     def __str__(self):
         return f"Note #{self.pk} sur le compte #{self.user_id}"
+
+
+class StaffMFA(models.Model):
+    """Appareil TOTP d'un compte d'administration (voir backoffice/mfa.py). Le secret n'est jamais stocké en clair."""
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="mfa")
+    secret_enc = models.TextField()
+    confirmed_at = models.DateTimeField(null=True, blank=True)       # vide tant que l'enrôlement n'est pas confirmé par un code valide
+    last_used_step = models.BigIntegerField(null=True, blank=True)   # dernier pas TOTP accepté (anti-rejeu)
+    failed_attempts = models.PositiveSmallIntegerField(default=0)
+    locked_until = models.DateTimeField(null=True, blank=True)
+    backup_hashes = models.JSONField(default=list, blank=True)       # empreintes HMAC des codes de secours restants
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"MFA du compte #{self.user_id} ({'actif' if self.confirmed_at else 'en attente'})"
