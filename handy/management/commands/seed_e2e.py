@@ -135,7 +135,7 @@ class Command(BaseCommand):
     @transaction.atomic
     def purge(self):
         from business.models import InterventionRequest, Organization
-        from handy.models import Booking, HandymanDocument, Notification, Review, User
+        from handy.models import Booking, HandymanDocument, Notification, Payment, Review, User
         from trust.models import AuditEvent
 
         users = User.objects.filter(username__startswith=PREFIX)
@@ -147,6 +147,7 @@ class Command(BaseCommand):
         orgs.delete()
         bookings = Booking.objects.filter(client_id__in=ids) | Booking.objects.filter(handyman_id__in=ids)
         Review.objects.filter(booking__in=bookings).delete()
+        Payment.objects.filter(booking__in=bookings).delete()   # FK protégée : paiements en attente créés à la clôture
         n_bookings = bookings.count()
         bookings.delete()
         Notification.objects.filter(user_id__in=ids).delete()
