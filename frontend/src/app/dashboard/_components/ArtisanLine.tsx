@@ -3,6 +3,8 @@ import { Avatar, Badge, cx } from "@/components/ds";
 import { formatRating } from "@/lib/format";
 import type { Service } from "@/lib/types";
 import { artisanDisplayName } from "@/lib/artisan";
+import Link from "next/link";
+import { TrustBadges } from "@/components/trust/TrustBadge";
 
 /** Artisan d'un service : photo (ou initiales), nom, « Vérifié » et indicateurs réels uniquement. */
 export function ArtisanLine({
@@ -26,13 +28,20 @@ export function ArtisanLine({
       <Avatar name={name} photo={artisan?.photo} size={size} online={artisan?.online} />
       <div className="min-w-0">
         <p className="flex items-center gap-1.5 text-sm font-semibold text-ink">
-          <span className="truncate">{name}</span>
-          {artisan?.is_verified ? (
+          {artisan?.id ? (
+            <Link href={`/artisans/${artisan.id}`} className="truncate hover:text-primaryDark hover:underline" aria-label={`Passeport professionnel de ${name}`}>
+              {name}
+            </Link>
+          ) : (
+            <span className="truncate">{name}</span>
+          )}
+          {!artisan?.badges?.length && artisan?.is_verified ? (
             <Badge tone="primary" icon={<BadgeCheck />} className="shrink-0">
               Vérifié
             </Badge>
           ) : null}
         </p>
+        {artisan?.badges?.length ? <TrustBadges badges={artisan.badges} className="my-1" /> : null}
         <p className="flex flex-wrap items-center gap-x-2.5 text-xs text-ash">
           {rating ? (
             <span className="inline-flex items-center gap-1 font-semibold text-ink" aria-label={`Note ${rating} sur 5`}>
