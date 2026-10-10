@@ -46,6 +46,43 @@ def send_push(user_id, title, body, data=None):
     return push.send_to_user(user_id, title, body, data)
 
 
+@shared_task(bind=True, max_retries=3)
+def send_notification_push(self, notification_id, collapse_key=None):
+    """Diffuse UNE notification enregistrée sur tous les appareils du compte (FCM), de façon idempotente :
+    seule une notification « queued » est envoyée, donc un rejeu de la tâche ne duplique jamais le push.
+    Réessaie (délai exponentiel) uniquement les échecs transitoires ; l'état d'envoi est consigné sur la notification."""
+    from django.utils import timezone
+
+    from handy import notifications, push
+
+    n = Notification.objects.filter(pk=notification_id).first()
+    if n is None or n.push_status != 'queued':
+        return {"skipped": "already_processed"}
+    if not notifications.push_enabled(n.user_id, n.category):
+        Notification.objects.filter(pk=n.pk).update(push_status='disabled')
+        return {"skipped": "disabled"}
+    payload = {"t": n.notification_type, "cat": n.category, "nid": n.pk, "deeplink": notifications.deeplink(n.data), **(n.data or {})}
+    result = push.send_to_user(
+        n.user_id, n.title or notifications.TYPE_LABELS.get(n.notification_type, "Tratra"), n.message[:200], payload,
+        channel=notifications.CHANNEL_BY_CATEGORY.get(n.category), collapse_key=collapse_key,
+        badge=notifications.unread_count(n.user_id), ttl_seconds=notifications.TTL_BY_CATEGORY.get(n.category, 86400))
+    if result["skipped"] == "not_configured":
+        status = "unconfigured"
+    elif result["sent"]:
+        status = "sent"
+    elif result["failed"]:
+        if self.request.retries < self.max_retries:
+            raise self.retry(countdown=30 * (2 ** self.request.retries))
+        status = "failed"
+    elif result["skipped"] in ("no_device",) or result["removed"]:
+        status = "no_device"
+    else:
+        status = "failed"
+    Notification.objects.filter(pk=n.pk).update(
+        push_status=status, push_sent_at=timezone.now() if status == "sent" else None)
+    return {**result, "status": status}
+
+
 @shared_task
 def send_profile_completion_reminders():
     profiles = HandymanProfile.objects.filter(is_approved=True)
@@ -65,23 +102,14 @@ BOOKING_STATUS_FR = {"pending": "en attente", "confirmed": "confirmée", "in_pro
 
 
 @shared_task(max_retries=3, default_retry_delay=10)
-def notify_booking_status(booking_id, status):
-    """Notifie les DEUX parties d'un changement de statut :
-    notification in-app fiable (DB) + push best-effort."""
-    booking = (Booking.objects.filter(pk=booking_id)
-               .select_related('client', 'handyman').first())
-    if not booking:
-        return
-    label = BOOKING_STATUS_FR.get(status, status)
-    msg = f"Statut de la réservation #{booking_id} : {label}"
-    for user in (booking.client, booking.handyman):
-        if not user:
-            continue
-        Notification.objects.create(
-            user=user, notification_type='booking_status', message=msg,
-        )
-        _send_fcm(user.id, "Réservation", f"Statut : {label}",
-                  {"t": "booking", "id": booking_id, "s": status})
+def notify_booking_status(booking_id, status, actor_id=None):
+    """Notifie le changement de statut (historique en base + push asynchrone) : voir handy/notification_events.py.
+    L'auteur de l'action (`actor_id`) n'est jamais notifié de sa propre action."""
+    from handy.notification_events import booking_status_changed
+
+    booking = (Booking.objects.filter(pk=booking_id).select_related('client', 'handyman', 'service').first())
+    if booking:
+        booking_status_changed(booking, status, actor_id)
 
 
 @shared_task

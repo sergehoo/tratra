@@ -64,7 +64,7 @@ def test_without_credentials_nothing_is_sent_and_nothing_fails(monkeypatch):
     monkeypatch.setattr(push.requests, "post", lambda *a, **k: pytest.fail("aucune requête sans identifiants"))
     with override_settings(FCM_CREDENTIALS_FILE="", FCM_CREDENTIALS_JSON=""):
         assert push.is_configured() is False
-        assert push.send_to_user(u.id, "T", "B") == {"sent": 0, "removed": 0, "skipped": "not_configured"}
+        assert push.send_to_user(u.id, "T", "B") == {"sent": 0, "removed": 0, "failed": 0, "devices": 0, "skipped": "not_configured"}
         _send_fcm(u.id, "T", "B", {"k": 1})  # le chemin complet des notifications ne lève rien
     assert Device.objects.count() == 3
 
@@ -95,7 +95,7 @@ def test_with_credentials_android_and_ios_devices_receive_the_exact_payload(serv
     msg = kw["json"]["message"]
     assert msg["notification"] == {"title": "Moussa est en route", "body": "Suivez son arrivée."}
     assert msg["data"] == {"t": "live", "id": "12"}   # valeurs converties en texte (exigence FCM)
-    assert msg["android"] == {"priority": "high", "notification": {"channel_id": "tratra_default"}}
+    assert msg["android"] == {"priority": "high", "ttl": "86400s", "notification": {"channel_id": "tratra_default"}}
     # le jeton OAuth est signé par le compte de service (vérifiable avec sa clé publique)
     oauth = next(kw for url, kw in http.calls if url == "https://oauth.test/token")
     claims = jwt.decode(oauth["data"]["assertion"], public, algorithms=["RS256"], audience="https://oauth.test/token")
@@ -143,7 +143,7 @@ def test_network_failures_never_propagate(service_account, monkeypatch):
         _send_fcm(u.id, "T", "B")
 
 
-def test_live_notifications_use_registered_devices_and_keep_the_in_app_record(service_account, monkeypatch):
+def test_live_notifications_use_registered_devices_and_keep_the_in_app_record(service_account, monkeypatch, django_capture_on_commit_callbacks):
     """Parcours réel : « Je suis en route » → notification in-app TOUJOURS créée, push envoyé au client s'il a un appareil."""
     from datetime import timedelta
     from django.utils import timezone
@@ -160,11 +160,12 @@ def test_live_notifications_use_registered_devices_and_keep_the_in_app_record(se
     monkeypatch.setattr(push.requests, "post", http.post)
     c = APIClient()
     c.force_authenticate(art)
-    with override_settings(FCM_CREDENTIALS_FILE=path):
+    with override_settings(FCM_CREDENTIALS_FILE=path), django_capture_on_commit_callbacks(execute=True):
         assert c.post(f"/handy/bookings/{b.id}/live/en-route/", {"consent": True}, format="json").status_code == 200
     assert Notification.objects.filter(user=cli, notification_type="live_en_route").exists()
     sent = [kw["json"]["message"] for url, kw in http.calls if "fcm.googleapis.com" in url]
-    assert len(sent) == 1 and sent[0]["token"] == "tok-client" and sent[0]["data"]["k"] == "en_route"
+    assert len(sent) == 1 and sent[0]["token"] == "tok-client" and sent[0]["data"]["t"] == "live_en_route"
+    assert sent[0]["data"]["deeplink"] == f"tratra://booking/{b.id}"
 
 
 # ── Enregistrement des appareils : idempotent et toujours rattaché au dernier compte connecté ──
@@ -215,3 +216,16 @@ def test_registration_rejects_unknown_platforms_and_requires_authentication():
     a = _login("push_val_a")
     assert a.post("/handy/devices/", {"device_token": "tok-x", "device_type": "toaster"}, format="json").status_code == 400
     assert APIClient().post("/handy/devices/", {"device_token": "tok-y", "device_type": "android"}, format="json").status_code == 401
+
+
+def test_token_renewal_removes_the_previous_token_of_the_same_account_only():
+    a, b = _login("push_renew_a"), _login("push_renew_b")
+    a.post("/handy/devices/", {"device_token": "tok-old", "device_type": "android"}, format="json")
+    b.post("/handy/devices/", {"device_token": "tok-b", "device_type": "android"}, format="json")
+    # a renouvelle son jeton ; une tentative de supprimer le jeton d'un autre compte via previous_token est sans effet
+    r = a.post("/handy/devices/", {"device_token": "tok-new", "device_type": "android", "previous_token": "tok-old"}, format="json")
+    assert r.status_code == 201
+    a.post("/handy/devices/", {"device_token": "tok-new2", "device_type": "android", "previous_token": "tok-b"}, format="json")
+    tokens = set(Device.objects.values_list("device_token", flat=True))
+    assert "tok-old" not in tokens and {"tok-new", "tok-new2", "tok-b"} <= tokens
+

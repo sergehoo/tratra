@@ -86,9 +86,15 @@ def _stringify(data: Optional[Dict]) -> Dict[str, str]:
     return {str(k): str(v) for k, v in (data or {}).items()}  # FCM exige des valeurs textuelles
 
 
-def send_to_user(user_id: int, title: str, body: str, data: Optional[Dict] = None) -> Dict:
-    """Envoie la notification aux appareils mobiles du compte. Ne lève jamais d'exception."""
-    result = {"sent": 0, "removed": 0, "skipped": None}
+def send_to_user(user_id: int, title: str, body: str, data: Optional[Dict] = None, *, channel: Optional[str] = None,
+                 collapse_key: Optional[str] = None, badge: Optional[int] = None, ttl_seconds: int = 86400) -> Dict:
+    """Envoie la notification à TOUS les appareils mobiles du compte. Ne lève jamais d'exception.
+
+    Retour : {"sent": n, "removed": n, "failed": n, "devices": n, "skipped": None|"not_configured"|"no_device"|"no_access_token"}.
+    `failed` ne compte que les échecs TRANSITOIRES (réseau, 5xx, 429) : l'appelant peut réessayer. Un jeton refusé par FCM
+    comme périmé est supprimé (`removed`). `collapse_key` remplace la notification précédente de même clé (ex. messages d'une
+    conversation) ; `badge` (iOS) = nombre de notifications non lues."""
+    result = {"sent": 0, "removed": 0, "failed": 0, "devices": 0, "skipped": None}
     try:
         if not is_configured():
             result["skipped"] = "not_configured"
@@ -96,6 +102,7 @@ def send_to_user(user_id: int, title: str, body: str, data: Optional[Dict] = Non
         from handy.models import Device
 
         devices = list(Device.objects.filter(user_id=user_id, device_type__in=("android", "ios")))
+        result["devices"] = len(devices)
         if not devices:
             result["skipped"] = "no_device"
             return result
@@ -104,15 +111,28 @@ def send_to_user(user_id: int, title: str, body: str, data: Optional[Dict] = Non
             result["skipped"] = "no_access_token"
             return result
         url = f"https://fcm.googleapis.com/v1/projects/{project_id()}/messages:send"
+        android_notification = {"channel_id": channel or ANDROID_CHANNEL}
+        if collapse_key:
+            android_notification["tag"] = collapse_key
+        android = {"priority": "high", "ttl": f"{int(ttl_seconds)}s", "notification": android_notification}
+        if collapse_key:
+            android["collapse_key"] = collapse_key
+        apns = {"headers": {"apns-priority": "10", "apns-expiration": str(int(time.time()) + int(ttl_seconds))},
+                "payload": {"aps": {"sound": "default", **({"badge": int(badge)} if badge is not None else {})}}}
+        if collapse_key:
+            apns["headers"]["apns-collapse-id"] = collapse_key[:64]
         for device in devices:
             message = {"message": {"token": device.device_token, "notification": {"title": title, "body": body},
-                                   "data": _stringify(data),
-                                   "android": {"priority": "high", "notification": {"channel_id": ANDROID_CHANNEL}},
-                                   "apns": {"headers": {"apns-priority": "10"}}}}
-            r = requests.post(url, json=message, headers={"Authorization": f"Bearer {token}"}, timeout=TIMEOUT)
-            if r.status_code == 401:  # jeton expiré côté Google : un seul nouvel essai
-                token = _access_token(force=True) or token
+                                   "data": _stringify(data), "android": android, "apns": apns}}
+            try:
                 r = requests.post(url, json=message, headers={"Authorization": f"Bearer {token}"}, timeout=TIMEOUT)
+                if r.status_code == 401:  # jeton expiré côté Google : un seul nouvel essai
+                    token = _access_token(force=True) or token
+                    r = requests.post(url, json=message, headers={"Authorization": f"Bearer {token}"}, timeout=TIMEOUT)
+            except requests.RequestException:
+                logger.warning("FCM : appareil #%s injoignable (réseau).", device.pk)
+                result["failed"] += 1
+                continue
             if r.status_code == 200:
                 result["sent"] += 1
             elif r.status_code in (400, 404) and _is_dead_token(r):
@@ -120,14 +140,20 @@ def send_to_user(user_id: int, title: str, body: str, data: Optional[Dict] = Non
                 result["removed"] += 1
             else:
                 logger.warning("FCM : refus %s pour l'appareil #%s", r.status_code, device.pk)
+                if r.status_code == 429 or r.status_code >= 500:
+                    result["failed"] += 1
     except Exception:
         logger.warning("Push FCM non envoyé.", exc_info=True)
     return result
 
 
 def _is_dead_token(response) -> bool:
+    """Jeton périmé : désinstallation, expiration, appareil inconnu. Un « INVALID_ARGUMENT » ne vise le jeton que s'il le
+    mentionne (sinon c'est la charge utile qui est en cause : l'appareil ne doit alors PAS être supprimé)."""
     try:
         text = json.dumps(response.json())
     except ValueError:
         text = response.text or ""
-    return "UNREGISTERED" in text or "INVALID_ARGUMENT" in text or "NOT_FOUND" in text
+    if "UNREGISTERED" in text or "NOT_FOUND" in text:
+        return True
+    return "INVALID_ARGUMENT" in text and "token" in text.lower()

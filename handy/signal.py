@@ -6,7 +6,7 @@ from django.dispatch import receiver
 
 from handy.media.sanitize import sanitize_new_upload
 from handy.models import (
-    ServiceImage, User, HandymanProfile, Review, Booking, CompanyProfile, Service, ReviewMedia,
+    ServiceImage, User, HandymanProfile, Review, Booking, CompanyProfile, Service, ReviewMedia, Message, Dispute,
 )
 from handy.tasks import notify_booking_status
 logger = logging.getLogger(__name__)
@@ -95,16 +95,39 @@ def update_rating_on_review_delete(sender, instance: Review, **kwargs):
 
 @receiver(post_save, sender=Booking)
 def on_booking_status_change(sender, instance: Booking, created: bool, **kwargs):
-    # Ne pas notifier à la création si ce n'est pas utile
+    from handy import notification_events
+
     if created:
+        notification_events.booking_created(instance)  # l'artisan est prévenu de la nouvelle demande
         return
 
+    actor_id = getattr(instance, '_transition_actor_id', None)
     if notify_booking_status:
         try:
             # retry=False : sans broker joignable (dev, panne), échec immédiat et journalisé au lieu de
             # ~10 s d'attente par changement de statut ; la notification reste « best-effort ».
-            notify_booking_status.apply_async(args=(instance.id, instance.status), retry=False)
+            notify_booking_status.apply_async(args=(instance.id, instance.status, actor_id), retry=False)
         except Exception:
             logger.exception("Échec d'envoi de la tâche Celery notify_booking_status")
     else:
         logger.debug("notify_booking_status indisponible — notification ignorée.")
+
+
+@receiver(post_save, sender=Review)
+def notify_review_received(sender, instance: Review, created, **kwargs):
+    if created:
+        from handy import notification_events
+        notification_events.review_created(instance)
+
+
+@receiver(post_save, sender=Message)
+def notify_message_received(sender, instance: Message, created, **kwargs):
+    if created:
+        from handy import notification_events
+        notification_events.message_created(instance)
+
+
+@receiver(post_save, sender=Dispute)
+def notify_dispute_changed(sender, instance: Dispute, created, **kwargs):
+    from handy import notification_events
+    notification_events.dispute_changed(instance, created)

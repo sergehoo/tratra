@@ -267,6 +267,8 @@ class HandymanDocument(models.Model):
         self.reviewed_at = timezone.now()
         self.rejection_reason = ''
         self.save(update_fields=['status', 'reviewed_by', 'reviewed_at', 'rejection_reason'])
+        from handy.notification_events import kyc_decided
+        kyc_decided(self)
         return self
 
     def reject(self, *, by, reason=''):
@@ -275,6 +277,8 @@ class HandymanDocument(models.Model):
         self.reviewed_at = timezone.now()
         self.rejection_reason = reason
         self.save(update_fields=['status', 'reviewed_by', 'reviewed_at', 'rejection_reason'])
+        from handy.notification_events import kyc_decided
+        kyc_decided(self)
         return self
 
 
@@ -577,6 +581,7 @@ class Booking(models.Model):
 
         previous = self.status
         self.status = new_status
+        self._transition_actor_id = getattr(actor, 'pk', None)  # lu par le signal de notification (l'auteur n'est pas notifié)
         update_fields = ['status', 'updated_at']
         if new_status == 'completed' and not self.end_date:
             # Jamais avant le début (contrainte bk_end_after_start) : terminer une mission en avance
@@ -733,6 +738,8 @@ class Payment(models.Model):
                 total=self.amount,
             ),
         )
+        from handy.notification_events import payment_released
+        payment_released(self)
         return self
 
     @transaction.atomic
@@ -747,6 +754,8 @@ class Payment(models.Model):
         PaymentLog.objects.create(
             payment=self, previous_status=old, new_status='refunded', notes=note
         )
+        from handy.notification_events import payment_refunded
+        payment_refunded(self)
         return self
 
 
@@ -906,27 +915,64 @@ class Message(models.Model):
 
 
 class Notification(models.Model):
+    """Historique persistant des notifications d'un utilisateur (centre de notifications Web, Flutter et API).
+
+    Créé uniquement par `handy.notifications.notify` : le push FCM n'est qu'un canal de diffusion supplémentaire,
+    l'enregistrement en base reste la source de vérité (lu/non lu, navigation, déduplication)."""
     TYPES = [
         ('profile_incomplete', 'Profil incomplet'),
         ('profile_completed', 'Profil complété'),
         ('booking_request', 'Demande de réservation'),
         ('booking_confirmed', 'Réservation confirmée'),
         ('booking_cancelled', 'Réservation annulée'),
+        ('booking_started', 'Intervention démarrée'),
+        ('booking_completed', 'Intervention terminée'),
         ('payment_received', 'Paiement reçu'),
+        ('refund_issued', 'Remboursement émis'),
         ('review_received', 'Avis reçu'),
         ('review_reply', "Réponse à un avis"),
         ('message_received', 'Message reçu'),
         ('booking_status', 'Changement de statut de réservation'),
         ('live_en_route', 'Artisan en route'),
         ('live_arrived', 'Artisan arrivé'),
+        ('kyc_approved', 'Identité vérifiée'),
+        ('kyc_rejected', 'Document refusé'),
+        ('dispute_opened', 'Litige ouvert'),
+        ('dispute_resolved', 'Litige résolu'),
         ('business_request', "Demande d'intervention à valider"),
         ('business_update', "Mise à jour d'une demande d'intervention"),
         ('business_reminder', 'Rappel de maintenance'),
+        ('announcement', 'Annonce'),
+        ('system', 'Information Tratra'),
+    ]
+    CATEGORIES = [
+        ('booking', 'Réservations et missions'),
+        ('message', 'Messages'),
+        ('payment', 'Paiements'),
+        ('live', 'Suivi en direct'),
+        ('review', 'Avis'),
+        ('account', 'Compte et vérification'),
+        ('business', 'Entreprise'),
+        ('announcement', 'Annonces'),
+        ('system', 'Informations'),
+    ]
+    PUSH_STATUSES = [
+        ('', 'Non concerné'), ('queued', 'En file'), ('sent', 'Envoyé'), ('no_device', 'Aucun appareil'),
+        ('disabled', 'Désactivé par l\'utilisateur'), ('unconfigured', 'Firebase non configuré'), ('failed', 'Échec'),
     ]
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notifications', db_index=True)
     notification_type = models.CharField(max_length=50, choices=TYPES, db_index=True)
+    category = models.CharField(max_length=20, choices=CATEGORIES, default='system', db_index=True)
+    title = models.CharField(max_length=140, blank=True, default='')
     message = models.TextField()
+    # Navigation vers l'objet concerné : {"kind": "booking"|"mission"|"conversation"|"announcement"|…, "id": n}
+    data = models.JSONField(default=dict, blank=True)
     is_read = models.BooleanField(default=False, db_index=True)
+    read_at = models.DateTimeField(null=True, blank=True)
+    # Un même événement ne crée jamais deux notifications pour un utilisateur (ex. « booking:12:confirmed »).
+    dedupe_key = models.CharField(max_length=120, null=True, blank=True)
+    push_status = models.CharField(max_length=20, choices=PUSH_STATUSES, blank=True, default='')
+    push_sent_at = models.DateTimeField(null=True, blank=True)
 
     # Generic relation (remplace related_id)
     content_type = models.ForeignKey(ContentType, on_delete=models.SET_NULL, null=True, blank=True)
@@ -934,6 +980,37 @@ class Notification(models.Model):
     content_object = GenericForeignKey('content_type', 'object_id')
 
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['user', 'dedupe_key'], condition=models.Q(dedupe_key__isnull=False),
+                                    name='uniq_notification_dedupe_per_user'),
+        ]
+        indexes = [models.Index(fields=['user', 'is_read', '-created_at']),
+                   models.Index(fields=['user', 'category', '-created_at'])]
+
+
+class NotificationPreference(models.Model):
+    """Choix de l'utilisateur par catégorie. Sans ligne : valeurs par défaut (push actif, sauf annonces)."""
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notification_preferences')
+    category = models.CharField(max_length=20, choices=Notification.CATEGORIES)
+    push_enabled = models.BooleanField(default=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['user', 'category'], name='uniq_notification_pref')]
+
+
+class MarketingConsent(models.Model):
+    """Consentement aux communications PROMOTIONNELLES (annonces commerciales). Aucun envoi promotionnel sans
+    `granted=True` ; chaque changement est horodaté (preuve) et journalisé."""
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='marketing_consent')
+    granted = models.BooleanField(default=False)
+    granted_at = models.DateTimeField(null=True, blank=True)
+    revoked_at = models.DateTimeField(null=True, blank=True)
+    source = models.CharField(max_length=40, blank=True, default='')            # app, web, admin…
+    text_version = models.CharField(max_length=20, blank=True, default='')      # version du libellé accepté
+    updated_at = models.DateTimeField(auto_now=True)
 
 
 class Report(models.Model):

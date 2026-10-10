@@ -18,6 +18,7 @@ from business.models import (ApprovalRule, ApprovalStep, Budget, ConsolidatedInv
                              Site)
 from handy.eligibility import publishable
 from handy.models import Booking, HandymanProfile, Notification, Payment, Service, TimeOff
+from handy.notifications import notify
 from trust.models import audit
 
 # SLA par défaut (heures : prise en charge, résolution) quand aucun contrat ne s'applique.
@@ -165,8 +166,9 @@ def _notify_approvers(req: InterventionRequest, role: str) -> None:
                .select_related("user"))
     for m in members:
         if rbac.site_allowed(m, req.site_id):
-            Notification.objects.create(user=m.user, notification_type="business_request",
-                                        message=f"Demande {req.number} à valider : {req.title} ({req.site.name}).")
+            notify(m.user_id, "business_request", f"Demande {req.number} à valider : {req.title} ({req.site.name}).",
+                   title="Demande à valider", data={"kind": "business_request", "id": req.pk, "org": req.organization_id},
+                   dedupe_key=f"business:{req.pk}:to_validate:{m.user_id}:{req.steps.filter(status='pending').count()}")
 
 
 def pending_step(req: InterventionRequest) -> Optional[ApprovalStep]:
@@ -204,10 +206,10 @@ def decide(req: InterventionRequest, user, membership: Membership, *, approve: b
           target_type="interventionrequest", organization_id=req.organization_id, step=step.order, role=step.role,
           override=membership.role != step.role)
     if not approve or req.status == "approved":
-        Notification.objects.create(
-            user=req.requested_by, notification_type="business_update",
-            message=(f"Votre demande {req.number} a été validée." if approve
-                     else f"Votre demande {req.number} a été refusée. {comment}".strip()))
+        notify(req.requested_by_id, "business_update",
+               (f"Votre demande {req.number} a été validée." if approve else f"Votre demande {req.number} a été refusée. {comment}".strip()),
+               title="Demande d'intervention", data={"kind": "business_request", "id": req.pk, "org": req.organization_id},
+               dedupe_key=f"business:{req.pk}:decision:{'ok' if approve else 'ko'}")
     elif (nxt := pending_step(req)) is not None:
         _notify_approvers(req, nxt.role)
     return req
@@ -311,8 +313,14 @@ def dispatch(req: InterventionRequest, user, *, artisan_id: Optional[int] = None
         job_location=site.location, proposed_price=req.estimated_cost)
     req.booking, req.status = booking, "dispatched"
     req.save()
-    Notification.objects.create(user_id=chosen["user_id"], notification_type="booking_request",
-                                message=f"Nouvelle demande d'intervention {req.number} : {req.title}.")
+    # La création de la réservation a déjà notifié l'artisan (signal) avec le texte générique : on le remplace par le texte
+    # métier (le push, asynchrone, lit la notification après validation de la transaction).
+    text = f"Nouvelle demande d'intervention {req.number} : {req.title}."
+    data = {"kind": "mission", "id": booking.id, "audience": "artisan"}
+    if notify(chosen["user_id"], "booking_request", text, title="Nouvelle mission", data=data,
+              dedupe_key=f"booking:{booking.id}:request") is None:
+        Notification.objects.filter(user_id=chosen["user_id"], dedupe_key=f"booking:{booking.id}:request").update(
+            message=text, title="Nouvelle mission", data=data)
     audit("request.dispatched", actor=user, target=req, target_type="interventionrequest",
           organization_id=req.organization_id, artisan_id=chosen["user_id"], booking_id=booking.id, auto=auto)
     return req
@@ -360,8 +368,9 @@ def sync_from_booking(booking: Booking) -> None:
         req.status, req.booking, req.responded_at = "approved", None, None
         for m in Membership.objects.filter(organization=req.organization, is_active=True, role__in=[Role.OWNER, Role.ADMIN, Role.SITE_MANAGER]):
             if rbac.site_allowed(m, req.site_id):
-                Notification.objects.create(user=m.user, notification_type="business_update",
-                                            message=f"L'intervention {req.number} est à réaffecter (mission annulée).")
+                notify(m.user_id, "business_update", f"L'intervention {req.number} est à réaffecter (mission annulée).",
+                       title="Intervention à réaffecter", data={"kind": "business_request", "id": req.pk, "org": req.organization_id},
+                       dedupe_key=f"business:{req.pk}:reassign:{booking.pk}:{m.user_id}")
     else:
         return
     req.save()
@@ -473,8 +482,10 @@ def run_preventive(today: Optional[date] = None) -> int:
             fresh.save(update_fields=["last_generated_for"])
             for m in Membership.objects.filter(organization=org, is_active=True, role__in=[Role.OWNER, Role.ADMIN, Role.SITE_MANAGER]):
                 if rbac.site_allowed(m, eq.site_id):
-                    Notification.objects.create(user=m.user, notification_type="business_reminder",
-                                                message=f"Maintenance préventive à prévoir : {eq.name} ({eq.site.name}) — {fresh.next_due_on:%d/%m/%Y}. Demande {req.number} créée.")
+                    notify(m.user_id, "business_reminder",
+                           f"Maintenance préventive à prévoir : {eq.name} ({eq.site.name}) — {fresh.next_due_on:%d/%m/%Y}. Demande {req.number} créée.",
+                           title="Maintenance préventive", data={"kind": "business_request", "id": req.pk, "org": req.organization_id},
+                           dedupe_key=f"business:{req.pk}:preventive:{m.user_id}")
             created += 1
     return created
 

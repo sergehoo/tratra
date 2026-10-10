@@ -1135,9 +1135,8 @@ class ReviewViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
         review.reply_text = text
         review.reply_at = review.reply_at or timezone.now()
         review.save(update_fields=["reply_text", "reply_at", "updated_at"])
-        Notification.objects.create(
-            user=review.booking.client, notification_type="review_reply",
-            message="L'artisan a répondu à votre avis.", content_object=review)
+        from handy.notification_events import review_replied
+        review_replied(review)
         return Response(self.get_serializer(review).data)
 
     @extend_schema(request=OpenApiTypes.OBJECT, responses=ReviewSerializer, tags=["Avis"],
@@ -1238,18 +1237,6 @@ class MessageViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
         serializer.save(sender=self.request.user)
 
 
-class NotificationViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
-    queryset = Notification.objects.select_related("user").all()
-    serializer_class = NotificationSerializer
-    permission_classes = [permissions.IsAuthenticated]
-    owner_lookups = ("user",)
-    ordering = ["-created_at"]
-    pagination_class = DefaultPageNumberPagination
-
-    def perform_create(self, serializer):
-        serializer.save(user=self.request.user)
-
-
 class HandymanDocumentViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
     queryset = HandymanDocument.objects.select_related("handyman", "handyman__user").all()
     serializer_class = HandymanDocumentSerializer
@@ -1341,6 +1328,10 @@ class DeviceViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
         sur ce téléphone (jamais de push d'un compte vers l'appareil d'un autre)."""
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        # Renouvellement du jeton FCM : l'application envoie l'ancien jeton, supprimé s'il appartient bien à ce compte.
+        previous = str(request.data.get("previous_token") or "").strip()
+        if previous and previous != serializer.validated_data["device_token"]:
+            Device.objects.filter(user=request.user, device_token=previous).delete()
         device, created = Device.objects.update_or_create(
             device_token=serializer.validated_data["device_token"],
             defaults={"user": request.user, "device_type": serializer.validated_data["device_type"]},

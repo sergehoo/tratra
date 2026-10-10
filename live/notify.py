@@ -1,8 +1,7 @@
-"""Notifications du suivi : in-app (fiable) + push mobile (best-effort, nécessite la configuration FCM)."""
+"""Notifications du suivi : historique en base + push asynchrone (voir handy/notifications.py)."""
 import logging
 
-from handy.models import Notification
-from handy.tasks import _send_fcm
+from handy.notifications import notify
 
 logger = logging.getLogger(__name__)
 
@@ -19,9 +18,9 @@ def notify_client(booking, kind: str) -> None:
         "arrived": (f"{_who(booking.handyman)} est arrivé", "Vérifiez son identité avec le QR de mission."),
     }
     title, body = texts[kind]
-    Notification.objects.create(user=booking.client, notification_type=f"live_{kind}",
-                                message=f"{title} — réservation #{booking.id}. {body}")
     try:
-        _send_fcm(booking.client_id, title, body, {"t": "live", "id": booking.id, "k": kind})
-    except Exception:  # push indisponible : la notification in-app est déjà créée
-        logger.warning("Push suivi #%s non envoyé", booking.id, exc_info=True)
+        notify(booking.client_id, f"live_{kind}", f"{title} — réservation #{booking.id}. {body}", title=title,
+               data={"kind": "booking", "id": booking.id, "audience": "client"}, dedupe_key=f"live:{booking.id}:{kind}",
+               content_object=booking)
+    except Exception:  # la mission continue même si la notification échoue
+        logger.warning("Notification de suivi #%s non créée", booking.id, exc_info=True)

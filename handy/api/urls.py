@@ -7,12 +7,13 @@ from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from .views import (
     UserViewSet, HandymanProfileViewSet, ServiceCategoryViewSet, ServiceViewSet, ServiceImageViewSet,
     BookingViewSet, PaymentViewSet, PaymentLogViewSet, PayoutViewSet, ReviewViewSet, ConversationViewSet,
-    MessageViewSet, NotificationViewSet, HandymanDocumentViewSet, ReportViewSet, DeviceViewSet, DisputeViewSet,
+    MessageViewSet, HandymanDocumentViewSet, ReportViewSet, DeviceViewSet, DisputeViewSet,
     TimeOffViewSet, SubscriptionPlanViewSet, SubscriptionViewSet,
     price_estimate, payment_initiate, match, PaymentWebhook, EmailOrUsernameTokenObtainPairView, HeroSlideViewSet,
     otp_request, otp_verify, coupon_validate, payout_account, company_profile, public_stats
 )
 
+from .notification_views import NotificationViewSet, me_marketing_consent, me_notification_preferences
 from .dashboard import (
     me_become_provider, me_conversation_messages, me_conversations, me_dashboard,
     me_notifications_read_all, me_reviews, me_services,
@@ -68,6 +69,8 @@ urlpatterns = [
     path('me/conversations/<int:pk>/messages/', me_conversation_messages, name='me-conversation-messages'),
     path('me/reviews/', me_reviews, name='me-reviews'),
     path('me/notifications/read-all/', me_notifications_read_all, name='me-notifications-read-all'),
+    path('me/notification-preferences/', me_notification_preferences, name='me-notification-preferences'),
+    path('me/marketing-consent/', me_marketing_consent, name='me-marketing-consent'),
 
     path('', include('trust.urls')),  # Tratra Trust / Tratra ID
     path('', include('live.urls')),   # Tratra Live : suivi en direct des missions

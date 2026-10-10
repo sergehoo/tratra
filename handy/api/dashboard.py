@@ -405,5 +405,6 @@ def me_reviews(request):
 @api_view(["POST"])
 @permission_classes([permissions.IsAuthenticated])
 def me_notifications_read_all(request):
-    n = Notification.objects.filter(user=request.user, is_read=False).update(is_read=True)
+    from handy import notifications
+    n = notifications.mark_read(request.user)
     return Response({"marked": n})
