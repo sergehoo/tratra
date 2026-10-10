@@ -24,6 +24,7 @@ function Shell({ children }: { children: ReactNode }) {
   const { data } = useDashboard();
   const provider = data?.capabilities.provider ?? false;
   const company = data?.capabilities.company ?? false;
+  const business = data?.capabilities.business ?? false;
 
   const nav = useMemo<NavItem[]>(() => {
     const items: NavItem[] = [
@@ -42,13 +43,14 @@ function Shell({ children }: { children: ReactNode }) {
       { href: "/dashboard/notifications", label: "Notifications", icon: Bell, badge: data?.unread.notifications },
       { href: "/dashboard/profile", label: "Mon profil et KYC", icon: ShieldCheck },
     );
+    if (business || company) items.push({ href: "/dashboard/business", label: "Tratra Business", icon: Building2, primary: false });
     items.push(
       company
         ? { href: "/company", label: "Espace entreprise", icon: Building2 }
         : { href: "/dashboard/company/new", label: "Créer un espace entreprise", icon: Building2 },
     );
     return items;
-  }, [provider, company, data?.unread.messages, data?.unread.notifications]);
+  }, [provider, company, business, data?.unread.messages, data?.unread.notifications]);
 
   return (
     <AppShell title="Mon espace" nav={nav}>

@@ -69,7 +69,7 @@ export interface DashAction {
 export interface DashboardData {
   generated_at: string;
   user: { id: number; first_name: string; display_name: string; phone: string | null; is_verified: boolean; user_type: string };
-  capabilities: { client: boolean; provider: boolean; publishable: boolean; company: boolean };
+  capabilities: { client: boolean; provider: boolean; publishable: boolean; company: boolean; business?: boolean };
   client: { bookings: BookingCounts; next_bookings: DashItem[]; recent_bookings: DashItem[]; reviews_to_write: number };
   provider: ProviderBlock | null;
   upcoming: DashItem[];
