@@ -59,11 +59,32 @@ def ping(lat_lng, **extra):
             "captured_at": timezone.now().isoformat(), **extra}
 
 
+def _numbers(obj):
+    """Toutes les valeurs numériques (ou textes numériques) d'une réponse JSON, clés et horodatages exclus."""
+    if isinstance(obj, dict):
+        for v in obj.values():
+            yield from _numbers(v)
+    elif isinstance(obj, (list, tuple)):
+        for v in obj:
+            yield from _numbers(v)
+    elif isinstance(obj, bool):
+        return
+    elif isinstance(obj, (int, float)):
+        yield float(obj)
+    elif isinstance(obj, str):
+        try:
+            yield float(obj)
+        except ValueError:
+            return
+
+
 def no_position_leak(responses, *needles):
-    """Aucune réponse ne contient les coordonnées de l'artisan (position en direct ni position enregistrée)."""
-    blob = " ".join(json.dumps(r.json() if hasattr(r, "json") else r, default=str) for r in responses)
+    """Aucune réponse ne contient les coordonnées de l'artisan (position en direct ni position enregistrée).
+    Comparaison sur les VALEURS numériques, pas sur le texte : « 5.25 » apparaît par hasard dans un horodatage."""
+    values = [v for r in responses for v in _numbers(r.json() if hasattr(r, "json") else r)]
     for n in needles:
-        assert n not in blob, f"fuite de position : {n}"
+        target = float(n)
+        assert not any(abs(v - target) < 1e-6 for v in values), f"fuite de position : {n}"
 
 
 def test_full_journey_with_two_distinct_sessions():
@@ -258,3 +279,12 @@ def test_two_sessions_never_share_identity_or_rights():
     assert client.post(f"/handy/bookings/{b.id}/live/en-route/", {"consent": True}, format="json").status_code == 403
     assert artisan_api.post(f"/handy/bookings/{b.id}/identity-pass/").status_code == 201
     assert artisan_api.post("/handy/reviews/", {"booking": b.id, "rating": 5}, format="json").status_code in (400, 403, 404)
+
+
+def test_leak_check_flags_real_coordinates_but_not_lookalike_timestamps():
+    """Le contrôle de fuite doit rester fiable : faux positif sur « …05.259Z » = test instable (constaté)."""
+    harmless = [{"created": "2026-10-10T11:45:05.259379Z", "lat": 5.36, "lng": -4.0083}]
+    no_position_leak(harmless, "5.25", "-3.9")
+    for leaked in ({"position": {"lat": 5.25}}, {"nested": [{"home": "5.250000"}]}, {"lng": -3.9}):
+        with pytest.raises(AssertionError):
+            no_position_leak([leaked], "5.25", "-3.9")
