@@ -114,6 +114,31 @@ def payment_released(payment) -> None:
            title="Paiement reçu", data=_booking_data(booking, "artisan"), dedupe_key=f"payment:{payment.pk}:released")
 
 
+def _cash_audience(booking, user_id) -> str:
+    return "artisan" if user_id == booking.handyman_id else "client"
+
+
+@_safe
+def cash_declared(decl) -> None:
+    """Paiement en espèces déclaré par une partie : l'AUTRE partie est invitée à confirmer (jamais l'auteur)."""
+    booking = decl.booking
+    other = booking.handyman_id if decl.declared_by_id == booking.client_id else booking.client_id
+    verb = "avoir reçu" if decl.declared_by_role == "artisan" else "avoir remis"
+    notify(other, "cash_declared", f"{_first(decl.declared_by, 'L’autre partie')} déclare {verb} {decl.amount:.0f} FCFA en espèces pour « {_service_title(booking)} ». Confirmez si c'est exact.",
+           title="Paiement en espèces à confirmer", data=_booking_data(booking, _cash_audience(booking, other)), dedupe_key=f"cash:{decl.pk}:declared")
+
+
+@_safe
+def cash_responded(decl) -> None:
+    """Réponse de l'autre partie : l'auteur de la déclaration est informé de la confirmation ou de la contestation."""
+    booking = decl.booking
+    ok = decl.status == "confirmed"
+    notify(decl.declared_by_id, "cash_confirmed" if ok else "cash_contested",
+           f"Votre déclaration de {decl.amount:.0f} FCFA en espèces pour « {_service_title(booking)} » est {'confirmée' if ok else 'contestée : ' + decl.rejection_reason}.",
+           title="Espèces confirmées" if ok else "Espèces contestées", data=_booking_data(booking, _cash_audience(booking, decl.declared_by_id)),
+           dedupe_key=f"cash:{decl.pk}:{'confirmed' if ok else 'rejected'}")
+
+
 @_safe
 def payment_refunded(payment) -> None:
     booking = payment.booking

@@ -1,4 +1,6 @@
 "use client";
+import { CashBlock } from "../_components/CashBlock";
+import type { CashSummary } from "@/lib/cash";
 import { useCallback, useEffect, useState } from "react";
 import { Alert, Badge, Button, Modal, PageHeader, SkeletonStats, Stat, Tabs, type Column } from "@/components/ds";
 import { bo, boError, moneyLabel } from "@/lib/bo";
@@ -8,7 +10,7 @@ import { DateRange, FilterBar, FilterSelect, KV, ListView, ReasonModal, SearchBo
 
 interface Summary { gmv: string; commission_earned: string; commission_in_escrow: string; escrow_held: string; refunded: string; payouts: Record<string, { count: number; amount: string }>; by_status: Record<string, { count: number; amount: string }> }
 interface Payment { id: number; booking_id: number; client: string; artisan: string; amount: string; platform_fee: string; net: string; method: string; status: string; refunded_amount: string; created_at: string; payment_date: string | null; verification: "provider_verified" | "unverified" | "manual"; provider_verified_at: string | null; provider_checked_at: string | null; provider_status: string }
-interface PaymentDetail extends Payment { booking_status: string; discount: string; can_refund: boolean; logs: { previous_status: string; new_status: string; at: string; notes: string }[]; history: { action: string; at: string; by: string; reason: string }[] }
+interface PaymentDetail extends Payment { cash?: CashSummary; booking_status: string; discount: string; can_refund: boolean; logs: { previous_status: string; new_status: string; at: string; notes: string }[]; history: { action: string; at: string; by: string; reason: string }[] }
 interface Payout { id: number; artisan_id: number; artisan: string; amount: string; status: string; requested_at: string; processed_at: string | null; notes: string }
 interface Invoice { id: number; number: string; booking_id: number; client: string; artisan: string; amount: string; fee: string; total: string }
 
@@ -36,6 +38,7 @@ function PaymentPanel({ id, onClose, onChanged }: { id: number | null; onClose: 
               ["Preuve de l’encaissement", d.provider_verified_at ? `${VERIFICATION_FR[d.verification]} · ${dt(d.provider_verified_at)}` : VERIFICATION_FR[d.verification] ?? d.verification],
               ...(d.provider_status ? [["Dernier statut du prestataire", d.provider_status] as [string, string]] : []),
               ["Remboursé", moneyLabel(d.refunded_amount)], ["Remise", moneyLabel(d.discount)], ["Client", d.client], ["Artisan", d.artisan], ["Statut de la réservation", STATUS_FR[d.booking_status] ?? d.booking_status]]} />
+            {d.cash ? <div><h3 className="mb-1.5 text-sm font-bold text-ink">Espèces entre les parties</h3><CashBlock cash={d.cash} /></div> : null}
             <div><h3 className="mb-1.5 text-sm font-bold text-ink">Journal du paiement</h3>
               <ul className="divide-y divide-lineSoft text-sm">{d.logs.map((l, i) => <li key={i} className="py-1.5">{STATUS_FR[l.previous_status] ?? l.previous_status} → <strong>{STATUS_FR[l.new_status] ?? l.new_status}</strong> · {dt(l.at)}{l.notes ? <span className="block text-inkSoft">{l.notes}</span> : null}</li>)}</ul></div>
             {d.can_refund ? <div><Button variant="danger" onClick={() => setRefund(true)}>Rembourser le client</Button><p className="mt-2 text-xs text-ash">Le remboursement passe par l’escrow existant : il ne crée ni ne valide aucun paiement.</p></div> : <p className="text-xs text-ash">Aucun remboursement possible dans l’état actuel (ou droit insuffisant).</p>}

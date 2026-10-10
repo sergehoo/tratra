@@ -1,6 +1,7 @@
 # /Users/ogahserge/Documents/tratra/handy/api/urls.py
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
+from handy.api import cash as cash_api
 from handy.api.recovery import password_reset_confirm, password_reset_request
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView, TokenBlacklistView
 
@@ -50,6 +51,10 @@ urlpatterns = [
     path('auth/logout/', TokenBlacklistView.as_view(), name='jwt-logout'),
     path('price/estimate/', price_estimate, name='price-estimate'),
     path('payments/initiate/', payment_initiate, name='payment-initiate'),
+    path('payments/cash/<int:pk>/respond/', cash_api.cash_respond, name='cash-respond'),
+    path('payments/cash/<int:pk>/receipt/', cash_api.cash_receipt, name='cash-receipt'),
+    path('bookings/<int:pk>/payment/', cash_api.booking_payment, name='booking-payment'),
+    path('bookings/<int:pk>/payment/cash/', cash_api.cash_declare, name='cash-declare'),
     path('payments/webhook/<str:provider>/', PaymentWebhook.as_view(), name='payment-webhook'),
     path('match/', match, name='match'),
     path('auth/otp/request/', otp_request, name='otp-request'),

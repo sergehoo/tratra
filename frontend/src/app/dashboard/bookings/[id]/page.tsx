@@ -30,6 +30,7 @@ import { formatFCFA, priceLabel } from "@/lib/format";
 import type { Booking, ReplacementSuggestion } from "@/lib/types";
 import { ArtisanLine } from "../../_components/ArtisanLine";
 import { BookingProgress } from "../../_components/BookingProgress";
+import { CashPaymentCard } from "../../_components/CashPaymentCard";
 import { DetailList, type DetailItem } from "../../_components/DetailList";
 import { MessageButton } from "../../_components/MessageButton";
 import { IdentityVerifyCard } from "@/components/trust/IdentityVerifyCard";
@@ -338,6 +339,8 @@ export default function BookingDetailPage() {
           {["confirmed", "in_progress", "completed"].includes(b.status) ? (
             <IdentityVerifyCard bookingId={b.id} active={b.status !== "completed"} />
           ) : null}
+
+          {["confirmed", "in_progress", "completed"].includes(b.status) ? <CashPaymentCard bookingId={b.id} bookingStatus={b.status} /> : null}
 
           {b.handyman_detail && b.status !== "cancelled" ? (
             <Card>

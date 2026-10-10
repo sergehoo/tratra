@@ -797,6 +797,43 @@ class PaymentLog(models.Model):
     notes = models.TextField(blank=True, null=True)
 
 
+def cash_receipt_path(instance, filename):
+    """Justificatif d'espèces sous une clé opaque (le nom d'origine peut contenir une identité)."""
+    suffix = filename.rsplit(".", 1)[-1].lower() if "." in filename else "bin"
+    return f"cash/{instance.booking_id}/{uuid4().hex}.{suffix[:5]}"
+
+
+class CashDeclaration(models.Model):
+    """Paiement en ESPÈCES entre le client et l'artisan : DÉCLARÉ par une partie, il ne compte qu'une fois CONFIRMÉ par l'AUTRE.
+
+    Aucun prestataire de paiement n'intervient et aucun fonds ne transite par Tratra : une confirmation prouve l'accord des deux
+    parties, jamais un encaissement vérifié. Elle ne crée AUCUN gain retirable (le séquestre et `Payment.mark_held` n'y sont pas
+    concernés) : l'artisan a déjà reçu l'argent en main propre. Chaque déclaration, confirmation ou contestation reste dans l'historique."""
+    STATUSES = [('declared', 'Déclaré'), ('confirmed', 'Confirmé'), ('rejected', 'Contesté')]
+    ROLES = [('client', 'Client'), ('artisan', 'Artisan')]
+
+    booking = models.ForeignKey('Booking', on_delete=models.PROTECT, related_name='cash_declarations')
+    amount = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(Decimal('0.01'))])
+    paid_on = models.DateField()
+    note = models.CharField(max_length=200, blank=True, default='')
+    declared_by = models.ForeignKey(User, on_delete=models.PROTECT, related_name='+')
+    declared_by_role = models.CharField(max_length=10, choices=ROLES)
+    declared_at = models.DateTimeField(auto_now_add=True)
+    status = models.CharField(max_length=10, choices=STATUSES, default='declared', db_index=True)
+    responded_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
+    responded_at = models.DateTimeField(null=True, blank=True)
+    rejection_reason = models.CharField(max_length=500, blank=True, default='')
+    receipt = models.FileField(upload_to=cash_receipt_path, storage=KycPrivateStorage(), null=True, blank=True)
+
+    class Meta:
+        ordering = ['declared_at', 'id']
+        indexes = [models.Index(fields=['booking', 'status'])]
+        constraints = [models.CheckConstraint(check=Q(amount__gt=0), name='cash_declaration_positive')]
+
+    def __str__(self):
+        return f"Espèces {self.amount} — réservation #{self.booking_id} ({self.status})"
+
+
 class Payout(models.Model):
     handyman = models.ForeignKey(User, on_delete=models.PROTECT, related_name='payouts', db_index=True)
     amount = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(0.01)])
@@ -958,6 +995,9 @@ class Notification(models.Model):
         ('booking_started', 'Intervention démarrée'),
         ('booking_completed', 'Intervention terminée'),
         ('payment_received', 'Paiement reçu'),
+        ('cash_declared', 'Paiement en espèces déclaré'),
+        ('cash_confirmed', 'Paiement en espèces confirmé'),
+        ('cash_contested', 'Paiement en espèces contesté'),
         ('refund_issued', 'Remboursement émis'),
         ('review_received', 'Avis reçu'),
         ('review_reply', "Réponse à un avis"),

@@ -31,6 +31,7 @@ import {
 import { statusView } from "@/lib/status";
 import type { Booking } from "@/lib/types";
 import { clientName, formatPlace, formatWhen } from "../../_components/format";
+import { CashPaymentCard } from "../../../_components/CashPaymentCard";
 import { MessageButton } from "../../../_components/MessageButton";
 import { MissionQrCard } from "@/components/trust/MissionQrCard";
 import { ArtisanLiveControls } from "@/components/live/ArtisanLiveControls";
@@ -265,6 +266,12 @@ export default function MissionDetailPage() {
         {b.status === "confirmed" || b.status === "in_progress" ? (
           <div className="lg:col-start-3 lg:row-start-4">
             <MissionQrCard bookingId={b.id} />
+          </div>
+        ) : null}
+
+        {["confirmed", "in_progress", "completed"].includes(b.status) ? (
+          <div className="lg:col-start-3 lg:row-start-5">
+            <CashPaymentCard bookingId={b.id} bookingStatus={b.status} />
           </div>
         ) : null}
 

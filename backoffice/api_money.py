@@ -236,6 +236,11 @@ class PaymentDetail(BOView):
                     "logs": [{"previous_status": l.previous_status, "new_status": l.new_status, "at": l.changed_at, "notes": l.notes or ""} for l in p.logs.order_by("changed_at", "id")],
                     "can_refund": "finance.manage" in rbac.user_permissions(request.user) and "refunded" in Payment.ESCROW_TRANSITIONS.get(p.status, set()),
                     "history": _history("payment", p.pk)})
+        if p.method == "cash":
+            # Déclarations et confirmations des PARTIES, en lecture seule : le Back-Office ne confirme jamais un paiement, et les
+            # justificatifs restent privés aux deux parties (`receipt` toujours nul pour le personnel).
+            from handy.services import cash as cash_svc
+            row["cash"] = cash_svc.summary(p.booking, request.user)
         return Response(row)
 
 

@@ -3,7 +3,9 @@ import { useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { Alert, Button, PageHeader, SkeletonPage } from "@/components/ds";
 import { bo, boError, moneyLabel } from "@/lib/bo";
+import { CashBlock } from "../../_components/CashBlock";
 import { KV, ReasonModal, Section, STATUS_FR, Tag, dt, postTo } from "../../_components/ui";
+import type { CashSummary } from "@/lib/cash";
 
 interface Detail {
   id: number;
@@ -23,6 +25,7 @@ interface Detail {
   created_at: string;
   timeline: { status: string; previous_status: string | null; at: string; by: string }[];
   payment: { status: string; method: string; amount?: string; platform_fee?: string; refunded?: string } | null;
+  cash: CashSummary | null;
   disputes: { id: number; status: string; created_at: string }[];
   live: { artisan_sharing: boolean; en_route_at: string | null; arrived_at: string | null } | null;
   identity_verified: boolean;
@@ -75,6 +78,7 @@ export default function BookingDetailPage() {
             <KV items={[["Statut", <Tag key="p" value={d.payment.status} label={STATUS_FR[d.payment.status] ?? d.payment.status} />], ["Moyen", d.payment.method],
               ...(d.payment.amount !== undefined ? ([["Montant", moneyLabel(d.payment.amount)], ["Commission", moneyLabel(d.payment.platform_fee)], ["Remboursé", moneyLabel(d.payment.refunded)]] as [string, string][]) : [["Montants", "Réservés aux rôles financiers"] as [string, string]])]} />
           ) : <p className="text-sm text-inkSoft">Aucun paiement enregistré pour cette réservation.</p>}
+          {d.cash ? <div className="mt-4 border-t border-lineSoft pt-4"><h3 className="mb-2 text-sm font-bold text-ink">Espèces entre les parties</h3><CashBlock cash={d.cash} /></div> : null}
           {d.review ? <p className="mt-4 text-sm text-inkSoft">Avis client : {d.review.rating} / 5{d.review.hidden ? " (masqué)" : ""}.</p> : null}
         </Section>
         <Section title="Chronologie">

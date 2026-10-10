@@ -204,6 +204,13 @@ class BookingList(BOView):
         return paginate(request, qs, _booking_row)
 
 
+def _cash_summary(booking, user):
+    """Règlement en espèces vu par le personnel : lecture seule (aucune action, aucun justificatif)."""
+    from handy.services import cash as cash_svc
+    summary = cash_svc.summary(booking, user)
+    return summary if summary["history"] or summary["state"] != "none" else None
+
+
 class BookingDetail(BOView):
     bo_permission = "bookings.view"
 
@@ -225,6 +232,7 @@ class BookingDetail(BOView):
                          for t in b.timeline.order_by("at", "id")],
             "payment": None if payment is None else {"status": payment.status, "method": payment.method,
                                                       **({"amount": str(payment.amount), "platform_fee": str(payment.platform_fee), "refunded": str(payment.refunded_amount)} if "finance.view" in perms else {})},
+            "cash": _cash_summary(b, request.user) if "finance.view" in perms else None,
             "disputes": [{"id": d.pk, "status": d.status, "created_at": d.created_at} for d in b.disputes.all()],
             "live": None if session is None else {"artisan_sharing": session.artisan_sharing, "en_route_at": session.en_route_at, "arrived_at": session.arrived_at},
             "identity_verified": IdentityCheck.objects.filter(booking=b).exists(),

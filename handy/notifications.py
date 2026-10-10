@@ -24,6 +24,7 @@ CATEGORY_BY_TYPE: Dict[str, str] = {
     "booking_started": "booking", "booking_completed": "booking", "booking_status": "booking",
     "dispute_opened": "booking", "dispute_resolved": "booking",
     "payment_received": "payment", "refund_issued": "payment",
+    "cash_declared": "payment", "cash_confirmed": "payment", "cash_contested": "payment",
     "review_received": "review", "review_reply": "review",
     "message_received": "message",
     "live_en_route": "live", "live_arrived": "live",
