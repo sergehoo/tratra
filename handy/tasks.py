@@ -59,6 +59,11 @@ def send_profile_completion_reminders():
             )
 
 
+# Libellés français (accordés avec « réservation ») : le code technique du statut ne doit jamais s'afficher.
+BOOKING_STATUS_FR = {"pending": "en attente", "confirmed": "confirmée", "in_progress": "en cours",
+                     "completed": "terminée", "cancelled": "annulée"}
+
+
 @shared_task(max_retries=3, default_retry_delay=10)
 def notify_booking_status(booking_id, status):
     """Notifie les DEUX parties d'un changement de statut :
@@ -67,14 +72,15 @@ def notify_booking_status(booking_id, status):
                .select_related('client', 'handyman').first())
     if not booking:
         return
-    msg = f"Statut de la réservation #{booking_id} : {status}"
+    label = BOOKING_STATUS_FR.get(status, status)
+    msg = f"Statut de la réservation #{booking_id} : {label}"
     for user in (booking.client, booking.handyman):
         if not user:
             continue
         Notification.objects.create(
             user=user, notification_type='booking_status', message=msg,
         )
-        _send_fcm(user.id, "Réservation", f"Statut: {status}",
+        _send_fcm(user.id, "Réservation", f"Statut : {label}",
                   {"t": "booking", "id": booking_id, "s": status})
 
 

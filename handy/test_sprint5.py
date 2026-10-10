@@ -127,6 +127,9 @@ def test_notify_booking_status_notifie_les_deux_parties():
     notify_booking_status(b.id, "confirmed")   # appel direct (synchrone)
     assert Notification.objects.filter(user=c, notification_type="booking_status").count() == 1
     assert Notification.objects.filter(user=h, notification_type="booking_status").count() == 1
+    # message en français : jamais le code technique du statut
+    msg = Notification.objects.get(user=c, notification_type="booking_status").message
+    assert msg == f"Statut de la réservation #{b.id} : confirmée" and "confirmed" not in msg
 
 
 @pytest.mark.django_db
