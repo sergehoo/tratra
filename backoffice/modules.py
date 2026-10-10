@@ -14,6 +14,7 @@ MODULES = [
     ("live", "Suivi en direct", "live.view", "map-pin", "/backoffice/live"),
     ("reviews", "Avis", "reviews.moderate", "star", "/backoffice/reviews"),
     ("business", "Tratra Business", "business.manage", "building-2", "/backoffice/business"),
+    ("engagements", "Engagements", "engagements.view", "file-signature", "/backoffice/engagements"),
     ("finance", "Finances", "finance.view", "wallet", "/backoffice/finance"),
     ("announcements", "Annonces", "announcements.manage", "megaphone", "/backoffice/announcements"),
     ("notifications", "Notifications", "notifications.view", "bell", "/backoffice/notifications"),

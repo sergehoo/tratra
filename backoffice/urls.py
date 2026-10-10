@@ -2,7 +2,7 @@ from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
 from announcements.api import AnnouncementAdminViewSet
-from backoffice import api_core, api_money, api_ops, api_people, api_system
+from backoffice import api_core, api_engagements, api_money, api_ops, api_people, api_system
 
 router = DefaultRouter()
 router.register("announcements", AnnouncementAdminViewSet, basename="bo-announcements")
@@ -46,6 +46,22 @@ urlpatterns = [
     path("disputes/", api_ops.DisputeList.as_view(), name="bo-disputes"),
     path("disputes/<int:pk>/", api_ops.DisputeDetail.as_view(), name="bo-dispute"),
     path("disputes/<int:pk>/<str:op>/", api_ops.DisputeAction.as_view(), name="bo-dispute-action"),
+    # Engagements récurrents et de longue durée
+    path("engagements/", api_engagements.EngagementOverview.as_view(), name="bo-engagements"),
+    path("engagements/contracts/", api_engagements.ContractList.as_view(), name="bo-engagement-contracts"),
+    path("engagements/contracts/<int:pk>/", api_engagements.ContractDetail.as_view(), name="bo-engagement-contract"),
+    path("engagements/contracts/<int:pk>/decision/", api_engagements.ContractDecision.as_view(), name="bo-engagement-contract-decision"),
+    path("engagements/postings/", api_engagements.PostingList.as_view(), name="bo-engagement-postings"),
+    path("engagements/postings/<int:pk>/remove/", api_engagements.PostingModerate.as_view(), name="bo-engagement-posting-remove"),
+    path("engagements/installments/", api_engagements.InstallmentList.as_view(), name="bo-engagement-installments"),
+    path("engagements/installments/<int:pk>/fee/", api_engagements.InstallmentFee.as_view(), name="bo-engagement-installment-fee"),
+    path("engagements/disputes/", api_engagements.DisputeList.as_view(), name="bo-engagement-disputes"),
+    path("engagements/disputes/<int:pk>/", api_engagements.DisputeDetail.as_view(), name="bo-engagement-dispute"),
+    path("engagements/disputes/<int:pk>/<str:op>/", api_engagements.DisputeAction.as_view(), name="bo-engagement-dispute-action"),
+    path("engagements/evaluations/", api_engagements.EvaluationList.as_view(), name="bo-engagement-evaluations"),
+    path("engagements/evaluations/<int:pk>/<str:op>/", api_engagements.EvaluationModerate.as_view(), name="bo-engagement-evaluation-action"),
+    path("engagements/rules/", api_engagements.RuleList.as_view(), name="bo-engagement-rules"),
+    path("engagements/rules/<str:key>/", api_engagements.RuleDetail.as_view(), name="bo-engagement-rule"),
     # Suivi en direct
     path("live/", api_ops.LiveList.as_view(), name="bo-live"),
     path("live/<int:booking_id>/", api_ops.LiveDetail.as_view(), name="bo-live-detail"),

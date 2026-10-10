@@ -266,9 +266,34 @@ def _audit_rows(request, perms):
                                                                     e.action, e.target_type, e.target_id or ""] for e in qs)
 
 
+def _engagement_contract_rows(request, perms):
+    from engagements.models import EngagementContract
+
+    qs = apply_range(request, EngagementContract.objects.select_related("category"), "created_at").order_by("id")[:EXPORT_MAX_ROWS]
+    header = ["id", "cree_le", "statut", "type", "relation", "categorie", "debut", "fin", "periodicite", "montant", "renouvellements"]
+    return header, ([c.pk, c.created_at.date(), c.status, c.mission_type, c.work_relationship, c.category.name, c.start_date, c.end_date or "", c.period, money(c.amount),
+                     c.renewal_count] for c in qs)       # aucun nom, contact ni adresse
+
+
+def _engagement_installment_rows(request, perms):
+    from engagements.models import ContractInstallment
+    from engagements.services import installments as inst_svc
+
+    qs = apply_range(request, ContractInstallment.objects.all(), "created_at").order_by("id")[:EXPORT_MAX_ROWS]
+    header = ["id", "contrat", "numero", "debut", "fin", "echeance", "statut", "total", "confirme", "solde", "commission", "statut_commission"]
+
+    def rows():
+        for i in qs:
+            t = inst_svc.totals(i)
+            yield [i.pk, i.contract_id, i.sequence + 1, i.period_start, i.period_end, i.due_date, i.status, money(t["total"]), money(t["confirmed"]), money(t["balance"]),
+                   money(i.platform_fee), i.platform_fee_status]
+    return header, rows()
+
+
 # jeu de données → (droit supplémentaire exigé, constructeur de lignes)
 EXPORTS = {"users": ("users.view", _users_rows), "bookings": ("bookings.view", _bookings_rows), "payments": ("finance.view", _payments_rows),
-           "reviews": ("reviews.moderate", _reviews_rows), "audit": ("security.manage", _audit_rows)}
+           "reviews": ("reviews.moderate", _reviews_rows), "audit": ("security.manage", _audit_rows),
+           "engagements": ("engagements.view", _engagement_contract_rows), "engagement_installments": ("engagements.view", _engagement_installment_rows)}
 
 
 class AnalyticsExport(BOView):

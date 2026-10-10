@@ -87,6 +87,15 @@ class DashboardView(BOView):
                 "payouts_pending_amount": money(pending["total"]),
             }
 
+        if "engagements.view" in perms:
+            from engagements.models import ContractInstallment, EngagementContract, EngagementDispute
+
+            live = EngagementContract.objects.filter(status__in=EngagementContract.LIVE)
+            out["kpis"]["engagements"] = {"live": live.count(), "pending_acceptance": EngagementContract.objects.filter(status="pending_acceptance").count(),
+                                          "overdue_installments": ContractInstallment.objects.filter(status="overdue").count(),
+                                          "created_30d": EngagementContract.objects.filter(created_at__gte=d30).count()}
+            out["series"]["engagements"] = _series(EngagementContract.objects, "created_at", 30)
+
         if "live.view" in perms:
             out["kpis"]["live"] = {"sharing_sessions": TrackingSession.objects.filter(artisan_sharing=True).count()}   # aucun GPS ici
 
@@ -101,6 +110,14 @@ class DashboardView(BOView):
             alert("disputes_open", "Litiges ouverts", Dispute.objects.filter(status__in=("open", "under_review")).count(), "/backoffice/bookings?tab=disputes", "danger")
         if "reviews.moderate" in perms:
             alert("reports_open", "Signalements non traités", Report.objects.filter(is_resolved=False).count(), "/backoffice/reviews")
+        if "engagements.manage" in perms:
+            from engagements.models import EngagementDispute
+
+            alert("engagement_disputes", "Litiges d'engagement ouverts", EngagementDispute.objects.filter(status__in=("open", "under_review")).count(), "/backoffice/engagements?tab=disputes", "danger")
+        if "engagements.view" in perms:
+            from engagements.models import ContractInstallment
+
+            alert("engagement_overdue", "Échéances d'engagement en retard", ContractInstallment.objects.filter(status="overdue").count(), "/backoffice/engagements?tab=installments")
         if "finance.manage" in perms:
             alert("payouts_pending", "Retraits en attente", Payout.objects.filter(status="pending").count(), "/backoffice/finance")
         if "business.manage" in perms:
