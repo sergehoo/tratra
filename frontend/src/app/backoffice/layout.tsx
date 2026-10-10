@@ -3,7 +3,7 @@ import { useMemo, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
-  Award, BarChart3, Bell, Briefcase, Building2, CalendarCheck, IdCard, LayoutDashboard, LifeBuoy, Lock, MapPin, Megaphone, RefreshCw, Settings,
+  Award, BarChart3, Bell, Briefcase, Building2, CalendarCheck, FileSignature, IdCard, LayoutDashboard, LifeBuoy, Lock, MapPin, Megaphone, RefreshCw, Settings,
   ShieldCheck, Star, Users, Wallet, type LucideIcon,
 } from "lucide-react";
 import { RoleGuard } from "@/components/RoleGuard";
@@ -13,7 +13,7 @@ import { BoProvider, useBo } from "@/lib/BoProvider";
 const ICONS: Record<string, LucideIcon> = {
   "layout-dashboard": LayoutDashboard, users: Users, "shield-check": ShieldCheck, award: Award, "id-card": IdCard, briefcase: Briefcase,
   "calendar-check": CalendarCheck, "map-pin": MapPin, star: Star, "building-2": Building2, wallet: Wallet, megaphone: Megaphone, bell: Bell,
-  "refresh-cw": RefreshCw, "life-buoy": LifeBuoy, "bar-chart-3": BarChart3, settings: Settings, lock: Lock,
+  "file-signature": FileSignature, "refresh-cw": RefreshCw, "life-buoy": LifeBuoy, "bar-chart-3": BarChart3, settings: Settings, lock: Lock,
 };
 
 /** Menu = modules que le rôle peut ouvrir (confort : chaque endpoint refuse de toute façon ce que le rôle n'autorise pas). */

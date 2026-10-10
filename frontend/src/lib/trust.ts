@@ -96,6 +96,8 @@ export interface Passport {
   };
   experience: { years: number; source: DataSource };
   missions: { completed: number; completed_window: number; window_days: number; source: DataSource };
+  /** Expérience VÉRIFIABLE tirée des contrats récurrents / de longue durée acceptés par les deux parties (additif). */
+  engagements?: { contracts_completed: number; contracts_active: number; months_total: number; distinct_principals: number; categories: string[]; evaluations: { count: number; average: number | null; min_public: number }; source: DataSource };
   satisfaction: ReviewStats & { source: DataSource };
   punctuality: { rate: number | null; sample: number; on_time: number; tolerance_minutes: number; min_sample: number; source: DataSource };
   reactivity: { median_minutes: number | null; sample: number; min_sample: number; source: DataSource };

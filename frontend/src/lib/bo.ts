@@ -8,6 +8,7 @@ export const bo = {
   post: <T>(path: string, body?: unknown) => apiJson<T>(root(path), { method: "POST", body: JSON.stringify(body ?? {}) }),
   put: <T>(path: string, body?: unknown) => apiJson<T>(root(path), { method: "PUT", body: JSON.stringify(body ?? {}) }),
   patch: <T>(path: string, body?: unknown) => apiJson<T>(root(path), { method: "PATCH", body: JSON.stringify(body ?? {}) }),
+  delete: <T = unknown>(path: string) => apiJson<T>(root(path), { method: "DELETE" }),
 };
 
 export interface BoModule {

@@ -3,9 +3,9 @@ import { deleteLocal, readLocal, writeLocal } from "./localVault";
 
 /** Activité en cours telle que le serveur la décrit (GET /me/activities/) : jamais de coordonnées ni d'adresse complète. */
 export interface Activity {
-  kind: "booking" | "mission" | "business_request";
+  kind: "booking" | "mission" | "business_request" | "contract";
   id: number;
-  role: "client" | "handyman" | "requester";
+  role: "client" | "handyman" | "requester" | "principal" | "worker";
   status: string;
   status_label: string;
   version: number | null;
@@ -34,6 +34,8 @@ export function activityHref(a: Pick<Activity, "kind" | "id">): string {
       return `/dashboard/provider/missions/${a.id}`;
     case "business_request":
       return `/dashboard/business/requests/${a.id}`;
+    case "contract":
+      return `/dashboard/engagements/contracts/${a.id}`;
     default:
       return `/dashboard/bookings/${a.id}`;
   }

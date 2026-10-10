@@ -38,13 +38,22 @@ export default async function ArtisanPassportPage({ params }: Params) {
           <PassportView
             passport={passport}
             actions={
-              <ButtonLink
-                href={`/search?handyman=${passport.user_id}`}
-                size="lg"
-                rightIcon={<ArrowRight aria-hidden className="h-4 w-4" />}
-              >
-                Voir ses prestations
-              </ButtonLink>
+              <>
+                <ButtonLink
+                  href={`/search?handyman=${passport.user_id}`}
+                  size="lg"
+                  rightIcon={<ArrowRight aria-hidden className="h-4 w-4" />}
+                >
+                  Voir ses prestations
+                </ButtonLink>
+                <ButtonLink
+                  href={`/dashboard/engagements/contracts/new?worker=${passport.user_id}&name=${encodeURIComponent(passport.display_name)}`}
+                  size="lg"
+                  variant="outline"
+                >
+                  Proposer un engagement
+                </ButtonLink>
+              </>
             }
           >
             <PassportReviews profileId={passport.profile_id} />

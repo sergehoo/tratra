@@ -53,7 +53,52 @@ export const PAYOUT_STATUS: Record<string, StatusView> = {
   failed: { label: "Échoué", tone: "danger" },
 };
 
+export const CONTRACT_STATUS: Record<string, StatusView> = {
+  draft: { label: "Brouillon", tone: "gray" },
+  pending_acceptance: { label: "À accepter", tone: "accent" },
+  accepted: { label: "Accepté · début à venir", tone: "info" },
+  active: { label: "En cours", tone: "success" },
+  suspended: { label: "Suspendu", tone: "warning" },
+  notice: { label: "Préavis en cours", tone: "warning" },
+  terminated: { label: "Résilié", tone: "gray" },
+  completed: { label: "Terminé", tone: "primary" },
+  cancelled: { label: "Annulé", tone: "gray" },
+};
+
+export const INSTALLMENT_STATUS: Record<string, StatusView> = {
+  scheduled: { label: "Planifiée", tone: "gray" },
+  due: { label: "À régler", tone: "accent" },
+  partial: { label: "Partiellement réglée", tone: "info" },
+  paid: { label: "Réglée", tone: "success" },
+  overdue: { label: "En retard", tone: "danger" },
+  on_hold: { label: "Suspendue", tone: "warning" },
+  waived: { label: "Solde abandonné", tone: "gray" },
+  cancelled: { label: "Annulée", tone: "gray" },
+};
+
+export const POSTING_STATUS: Record<string, StatusView> = {
+  draft: { label: "Brouillon", tone: "gray" },
+  open: { label: "Ouvert aux candidatures", tone: "success" },
+  closed: { label: "Clos", tone: "gray" },
+  filled: { label: "Pourvu", tone: "primary" },
+  cancelled: { label: "Annulé", tone: "gray" },
+  expired: { label: "Expiré", tone: "gray" },
+};
+
+export const APPLICATION_STATUS: Record<string, StatusView> = {
+  submitted: { label: "Reçue", tone: "accent" },
+  shortlisted: { label: "Présélectionnée", tone: "info" },
+  interview: { label: "Entretien", tone: "info" },
+  selected: { label: "Retenue", tone: "success" },
+  rejected: { label: "Non retenue", tone: "gray" },
+  withdrawn: { label: "Retirée", tone: "gray" },
+};
+
 export const STATUS_KINDS = {
+  contract: CONTRACT_STATUS,
+  installment: INSTALLMENT_STATUS,
+  posting: POSTING_STATUS,
+  application: APPLICATION_STATUS,
   booking: BOOKING_STATUS,
   document: DOCUMENT_STATUS,
   dispute: DISPUTE_STATUS,

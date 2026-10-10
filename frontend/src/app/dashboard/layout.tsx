@@ -1,5 +1,5 @@
 "use client";
-import { useMemo, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   Bell,
   Award,
@@ -7,6 +7,7 @@ import {
   Building2,
   CalendarCheck,
   Compass,
+  FileSignature,
   IdCard,
   LayoutDashboard,
   Megaphone,
@@ -18,6 +19,7 @@ import {
 } from "lucide-react";
 import { RoleGuard } from "@/components/RoleGuard";
 import { AppShell, type NavItem } from "@/components/ds";
+import { get } from "@/lib/api";
 import { DashboardProvider, useDashboard } from "@/lib/dashboard";
 
 /** Navigation de l'espace unifié : les entrées « artisan » dépendent du profil réel du compte. */
@@ -26,6 +28,15 @@ function Shell({ children }: { children: ReactNode }) {
   const provider = data?.capabilities.provider ?? false;
   const company = data?.capabilities.company ?? false;
   const business = data?.capabilities.business ?? false;
+  const [engagementTodo, setEngagementTodo] = useState(0);
+  // Pastille « à faire » des engagements : compteur réel du serveur ; en cas d'échec, simplement absente.
+  useEffect(() => {
+    let alive = true;
+    get<{ todo_count: number }>("/engagements/me/overview/").then((o) => alive && setEngagementTodo(o.todo_count)).catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   const nav = useMemo<NavItem[]>(() => {
     const items: NavItem[] = [
@@ -38,6 +49,7 @@ function Shell({ children }: { children: ReactNode }) {
     }
     items.push(
       { href: "/dashboard/provide", label: "Proposer un service", short: "Proposer", icon: PlusCircle, primary: !provider },
+      { href: "/dashboard/engagements", label: "Engagements", icon: FileSignature, badge: engagementTodo || undefined },
       { href: "/dashboard/messages", label: "Messages", icon: MessageSquare, badge: data?.unread.messages },
       { href: "/dashboard/wallet", label: "Portefeuille", icon: Wallet },
       { href: "/dashboard/reviews", label: "Avis", icon: Star },
@@ -52,7 +64,7 @@ function Shell({ children }: { children: ReactNode }) {
         : { href: "/dashboard/company/new", label: "Créer un espace entreprise", icon: Building2 },
     );
     return items;
-  }, [provider, company, business, data?.unread.messages, data?.unread.notifications]);
+  }, [provider, company, business, engagementTodo, data?.unread.messages, data?.unread.notifications]);
 
   return (
     <AppShell title="Mon espace" nav={nav}>

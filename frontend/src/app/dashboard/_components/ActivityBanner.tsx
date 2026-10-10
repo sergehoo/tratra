@@ -4,6 +4,7 @@ import Link from "next/link";
 import { Zap } from "lucide-react";
 import { Alert, Badge, Card } from "@/components/ds";
 import { activityHref } from "@/lib/continuity";
+import { dateFr } from "@/lib/engagements";
 import { useActivities } from "@/lib/useActivities";
 import { formatDateTimeShort } from "./dates";
 
@@ -37,7 +38,7 @@ export function ActivityBanner({ className }: { className?: string }) {
               </div>
               <p className="mt-1 font-display text-lg font-bold leading-snug text-ink">{a.title}</p>
               <p className="text-sm text-inkSoft">
-                {[a.counterpart, a.city, a.booking_date ? formatDateTimeShort(a.booking_date) : null].filter(Boolean).join(" · ")}
+                {[a.counterpart, a.city, a.booking_date ? (a.kind === "contract" ? `dès le ${dateFr(a.booking_date)}` : formatDateTimeShort(a.booking_date)) : null].filter(Boolean).join(" · ")}
               </p>
               {offline ? (
                 <p role="status" className="mt-1 text-xs font-medium text-warningInk">

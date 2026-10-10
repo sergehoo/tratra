@@ -39,6 +39,7 @@ export const NOTIFICATION_CATEGORIES: { id: string; label: string }[] = [
   { id: "review", label: "Avis" },
   { id: "account", label: "Compte" },
   { id: "business", label: "Entreprise" },
+  { id: "engagement", label: "Contrats et engagements" },
   { id: "announcement", label: "Annonces" },
   { id: "system", label: "Infos" },
 ];
@@ -59,6 +60,12 @@ export function notificationHref(n: Pick<Notif, "data">): string | null {
       return "/dashboard/profile/kyc";
     case "business_request":
       return id != null ? `/dashboard/business/requests/${id}` : "/dashboard/business/requests";
+    case "contract":
+      return id != null ? `/dashboard/engagements/contracts/${id}` : "/dashboard/engagements";
+    case "posting":
+      return id != null ? `/dashboard/engagements/postings/${id}` : "/dashboard/engagements";
+    case "replacements":
+      return "/dashboard/engagements/replacements";
     case "announcement":
       return id != null ? `/dashboard/announcements?a=${id}` : "/dashboard/announcements";
     default:

@@ -219,8 +219,8 @@ export async function privateFileUrl(path: string): Promise<string> {
 }
 
 /** Upload multipart (fichiers, ex. documents KYC) — gère aussi le refresh 401. */
-export async function upload<T>(path: string, form: FormData, retry = true): Promise<T> {
-  const headers: Record<string, string> = {};
+export async function upload<T>(path: string, form: FormData, retry = true, extraHeaders: Record<string, string> = {}): Promise<T> {
+  const headers: Record<string, string> = { ...extraHeaders };
   const access = tokens.access;
   if (access) headers["Authorization"] = `Bearer ${access}`;
   let res = await fetch(apiUrl(path), {

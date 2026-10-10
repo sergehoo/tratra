@@ -110,6 +110,13 @@ export function PassportView({ passport: p, actions, children }: { passport: Pas
               <Fact icon={<Hourglass aria-hidden />} label="Réactivité" value={formatMinutes(p.reactivity.median_minutes)}
                 hint={p.reactivity.median_minutes != null ? `Délai médian de réponse · ${p.reactivity.sample} demandes` : `Pas encore assez de demandes traitées (${p.reactivity.sample}/${p.reactivity.min_sample})`} source={p.reactivity.source} />
             </div>
+            {p.engagements && (p.engagements.months_total > 0 || p.engagements.contracts_completed > 0) ? (
+              <p className="mt-3 rounded-panel bg-primarySoft/50 p-3 text-xs text-inkSoft">
+                <strong className="text-ink">Engagements de longue durée vérifiés sur Tratra :</strong> {p.engagements.contracts_completed} contrat{p.engagements.contracts_completed > 1 ? "s" : ""} terminé{p.engagements.contracts_completed > 1 ? "s" : ""}
+                {p.engagements.contracts_active ? `, ${p.engagements.contracts_active} en cours` : ""} · {p.engagements.months_total} mois d’activité · {p.engagements.distinct_principals} donneur{p.engagements.distinct_principals > 1 ? "s" : ""} d’ordre différent{p.engagements.distinct_principals > 1 ? "s" : ""}
+                {p.engagements.evaluations.average != null ? ` · note ${String(p.engagements.evaluations.average).replace(".", ",")}/5 (${p.engagements.evaluations.count} évaluations)` : ""} · <SourceTag source="plateforme" />
+              </p>
+            ) : null}
             <p className="mt-3 text-xs text-ash">
               Expérience déclarée : <strong className="text-inkSoft">{p.experience.years} an{p.experience.years > 1 ? "s" : ""}</strong> · <SourceTag source={p.experience.source} />
             </p>
