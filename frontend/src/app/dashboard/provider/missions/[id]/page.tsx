@@ -31,6 +31,7 @@ import { statusView } from "@/lib/status";
 import type { Booking } from "@/lib/types";
 import { clientName, formatPlace, formatWhen } from "../../_components/format";
 import { MessageButton } from "../../../_components/MessageButton";
+import { MissionQrCard } from "@/components/trust/MissionQrCard";
 
 // Transitions proposées à l'ouvrier selon le statut courant
 const NEXT: Record<string, { status: string; label: string; variant?: "primary" | "ghost" }[]> = {
@@ -239,6 +240,12 @@ export default function MissionDetailPage() {
           {error ? <Alert tone="danger" className="mt-4">{error}</Alert> : null}
           {notice && !error ? <Alert tone="success" className="mt-4">{notice}</Alert> : null}
         </Card>
+
+        {b.status === "confirmed" || b.status === "in_progress" ? (
+          <div className="lg:col-start-3 lg:row-start-3">
+            <MissionQrCard bookingId={b.id} />
+          </div>
+        ) : null}
 
         {b.status !== "cancelled" ? (
           <Card className="lg:col-start-3 lg:row-start-2">

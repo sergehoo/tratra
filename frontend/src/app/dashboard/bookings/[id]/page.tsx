@@ -31,6 +31,7 @@ import { ArtisanLine } from "../../_components/ArtisanLine";
 import { BookingProgress } from "../../_components/BookingProgress";
 import { DetailList, type DetailItem } from "../../_components/DetailList";
 import { MessageButton } from "../../_components/MessageButton";
+import { IdentityVerifyCard } from "@/components/trust/IdentityVerifyCard";
 import { formatDateTimeLong } from "../../_components/dates";
 import { useReveal } from "../../_components/useReveal";
 import { artisanDisplayName } from "@/lib/artisan";
@@ -314,6 +315,10 @@ export default function BookingDetailPage() {
                 })}
               </ul>
             </Card>
+          ) : null}
+
+          {["confirmed", "in_progress", "completed"].includes(b.status) ? (
+            <IdentityVerifyCard bookingId={b.id} active={b.status !== "completed"} />
           ) : null}
 
           {b.handyman_detail && b.status !== "cancelled" ? (

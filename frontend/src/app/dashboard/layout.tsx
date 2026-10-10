@@ -7,6 +7,7 @@ import {
   Building2,
   CalendarCheck,
   Compass,
+  IdCard,
   LayoutDashboard,
   MessageSquare,
   PlusCircle,
