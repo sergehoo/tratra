@@ -32,6 +32,7 @@ import { BookingProgress } from "../../_components/BookingProgress";
 import { DetailList, type DetailItem } from "../../_components/DetailList";
 import { MessageButton } from "../../_components/MessageButton";
 import { IdentityVerifyCard } from "@/components/trust/IdentityVerifyCard";
+import { LiveTrackingCard } from "@/components/live/LiveTrackingCard";
 import { formatDateTimeLong } from "../../_components/dates";
 import { useReveal } from "../../_components/useReveal";
 import { artisanDisplayName } from "@/lib/artisan";
@@ -316,6 +317,8 @@ export default function BookingDetailPage() {
               </ul>
             </Card>
           ) : null}
+
+          {["confirmed", "in_progress"].includes(b.status) ? <LiveTrackingCard bookingId={b.id} /> : null}
 
           {["confirmed", "in_progress", "completed"].includes(b.status) ? (
             <IdentityVerifyCard bookingId={b.id} active={b.status !== "completed"} />

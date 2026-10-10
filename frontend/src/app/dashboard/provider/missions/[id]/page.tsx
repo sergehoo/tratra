@@ -32,6 +32,7 @@ import type { Booking } from "@/lib/types";
 import { clientName, formatPlace, formatWhen } from "../../_components/format";
 import { MessageButton } from "../../../_components/MessageButton";
 import { MissionQrCard } from "@/components/trust/MissionQrCard";
+import { ArtisanLiveControls } from "@/components/live/ArtisanLiveControls";
 
 // Transitions proposées à l'ouvrier selon le statut courant
 const NEXT: Record<string, { status: string; label: string; variant?: "primary" | "ghost" }[]> = {
@@ -241,8 +242,14 @@ export default function MissionDetailPage() {
           {notice && !error ? <Alert tone="success" className="mt-4">{notice}</Alert> : null}
         </Card>
 
-        {b.status === "confirmed" || b.status === "in_progress" ? (
+        {b.status === "confirmed" ? (
           <div className="lg:col-start-3 lg:row-start-3">
+            <ArtisanLiveControls bookingId={b.id} />
+          </div>
+        ) : null}
+
+        {b.status === "confirmed" || b.status === "in_progress" ? (
+          <div className="lg:col-start-3 lg:row-start-4">
             <MissionQrCard bookingId={b.id} />
           </div>
         ) : null}

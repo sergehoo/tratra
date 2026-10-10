@@ -21,7 +21,18 @@ const mediaOrigins = (process.env.NEXT_PUBLIC_MEDIA_ORIGINS ?? "")
       return [];
     }
   });
-const imgSources = Array.from(new Set(["'self'", "data:", "blob:", apiOrigin, ...mediaOrigins]));
+// Fond de carte du suivi en direct : gabarit d'URL de tuiles configurable (OpenStreetMap par défaut — à remplacer par un
+// fournisseur adapté au volume en production, cf. docs). Son origine est ajoutée à img-src.
+const tileTemplate = process.env.NEXT_PUBLIC_MAP_TILES ?? "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
+let tileOrigins = [];
+try {
+  tileOrigins = [new URL(tileTemplate.replace(/\{[a-z]\}/g, "a")).origin];
+} catch {
+  // gabarit invalide : aucune origine supplémentaire (la carte n'affichera pas de fond)
+}
+const imgSources = Array.from(new Set(["'self'", "data:", "blob:", apiOrigin, ...mediaOrigins, ...tileOrigins]));
+// WebSocket du suivi en direct : même origine que l'API (ws:// ou wss://).
+const wsOrigin = apiOrigin.replace(/^http/, "ws");
 
 // `next dev` (React Refresh / sourcemaps webpack « eval ») exige 'unsafe-eval' :
 // sans lui aucune page n'hydrate en développement. Jamais en production.
@@ -35,7 +46,7 @@ const contentSecurityPolicy = [
   "style-src 'self' 'unsafe-inline'",
   `img-src ${imgSources.join(" ")}`,
   "font-src 'self' data:",
-  `connect-src 'self' ${apiOrigin}`,
+  `connect-src 'self' ${apiOrigin} ${wsOrigin}`,
   "object-src 'none'",
   "base-uri 'self'",
   "form-action 'self'",
