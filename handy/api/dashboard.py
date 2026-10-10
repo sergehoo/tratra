@@ -228,6 +228,8 @@ def me_dashboard(request):
             "provider": profile is not None,
             "publishable": bool(provider and provider["publishable"]),
             "company": user.user_type == "entreprise" or CompanyProfile.objects.filter(user=user).exists(),
+            # Tratra Business : le compte est membre actif d'au moins une organisation (rôle et capacités : /business/orgs/).
+            "business": user.business_memberships.filter(is_active=True, organization__is_active=True).exists(),
         },
         "client": client_block,
         "provider": provider,

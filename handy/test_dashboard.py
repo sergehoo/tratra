@@ -38,7 +38,7 @@ def test_requires_authentication():
 def test_new_client_has_zero_everything_and_no_provider():
     me = client_user()
     d = api(me).get(URL).json()
-    assert d["capabilities"] == {"client": True, "provider": False, "publishable": False, "company": False}
+    assert d["capabilities"] == {"client": True, "provider": False, "publishable": False, "company": False, "business": False}
     assert d["provider"] is None
     assert d["client"]["bookings"]["total"] == 0
     assert d["reviews"] == {"received_count": 0, "received_average": None, "to_write": 0}
