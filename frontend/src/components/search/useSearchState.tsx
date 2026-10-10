@@ -7,7 +7,8 @@ import { usePathname, useSearchParams } from "next/navigation";
  * retour/avance du navigateur cohérents). Toute valeur invalide est ignorée.
  */
 
-export type SortKey = "recent" | "price_asc" | "price_desc" | "rating";
+export type SortKey = "recent" | "price_asc" | "price_desc" | "rating" | "trust";
+export type BadgeKey = "" | "EXPERT" | "SUR";
 export type PriceTypeKey = "hourly" | "fixed" | "quote";
 
 export const SORT_OPTIONS: { value: SortKey; label: string }[] = [
@@ -15,6 +16,14 @@ export const SORT_OPTIONS: { value: SortKey; label: string }[] = [
   { value: "price_asc", label: "Prix croissant" },
   { value: "price_desc", label: "Prix décroissant" },
   { value: "rating", label: "Mieux notés" },
+  { value: "trust", label: "Score de confiance" },
+];
+
+/** Badge Tratra Trust filtrable (le badge « Vérifié » est déjà couvert par « Profils vérifiés »). */
+export const BADGE_OPTIONS: { value: BadgeKey; label: string }[] = [
+  { value: "", label: "Tous" },
+  { value: "EXPERT", label: "Expert" },
+  { value: "SUR", label: "Sûr" },
 ];
 
 export const PRICE_TYPE_OPTIONS: { value: PriceTypeKey; label: string }[] = [
@@ -35,6 +44,7 @@ export interface SearchState {
   commune: string;
   online: boolean;
   verified: boolean;
+  badge: BadgeKey;
   sort: SortKey;
   priceType: PriceTypeKey | "";
   minPrice: string;
@@ -52,6 +62,7 @@ export const EMPTY_SEARCH: SearchState = {
   commune: "",
   online: false,
   verified: false,
+  badge: "",
   sort: "recent",
   priceType: "",
   minPrice: "",
@@ -107,6 +118,7 @@ export function parseSearch(sp: { get(name: string): string | null }): SearchSta
     commune: (sp.get("commune") ?? "").trim().slice(0, 60),
     online: sp.get("online") === "1",
     verified: sp.get("verified") === "1",
+    badge: sp.get("badge") === "EXPERT" || sp.get("badge") === "SUR" ? (sp.get("badge") as BadgeKey) : "",
     sort: SORT_OPTIONS.some((o) => o.value === sort) ? (sort as SortKey) : "recent",
     priceType: PRICE_TYPE_OPTIONS.some((o) => o.value === priceType) ? (priceType as PriceTypeKey) : "",
     minPrice: positiveInt(sp.get("min_price")),
@@ -126,6 +138,7 @@ export function serializeSearch(s: SearchState): string {
   if (s.commune) sp.set("commune", s.commune);
   if (s.online) sp.set("online", "1");
   if (s.verified) sp.set("verified", "1");
+  if (s.badge) sp.set("badge", s.badge);
   if (s.priceType) sp.set("price_type", s.priceType);
   if (s.minPrice) sp.set("min_price", s.minPrice);
   if (s.maxPrice) sp.set("max_price", s.maxPrice);

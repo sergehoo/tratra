@@ -49,6 +49,9 @@ export interface PublicArtisanMini {
   is_verified: boolean;
   online: boolean;
   photo?: string | null;
+  /** Tratra Trust : score expliqué (null tant que l'activité mesurée est insuffisante) et badges actuels. */
+  trust_score?: number | null;
+  badges?: { code: "NOUVEAU" | "VERIFIE" | "EXPERT" | "SUR"; label: string }[];
 }
 
 /** Carte artisan publique (GET /handymen/featured/). */

@@ -1,4 +1,5 @@
 "use client";
+import Link from "next/link";
 import { ArrowRight, Clock, MapPin } from "lucide-react";
 import { Badge } from "@/components/ds/Badge";
 import { ButtonLink } from "@/components/ds/Button";
@@ -10,6 +11,7 @@ import { iconForCategory } from "@/lib/trades";
 import type { Service } from "@/lib/types";
 import { Avatar, RatingStars, VerifiedBadge, useImageFallback } from "./primitives";
 import { artisanDisplayName } from "@/lib/artisan";
+import { TrustBadges } from "@/components/trust/TrustBadge";
 
 /** Première image réelle du service (galerie, bannière ou URL), sinon null. */
 export function serviceImage(service: Service): string | null {
@@ -78,15 +80,22 @@ export default function ServiceCard({ service }: { service: Service }) {
           <Avatar name={name} photo={artisan?.photo} size={36} online={artisan?.online} />
           <div className="min-w-0 flex-1">
             <p className="flex items-center gap-1.5 truncate text-sm font-semibold text-ink">
-              <span className="truncate">{name}</span>
-              {artisan?.is_verified ? (
+              {artisan?.id ? (
+                <Link href={`/artisans/${artisan.id}`} className="truncate hover:text-primaryDark hover:underline" aria-label={`Passeport professionnel de ${name}`}>
+                  {name}
+                </Link>
+              ) : (
+                <span className="truncate">{name}</span>
+              )}
+              {artisan && !artisan.badges?.length && artisan.is_verified ? (
                 <VerifiedBadge className="!px-1.5" label="Vérifié" />
-              ) : artisan ? (
+              ) : artisan && !artisan.is_verified ? (
                 <Badge tone="gray" className="shrink-0 !px-1.5 !py-0.5 !text-[11px] !font-medium">
                   Vérification en cours
                 </Badge>
               ) : null}
             </p>
+            {artisan?.badges?.length ? <TrustBadges badges={artisan.badges} className="mt-1" /> : null}
             <p className="flex flex-wrap items-center gap-x-2 text-xs text-ash">
               <RatingStars rating={artisan?.rating} />
               {artisan && artisan.completed_jobs > 0 ? <span>{artisan.completed_jobs} missions</span> : null}

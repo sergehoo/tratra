@@ -12,6 +12,8 @@ import {
   PRICE_TYPE_OPTIONS,
   RADIUS_OPTIONS,
   SORT_OPTIONS,
+  BADGE_OPTIONS,
+  type BadgeKey,
   isLocated,
   useDebouncedDraft,
   type PriceTypeKey,
@@ -121,6 +123,7 @@ export default function FiltersPanel({
   const ids = {
     category: `${uid}-category`,
     availability: `${uid}-availability`,
+    badge: `${uid}-badge`,
     radius: `${uid}-radius`,
     priceType: `${uid}-price-type`,
     budget: `${uid}-budget`,
@@ -197,6 +200,17 @@ export default function FiltersPanel({
             description="Identité et documents contrôlés"
           />
         </div>
+      </FilterSection>
+
+      <FilterSection title="Badge Tratra" titleId={ids.badge}>
+        <Segmented<BadgeKey>
+          labelledBy={ids.badge}
+          columns={3}
+          value={state.badge}
+          onChange={(badge) => update({ badge })}
+          options={BADGE_OPTIONS}
+        />
+        <p className="text-xs text-ash">Expert : justificatifs approuvés. Sûr : ponctualité et avis mesurés.</p>
       </FilterSection>
 
       {located ? (

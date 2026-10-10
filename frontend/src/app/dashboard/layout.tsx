@@ -2,6 +2,7 @@
 import { useMemo, type ReactNode } from "react";
 import {
   Bell,
+  Award,
   Briefcase,
   Building2,
   CalendarCheck,

@@ -1,9 +1,11 @@
+import Link from "next/link";
 import { ArrowRight, Briefcase, MapPin } from "lucide-react";
 import { Badge } from "@/components/ds/Badge";
 import { ButtonLink } from "@/components/ds/Button";
 import { Card } from "@/components/ds/Card";
 import type { PublicArtisan } from "@/lib/types";
 import { formatFCFA } from "@/lib/format";
+import { TrustBadges, TrustScorePill } from "@/components/trust/TrustBadge";
 import { Avatar, RatingStars, VerifiedBadge } from "./primitives";
 
 /** Libellé de CTA long (nom de métier) : on autorise le retour à la ligne. */
@@ -38,15 +40,20 @@ export default function ArtisanCard({
       <div className="flex items-start gap-4">
         <Avatar name={artisan.display_name} photo={artisan.photo} size={64} online={artisan.online} />
         <div className="min-w-0 flex-1">
-          <h3 className="truncate font-display text-lg font-bold text-ink">{artisan.display_name}</h3>
+          <h3 className="truncate font-display text-lg font-bold text-ink">
+            <Link href={`/artisans/${artisan.id}`} className="hover:text-primaryDark hover:underline" aria-label={`Passeport professionnel de ${artisan.display_name}`}>
+              {artisan.display_name}
+            </Link>
+          </h3>
           <div className="mt-1 flex flex-wrap items-center gap-2">
-            {artisan.is_verified ? <VerifiedBadge /> : null}
+            {artisan.badges?.length ? <TrustBadges badges={artisan.badges} /> : artisan.is_verified ? <VerifiedBadge /> : null}
             {artisan.online ? (
               <Badge tone="success" pulse>
                 En ligne
               </Badge>
             ) : null}
           </div>
+          <TrustScorePill score={artisan.trust_score} className="mt-2" />
         </div>
       </div>
 

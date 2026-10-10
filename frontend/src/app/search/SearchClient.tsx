@@ -52,6 +52,7 @@ const FILTER_DEFAULTS: Partial<SearchState> = {
   metier: [],
   online: false,
   verified: false,
+  badge: "",
   priceType: "",
   minPrice: "",
   maxPrice: "",
@@ -104,6 +105,7 @@ export default function SearchClient() {
       commune: state.commune,
       online: state.online,
       verified: state.verified,
+      badge: state.badge,
       min_price: state.minPrice,
       max_price: state.maxPrice,
       page_size: PAGE_SIZE,
@@ -132,6 +134,7 @@ export default function SearchClient() {
     (state.metier.length ? 1 : 0) +
     (state.online ? 1 : 0) +
     (state.verified ? 1 : 0) +
+    (state.badge ? 1 : 0) +
     (located && state.radius !== DEFAULT_RADIUS ? 1 : 0) +
     (state.minPrice ? 1 : 0) +
     (state.maxPrice ? 1 : 0) +
@@ -174,6 +177,9 @@ export default function SearchClient() {
     if (state.online) list.push({ key: "online", label: "En ligne maintenant", onRemove: () => update({ online: false }) });
     if (state.verified) {
       list.push({ key: "verified", label: "Profils vérifiés", onRemove: () => update({ verified: false }) });
+    }
+    if (state.badge) {
+      list.push({ key: "badge", label: `Badge ${state.badge === "EXPERT" ? "Expert" : "Sûr"}`, onRemove: () => update({ badge: "" }) });
     }
     const priceType = listMode ? PRICE_TYPE_OPTIONS.find((o) => o.value === state.priceType) : undefined;
     if (priceType) {
