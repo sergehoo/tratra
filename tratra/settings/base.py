@@ -93,6 +93,7 @@ INSTALLED_APPS = [
     'live',
     'business',
     'announcements',
+    'continuity',
     'backoffice',
     # Libs
     'allauth',
@@ -448,6 +449,11 @@ CELERY_BEAT_SCHEDULE = {
     'announcements-tick': {
         'task': 'announcements.tasks.tick',
         'schedule': 60.0,
+    },
+    # Continuité : purge des clés d'idempotence périmées (48 h).
+    'continuity-purge-idempotency': {
+        'task': 'continuity.tasks.purge_idempotency',
+        'schedule': 86400.0,
     },
     # Suivi en direct : purge des positions (historique minimal, expiration).
     'live-purge-positions': {

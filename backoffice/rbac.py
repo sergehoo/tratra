@@ -46,6 +46,15 @@ def role_group_name(role: str) -> str:
     return f"{GROUP_PREFIX}{role}"
 
 
+def ensure_roles() -> None:
+    """Crée les groupes de rôles s'ils manquent (idempotent) : appelé avant toute attribution de rôle, et par les tests
+    (un test transactionnel purge les données créées par migration)."""
+    from django.contrib.auth.models import Group
+
+    for role in ROLES:
+        Group.objects.get_or_create(name=role_group_name(role))
+
+
 def user_roles(user) -> Set[str]:
     if not (user and user.is_authenticated and user.is_active and user.is_staff):
         return set()

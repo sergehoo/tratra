@@ -47,6 +47,7 @@ from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework_simplejwt.authentication import JWTAuthentication
 
+from continuity.idempotency import run_idempotent
 from handy.api.errors import CodedAPIException
 from handy.media.sanitize import sanitize_image
 from handy.eligibility import (
@@ -838,14 +839,55 @@ class BookingViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
     def get_serializer_class(self):
         return BookingCreateSerializer if self.action == "create" else BookingSerializer
 
+    def create(self, request, *args, **kwargs):
+        """Création idempotente : avec `Idempotency-Key`, un double appui ou un renvoi après coupure/crash retrouve la
+        même réservation au lieu d'en créer une seconde (continuity.idempotency)."""
+        return run_idempotent(request, "booking.create", lambda: super(BookingViewSet, self).create(request, *args, **kwargs))
+
     def perform_create(self, serializer):
         # Missions : seuls les artisans éligibles (actif, approuvé, KYC approuvé, profil complet)
         # peuvent recevoir une réservation — règle unique : handy/eligibility.py.
         if not can_receive_missions(serializer.validated_data.get("handyman")):
             raise drf_serializers.ValidationError(
                 {"handyman": ["Cet artisan n'est pas éligible aux missions pour le moment."]})
+        # Doublon naturel (ancien client sans clé d'idempotence, double clic) : même client, même artisan, même
+        # prestation, même créneau, déjà en attente ou confirmé → on indique la réservation existante.
+        data = serializer.validated_data
+        duplicate = Booking.objects.filter(
+            client=self.request.user, handyman=data.get("handyman"), service=data.get("service"),
+            booking_date=data.get("booking_date"), status__in=("pending", "confirmed", "in_progress")).first()
+        if duplicate is not None:
+            raise CodedAPIException("duplicate_booking", "Une réservation identique existe déjà pour ce créneau.",
+                                    status=status.HTTP_409_CONFLICT, existing_id=duplicate.id)
         booking = serializer.save()
         # (option) notifier l'artisan via push (Device) / mail / task Celery
+
+    @staticmethod
+    def _expected_version(request):
+        raw = request.data.get("expected_version", request.headers.get("If-Match"))
+        if raw in ("", None):
+            return None
+        try:
+            return int(str(raw).strip('"'))
+        except (TypeError, ValueError):
+            raise drf_serializers.ValidationError({"expected_version": ["Version invalide."]})
+
+    def update(self, request, *args, **kwargs):
+        """PUT/PATCH : si `expected_version` (ou If-Match) est fourni et périmée → 409 (écriture concurrente). La ligne
+        est verrouillée le temps de la vérification et de l'écriture."""
+        with transaction.atomic():
+            booking = self.get_object()   # cloisonnement par propriétaire (404 pour un tiers)
+            current = Booking.objects.select_for_update().only("version").get(pk=booking.pk)
+            expected = self._expected_version(request)
+            if expected is not None and expected != current.version:
+                booking.refresh_from_db()
+                return Response({"code": "version_conflict", "detail": "Cette réservation a été modifiée entre-temps : rechargez-la.",
+                                 "current": BookingSerializer(booking, context={"request": request}).data},
+                                status=status.HTTP_409_CONFLICT)
+            return super().update(request, *args, **kwargs)
+
+    def perform_update(self, serializer):
+        serializer.save(version=serializer.instance.version + 1)
 
     @action(detail=True, methods=["get"])
     def timeline(self, request, pk=None):
@@ -895,10 +937,17 @@ class BookingViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
     @action(detail=True, methods=["post"])
     def transition(self, request, pk=None):
         """
-        POST { "status": "confirmed|in_progress|completed|cancelled" }
+        POST { "status": "confirmed|in_progress|completed|cancelled", "expected_version": N (facultatif) }
         Change le statut via la machine à états (transition validée + timeline).
         Le queryset est déjà cloisonné par propriétaire (anti-IDOR).
+
+        Écritures concurrentes : `expected_version` (ou l'en-tête If-Match) est la version vue par l'appelant. Si
+        l'état a changé entre-temps (autre appareil, autre acteur) → 409 `version_conflict` avec l'état courant,
+        sauf si la cible est déjà atteinte (rejeu : 200, rien n'est refait). `Idempotency-Key` rejoue la réponse.
         """
+        return run_idempotent(request, f"booking.transition:{pk}", lambda: self._transition(request, pk))
+
+    def _transition(self, request, pk):
         booking = self.get_object()
         new_status = request.data.get("status")
         if not new_status:
@@ -908,9 +957,22 @@ class BookingViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
         if booking.client_id == request.user.id and new_status != "cancelled":
             return Response({"detail": "Seul l'artisan peut faire avancer la mission."},
                             status=status.HTTP_403_FORBIDDEN)
+        expected = request.data.get("expected_version", request.headers.get("If-Match"))
+        if expected in ("", None):
+            expected = None
+        else:
+            try:
+                expected = int(str(expected).strip('"'))
+            except (TypeError, ValueError):
+                return Response({"code": "invalid_version", "detail": "Version invalide."}, status=status.HTTP_400_BAD_REQUEST)
         try:
-            booking.transition_to(new_status, actor=request.user)
+            booking.transition_to(new_status, actor=request.user, expected_version=expected)
         except DjangoValidationError as e:
+            if getattr(e, "code", None) == "version_conflict":
+                booking.refresh_from_db()
+                return Response({"code": "version_conflict", "detail": "Cette réservation a été modifiée entre-temps : rechargez-la.",
+                                 "current": BookingSerializer(booking, context={"request": request}).data},
+                                status=status.HTTP_409_CONFLICT)
             msg = e.messages[0] if getattr(e, "messages", None) else str(e)
             return Response({"detail": msg}, status=status.HTTP_400_BAD_REQUEST)
         return Response(BookingSerializer(booking).data, status=status.HTTP_200_OK)

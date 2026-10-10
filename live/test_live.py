@@ -365,7 +365,9 @@ def test_job_coordinates_are_optional_on_booking_creation():
     r = api(cli).post("/handy/bookings/", {**base, "lat": 5.36, "lng": -4.0083}, format="json")
     assert r.status_code == 201, r.content
     assert Booking.objects.get(pk=r.json()["id"]).job_location.y == pytest.approx(5.36)
-    r = api(cli).post("/handy/bookings/", base, format="json")
+    # autre créneau : une demande identique (même artisan, prestation et heure) est refusée comme doublon (continuity)
+    later = {**base, "booking_date": (timezone.now() + timedelta(days=2)).isoformat()}
+    r = api(cli).post("/handy/bookings/", later, format="json")
     assert r.status_code == 201 and Booking.objects.get(pk=r.json()["id"]).job_location is None
     assert api(cli).post("/handy/bookings/", {**base, "lat": 91, "lng": 0}, format="json").status_code == 400
 

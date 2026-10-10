@@ -659,11 +659,11 @@ class BookingCreateSerializer(serializers.ModelSerializer):
             "booking_date", "end_date",
             "address", "city", "postal_code",
             "description", "proposed_price", "handyman_comment",
-            "response_date", "status", "type", "is_immediate",
+            "response_date", "status", "type", "is_immediate", "version",
             # auxiliaires (write_only)
             "category_id", "minutes", "lat", "lng",
         ]
-        read_only_fields = ["client", "status", "response_date", "is_immediate"]
+        read_only_fields = ["client", "status", "response_date", "is_immediate", "version"]
 
     def validate(self, attrs):
         start = attrs.get("booking_date")
@@ -734,10 +734,10 @@ class BookingSerializer(serializers.ModelSerializer):
             "address", "city", "postal_code",
             "description", "proposed_price", "handyman_comment",
             "response_date", "status", "type", "is_immediate",
-            "created_at", "updated_at",
+            "created_at", "updated_at", "version",
         ]
         # 'status' n'est PAS modifiable via PATCH : passer par /bookings/{id}/transition/.
-        read_only_fields = ["created_at", "updated_at", "status"]
+        read_only_fields = ["created_at", "updated_at", "status", "version"]
 
 
 # ========= PAYMENTS =========

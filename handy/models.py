@@ -493,6 +493,9 @@ class Booking(models.Model):
         default='scheduled', db_index=True)
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
     updated_at = models.DateTimeField(auto_now=True)
+    # Contrôle des écritures concurrentes (deux appareils, rejeu hors ligne) : +1 à chaque transition de statut ou
+    # modification via l'API. Les clients renvoient la version qu'ils ont vue ; une version périmée donne un conflit 409.
+    version = models.PositiveIntegerField(default=1)
 
     class Meta:
         indexes = [
@@ -565,15 +568,25 @@ class Booking(models.Model):
         return (Decimal(base) * policy.fee_percent / Decimal('100')).quantize(Decimal('1.'))
 
     @transaction.atomic
-    def transition_to(self, new_status: str, *, actor=None, save: bool = True):
+    def transition_to(self, new_status: str, *, actor=None, save: bool = True, expected_version=None):
         """Change le statut en validant la transition, horodate dans
         BookingTimeline, et incrémente completed_jobs UNE seule fois à la
         complétion. Lève ValidationError si la transition est interdite.
 
         `actor` (User) est accepté pour traçabilité/contrôles éventuels.
+        `expected_version` : version vue par l'appelant ; si l'état a changé entre-temps (autre appareil, autre
+        acteur) et que la cible n'est pas déjà atteinte, lève ValidationError(code='version_conflict').
+
+        La ligne est VERROUILLÉE puis relue : deux transitions simultanées sont sérialisées, la seconde voit l'état
+        de la première (no-op si la cible est déjà atteinte, refus sinon) au lieu d'écraser son résultat.
         """
+        if self.pk and save:
+            fresh = Booking.objects.select_for_update().only('status', 'version').get(pk=self.pk)
+            self.status, self.version = fresh.status, fresh.version
         if new_status == self.status:
             return self
+        if expected_version is not None and int(expected_version) != self.version:
+            raise ValidationError("Cette réservation a été modifiée entre-temps.", code='version_conflict')
         if not self.can_transition_to(new_status):
             raise ValidationError(
                 f"Transition invalide: {self.status} -> {new_status}."
@@ -581,8 +594,9 @@ class Booking(models.Model):
 
         previous = self.status
         self.status = new_status
+        self.version = (self.version or 1) + 1
         self._transition_actor_id = getattr(actor, 'pk', None)  # lu par le signal de notification (l'auteur n'est pas notifié)
-        update_fields = ['status', 'updated_at']
+        update_fields = ['status', 'version', 'updated_at']
         if new_status == 'completed' and not self.end_date:
             # Jamais avant le début (contrainte bk_end_after_start) : terminer une mission en avance
             # donnait une IntegrityError (500).
@@ -597,8 +611,9 @@ class Booking(models.Model):
             # PK existant -> update ciblé; sinon save complet
             self.save(update_fields=update_fields if self.pk else None)
 
-        # Horodatage du nouveau statut
-        BookingTimeline.objects.create(booking=self, status=new_status)
+        # Horodatage du nouveau statut (et de son auteur : le rôle sert à l'historique, jamais l'identité)
+        BookingTimeline.objects.create(booking=self, status=new_status, previous_status=previous,
+                                       actor_id=getattr(actor, 'pk', None))
 
         # Incrément idempotent : seulement à l'ENTRÉE dans 'completed'
         if new_status == 'completed' and previous != 'completed':
@@ -1088,6 +1103,8 @@ class BookingRoute(models.Model):
 class BookingTimeline(models.Model):
     booking = models.ForeignKey(Booking, on_delete=models.CASCADE, related_name='timeline')
     status = models.CharField(max_length=20, choices=Booking.STATUS_CHOICES)
+    previous_status = models.CharField(max_length=20, blank=True, default='')
+    actor = models.ForeignKey('User', on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
     at = models.DateTimeField(auto_now_add=True)
 class PayoutAccount(models.Model):
     handyman = models.OneToOneField(User, on_delete=models.PROTECT, related_name='payout_account')

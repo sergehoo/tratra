@@ -31,6 +31,7 @@ def account(name, kind="client", city=None):
 
 
 def staff(name, role=None, superuser=False):
+    rbac.ensure_roles()
     u = User.objects.create_user(username=name, email=f"{name}@ex.com", password="pass1234", is_staff=True, is_superuser=superuser)
     if role:
         u.groups.add(Group.objects.get(name=rbac.role_group_name(role)))
