@@ -36,3 +36,9 @@ media/
 
 # Docs / divers
 *.md
+
+# Staging : secrets montés à l'exécution et sauvegardes — jamais dans l'image
+secrets/
+backups/
+scripts/staging/
+

@@ -186,3 +186,10 @@ cython_debug/
 .flutter-plugins
 .flutter-plugins-dependencies
 .metadata
+
+# Staging : jamais versionner les valeurs réelles (voir .env.staging.example)
+.env.staging
+secrets/*
+!secrets/.gitkeep
+backups/
+

@@ -1,0 +1,244 @@
+# docker-compose.staging.yml — pile STAGING de Tratra, isolée de la production.
+#
+#   Projet Compose  : tratra-staging (volumes et réseau interne préfixés → base PostgreSQL, Redis et MinIO SÉPARÉS)
+#   Traefik         : le même Traefik externe que la production (réseau « proxy », résolveur « lets »), mais TOUS les
+#                     routeurs / middlewares / services portent le préfixe « tratra-stg- » et chaque service joint au
+#                     réseau partagé « proxy » a un nom en « -stg » : aucune collision possible avec la production.
+#   Secrets         : aucun dans ce fichier. Valeurs dans .env (copie de .env.staging.example, jamais versionnée) ;
+#                     compte de service Firebase dans ./secrets/ (jamais versionné, jamais dans l'image).
+#
+# Commandes : voir docs/deploiement-staging.md   (DC="docker compose -f docker-compose.staging.yml")
+
+name: tratra-staging
+
+x-backend: &backend
+  image: tratra-backend:${IMAGE_TAG:-staging}
+  env_file: .env
+  # Compte de service Firebase (push FCM) : dossier monté en lecture seule, facultatif (sans fichier : aucun push).
+  volumes:
+    - ./secrets:/run/tratra-secrets:ro
+  restart: unless-stopped
+
+networks:
+  web:            # réseau interne du projet (db, redis, minio, workers)
+    driver: bridge
+  proxy:          # réseau Traefik partagé (créé hors de ce fichier : docker network create proxy)
+    external: true
+    name: ${PROXY_NETWORK:-proxy}
+
+volumes:
+  postgres_data:
+  static_volume:
+  media_volume:
+  minio_data:
+
+services:
+  # --- PostgreSQL + PostGIS : base STAGING dédiée -----------------------------------------------------------------
+  tratradb:
+    image: postgis/postgis:16-3.4
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    networks: [web]
+    restart: unless-stopped
+
+  # --- Redis : broker Celery, cache et couche de canaux WebSocket ---------------------------------------------------
+  redis:
+    image: redis:7
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "PING"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    networks: [web]
+    restart: unless-stopped
+
+  # --- MinIO : stockage objet STAGING (média + KYC privé), distinct de la production --------------------------------
+  minio-stg:
+    image: minio/minio:RELEASE.2025-02-18T16-25-55Z
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    volumes:
+      - minio_data:/data
+    networks: [web, proxy]
+    restart: unless-stopped
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=${PROXY_NETWORK:-proxy}
+      - traefik.http.routers.tratra-stg-minio-api.rule=Host(`${MINIO_API_HOST}`)
+      - traefik.http.routers.tratra-stg-minio-api.entrypoints=websecure
+      - traefik.http.routers.tratra-stg-minio-api.tls.certresolver=lets
+      - traefik.http.routers.tratra-stg-minio-api.service=tratra-stg-minio-api
+      - traefik.http.services.tratra-stg-minio-api.loadbalancer.server.port=9000
+      - traefik.http.routers.tratra-stg-minio-console.rule=Host(`${MINIO_CONSOLE_HOST}`)
+      - traefik.http.routers.tratra-stg-minio-console.entrypoints=websecure
+      - traefik.http.routers.tratra-stg-minio-console.tls.certresolver=lets
+      - traefik.http.routers.tratra-stg-minio-console.service=tratra-stg-minio-console
+      - traefik.http.services.tratra-stg-minio-console.loadbalancer.server.port=9001
+
+  # Crée les buckets média et KYC privé (aucune politique anonyme : URL signées uniquement).
+  minio-init:
+    image: minio/mc:RELEASE.2025-02-21T16-00-46Z
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      AWS_STORAGE_BUCKET_NAME: ${AWS_STORAGE_BUCKET_NAME}
+      KYC_STORAGE_BUCKET_NAME: ${KYC_STORAGE_BUCKET_NAME}
+    depends_on:
+      minio-stg:
+        condition: service_started
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        until mc alias set local http://minio-stg:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}"; do sleep 2; done
+        mc mb --ignore-existing "local/$${AWS_STORAGE_BUCKET_NAME}"
+        mc mb --ignore-existing "local/$${KYC_STORAGE_BUCKET_NAME}"
+        mc anonymous set none "local/$${AWS_STORAGE_BUCKET_NAME}"
+        mc anonymous set none "local/$${KYC_STORAGE_BUCKET_NAME}"
+    networks: [web]
+
+  # --- API Django / ASGI (Daphne) : HTTP + WebSocket /ws/ ---------------------------------------------------------
+  # L'entrypoint attend db/redis, lance « check --deploy », les migrations, collectstatic, puis Daphne.
+  tratraweb-stg:
+    <<: *backend
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["/app/docker/entrypoint.sh", "daphne", "-b", "0.0.0.0", "-p", "8000", "tratra.asgi:application"]
+    depends_on:
+      tratradb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    healthcheck:
+      # La production impose HTTPS (SECURE_SSL_REDIRECT) et un hôte autorisé : une sonde sur 127.0.0.1 en HTTP reçoit
+      # 400/301 et ne passe JAMAIS. On présente donc l'hôte public et l'en-tête de protocole posé par Traefik.
+      test:
+        - CMD-SHELL
+        - 'wget -qO- --header="Host: $${tratraweb_HOST}" --header="X-Forwarded-Proto: https" http://127.0.0.1:8000/readyz > /dev/null || exit 1'
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 120s
+    volumes:
+      - static_volume:/app/staticfiles
+      - media_volume:/app/media
+      - ./secrets:/run/tratra-secrets:ro
+    networks:
+      web:
+      proxy:
+        aliases: [tratraweb-stg]
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=${PROXY_NETWORK:-proxy}
+      - traefik.http.routers.tratra-stg-api.rule=Host(`${tratraweb_HOST}`)
+      - traefik.http.routers.tratra-stg-api.entrypoints=websecure
+      - traefik.http.routers.tratra-stg-api.tls.certresolver=lets
+      - traefik.http.routers.tratra-stg-api.middlewares=tratra-stg-sec@docker,tratra-stg-compress@docker,tratra-stg-rl@docker,tratra-stg-noindex@docker
+      - traefik.http.routers.tratra-stg-api.service=tratra-stg-api-svc
+      - traefik.http.services.tratra-stg-api-svc.loadbalancer.server.port=8000
+      - traefik.http.middlewares.tratra-stg-sec.headers.stsSeconds=31536000
+      - traefik.http.middlewares.tratra-stg-sec.headers.contentTypeNosniff=true
+      - traefik.http.middlewares.tratra-stg-sec.headers.frameDeny=true
+      - traefik.http.middlewares.tratra-stg-sec.headers.referrerPolicy=strict-origin-when-cross-origin
+      - traefik.http.middlewares.tratra-stg-compress.compress=true
+      - traefik.http.middlewares.tratra-stg-rl.ratelimit.average=150
+      - traefik.http.middlewares.tratra-stg-rl.ratelimit.burst=250
+      - traefik.http.middlewares.tratra-stg-noindex.headers.customresponseheaders.X-Robots-Tag=noindex,nofollow
+
+  # --- Frontend Next.js (variables NEXT_PUBLIC_* figées à la construction) ------------------------------------------
+  tratrafrontend-stg:
+    image: tratra-frontend:${IMAGE_TAG:-staging}
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_BASE: ${NEXT_PUBLIC_API_BASE}
+        NEXT_PUBLIC_PAYMENT_METHODS: ${NEXT_PUBLIC_PAYMENT_METHODS:-cash}
+        NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL:-https://${FRONTEND_HOST}}
+        NEXT_PUBLIC_MEDIA_ORIGINS: ${AWS_S3_ENDPOINT_URL:-},${NEXT_PUBLIC_MEDIA_ORIGINS:-}
+        NEXT_PUBLIC_ESCROW_ENABLED: ${NEXT_PUBLIC_ESCROW_ENABLED:-false}
+    depends_on:
+      tratraweb-stg:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))\""]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      proxy:
+        aliases: [tratrafrontend-stg]
+    restart: unless-stopped
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=${PROXY_NETWORK:-proxy}
+      - traefik.http.routers.tratra-stg-front.rule=Host(`${FRONTEND_HOST}`)
+      - traefik.http.routers.tratra-stg-front.entrypoints=websecure
+      - traefik.http.routers.tratra-stg-front.tls.certresolver=lets
+      - traefik.http.routers.tratra-stg-front.middlewares=tratra-stg-noindex@docker
+      - traefik.http.routers.tratra-stg-front.service=tratra-stg-front-svc
+      - traefik.http.services.tratra-stg-front-svc.loadbalancer.server.port=3000
+
+  # --- Celery : worker (files default/notifications + « celery » pour les producteurs d'anciennes versions) ---------
+  worker:
+    <<: *backend
+    pull_policy: never          # l'image est construite par tratraweb-stg (même tag) ; ne jamais la chercher en ligne
+    command: celery -A tratra worker -l info --prefetch-multiplier=1 --max-tasks-per-child=200 --queues=default,notifications,celery
+    depends_on:
+      tratraweb-stg:
+        condition: service_healthy   # migrations terminées
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A tratra inspect ping --timeout 5 | grep -q pong || exit 1"]
+      interval: 30s
+      timeout: 15s
+      retries: 5
+      start_period: 60s
+    networks: [web]
+
+  # --- Celery beat : réévaluation des badges (1 h), maintenances préventives (24 h), purge GPS (1 h) ------------------
+  beat:
+    <<: *backend
+    pull_policy: never
+    command: celery -A tratra beat -l info --scheduler django_celery_beat.schedulers:DatabaseScheduler
+    depends_on:
+      tratraweb-stg:
+        condition: service_healthy
+    networks: [web]
+
+  # --- Adminer : UNIQUEMENT à la demande (docker compose --profile tools up -d adminer-stg), jamais exposé sans auth --
+  adminer-stg:
+    profiles: ["tools"]
+    image: adminer:4
+    environment:
+      ADMINER_DEFAULT_SERVER: tratradb
+    networks:
+      web:
+      proxy:
+        aliases: [adminer-stg]
+    restart: unless-stopped
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=${PROXY_NETWORK:-proxy}
+      - traefik.http.routers.tratra-stg-adminer.rule=Host(`${ADMINER_HOST}`)
+      - traefik.http.routers.tratra-stg-adminer.entrypoints=websecure
+      - traefik.http.routers.tratra-stg-adminer.tls.certresolver=lets
+      - traefik.http.routers.tratra-stg-adminer.middlewares=tratra-stg-adminer-auth@docker,tratra-stg-noindex@docker
+      - traefik.http.routers.tratra-stg-adminer.service=tratra-stg-adminer-svc
+      - traefik.http.services.tratra-stg-adminer-svc.loadbalancer.server.port=8080
+      - traefik.http.middlewares.tratra-stg-adminer-auth.basicauth.users=${BASIC_AUTH_USERS}
