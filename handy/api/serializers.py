@@ -767,8 +767,21 @@ class PaymentSerializer(serializers.ModelSerializer):
             "amount", "platform_fee", "method", "status",
             "transaction_id", "is_paid", "currency",
             "payment_date", "created_at", "updated_at",
+            "provider_verified_at", "verification",
         ]
-        read_only_fields = ["is_paid", "created_at", "updated_at"]
+        read_only_fields = ["is_paid", "created_at", "updated_at", "provider_verified_at", "verification"]
+
+    verification = serializers.SerializerMethodField()
+
+    @extend_schema_field(serializers.CharField())
+    def get_verification(self, obj):
+        """Niveau de preuve de l'encaissement : « provider_verified » (confirmé auprès du prestataire), « manual » (espèces ou
+        autre moyen sans prestataire : confirmation humaine) ou « unverified » (rien de reconnu)."""
+        if obj.provider_verified_at:
+            return "provider_verified"
+        if obj.method in Payment.PROVIDER_VERIFIED_METHODS:
+            return "unverified"
+        return "manual" if obj.status in Payment.PAID_STATUSES else "unverified"
 
 
 class TimeOffSerializer(serializers.ModelSerializer):
@@ -1116,54 +1129,74 @@ class PaymentInitSerializer(serializers.Serializer):
         if not provider.is_available:
             raise PaymentProviderUnavailable(method)
 
-        # An existing payment must never be silently rebound to a different
-        # provider reference or amount.  It is safe to return the manual cash
-        # record because it does not claim that funds were received.
-        existing = Payment.objects.filter(booking=booking).first()
-        if existing:
-            if existing.method != method:
-                raise serializers.ValidationError(
-                    {"method": "Un paiement existe déjà pour cette réservation avec une autre méthode."}
+        with transaction.atomic():
+            # Verrou de la réservation : deux initiations simultanées ne doivent pas créer deux transactions chez le prestataire.
+            Booking.objects.select_for_update().filter(pk=booking.pk).first()
+            # An existing payment must never be silently rebound to a different
+            # provider reference or amount.  It is safe to return the manual cash
+            # record because it does not claim that funds were received.
+            existing = Payment.objects.select_for_update().filter(booking=booking).first()
+            if existing:
+                if existing.method != method and existing.status != "failed":
+                    raise serializers.ValidationError(
+                        {"method": "Un paiement existe déjà pour cette réservation avec une autre méthode."}
+                    )
+                if existing.status not in ("pending", "failed"):
+                    raise serializers.ValidationError({"booking_id": "Ce paiement n'est plus réinitialisable."})
+                if existing.status == "pending":
+                    if method == "cash":
+                        return {
+                            "payment_id": existing.id,
+                            "provider": "cash",
+                            "status": existing.status,
+                            "requires_customer_action": True,
+                            "instructions": "Paiement en espèces à confirmer manuellement après la prestation.",
+                        }
+                    if existing.transaction_id:
+                        return {
+                            "payment_id": existing.id,
+                            "provider": existing.method,
+                            "provider_ref": existing.transaction_id,
+                            "status": existing.status,
+                            "already_initiated": True,
+                            **provider.resume(existing),
+                        }
+                    raise serializers.ValidationError({"booking_id": "Une tentative de paiement est déjà en cours."})
+
+            # This call fails closed for unconfigured adapters.  It happens before a Payment row is created (or
+            # re-armed) so the UI cannot mistake a stub for an actionable payment flow.
+            res = provider.create(booking, int(amount))
+            provider_ref = res.get("provider_ref")
+            if method != "cash" and not provider_ref:
+                raise serializers.ValidationError({"method": "Le prestataire n'a pas retourné de référence de transaction."})
+            session = res.pop("session", {}) or {}        # données de session : conservées, jamais renvoyées au client
+            if "redirect_url" in res:
+                session["redirect_url"] = res["redirect_url"]
+
+            if existing:
+                # Tentative précédente ÉCHOUÉE (refus, expiration, annulation) : la même ligne repart avec une nouvelle transaction.
+                old_status = existing.status
+                existing.method, existing.amount, existing.platform_fee, existing.currency = method, amount, fee, "XOF"
+                existing.coupon, existing.discount, existing.transaction_id = coupon, discount, provider_ref
+                existing.provider_session, existing.provider_status = session, ""
+                existing.provider_verified_at = existing.provider_checked_at = None
+                existing.status = "pending"
+                existing.save()
+                PaymentLog.objects.create(payment=existing, previous_status=old_status, new_status="pending", notes="Nouvelle tentative de paiement.")
+                payment = existing
+            else:
+                payment = Payment.objects.create(
+                    booking=booking,
+                    amount=amount,
+                    platform_fee=fee,
+                    method=method,
+                    status="pending",
+                    currency="XOF",
+                    coupon=coupon,
+                    discount=discount,
+                    transaction_id=provider_ref,
+                    provider_session=session,
                 )
-            if existing.status != "pending":
-                raise serializers.ValidationError({"booking_id": "Ce paiement n'est plus réinitialisable."})
-            if method == "cash":
-                return {
-                    "payment_id": existing.id,
-                    "provider": "cash",
-                    "status": existing.status,
-                    "requires_customer_action": True,
-                    "instructions": "Paiement en espèces à confirmer manuellement après la prestation.",
-                }
-            if existing.transaction_id:
-                return {
-                    "payment_id": existing.id,
-                    "provider": existing.method,
-                    "provider_ref": existing.transaction_id,
-                    "status": existing.status,
-                    "already_initiated": True,
-                }
-            raise serializers.ValidationError({"booking_id": "Une tentative de paiement est déjà en cours."})
-
-        # This call fails closed for the placeholder adapters.  It happens
-        # before a Payment row is created so the UI cannot mistake a stub for
-        # an actionable payment flow.
-        res = provider.create(booking, int(amount))
-        provider_ref = res.get("provider_ref")
-        if method != "cash" and not provider_ref:
-            raise serializers.ValidationError({"method": "Le prestataire n'a pas retourné de référence de transaction."})
-
-        payment = Payment.objects.create(
-            booking=booking,
-            amount=amount,
-            platform_fee=fee,
-            method=method,
-            status="pending",
-            currency="XOF",
-            coupon=coupon,
-            discount=discount,
-            transaction_id=provider_ref,
-        )
         return {"payment_id": payment.id, **res}
 
 class HeroSlideSerializer(serializers.ModelSerializer):

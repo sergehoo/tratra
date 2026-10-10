@@ -168,7 +168,7 @@ def test_settings_overview_reports_integrations_honestly_and_never_a_secret():
     for secret in ("TOP-SECRET-KEY", "tratra-prod", "sk_live", "private_key", "password", "SECRET"):
         assert secret not in text, secret
     integ = r.json()["integrations"]
-    assert integ["payments"] == {"om": False, "mtn": False, "card": False, "cash": True}              # seuls les espèces existent aujourd'hui
+    assert integ["payments"] == {"om": False, "mtn": False, "card": True, "cash": True}               # « disponible » = identifiants présents (la clé elle-même n'apparaît jamais)
     assert set(integ) >= {"push_fcm", "sms", "email", "payments", "routing_osrm", "object_storage"} and "configured" in integ["push_fcm"]
     assert api(staff("st_ops", "ops")).get(f"{BO}/settings/").status_code == 403
 

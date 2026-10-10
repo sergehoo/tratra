@@ -63,6 +63,8 @@ export interface Line { id: number; kind: string; amount: string; description: s
 export interface Payment {
   id: number; amount: string; method: string; reference: string; paid_on: string; is_advance: boolean; status: string; declared_by_role: string; mine: boolean; can_respond: boolean;
   rejection_reason: string; evidence: Evidence | null; declared_at: string; responded_at: string | null;
+  /** Niveau de preuve : déclaré → confirmé par l'autre partie ; `verified` n'est jamais vrai ici (aucun prestataire de paiement n'intervient). */
+  trust?: { level: "declared" | "confirmed" | "contested"; verified: boolean; note: string };
 }
 export interface Installment {
   id: number; contract: number; sequence: number; number: number; period_start: string; period_end: string; due_date: string; status: string; currency: string; base_amount: string | null;

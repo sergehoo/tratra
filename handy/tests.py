@@ -183,7 +183,8 @@ def test_payment_provider_unavailable_and_signed_webhook(api_client, auth_client
         method="om", status="pending", transaction_id=provider_ref,
     )
 
-    # 4) webhook -> completed (authentifié par signature HMAC du corps brut)
+    # 4) webhook signé (HMAC du corps brut) : il n'est qu'un DÉCLENCHEUR. Sans prestataire configuré, le serveur ne peut rien
+    # vérifier : il répond 503 et NE reconnaît AUCUN encaissement (jamais de paiement simulé — voir test_payments_providers.py).
     webhook_url = reverse("payment-webhook", kwargs={"provider": "om"})
     webhook_payload = {"provider_ref": provider_ref, "status": "completed"}
     raw = json.dumps(webhook_payload).encode("utf-8")
@@ -192,13 +193,13 @@ def test_payment_provider_unavailable_and_signed_webhook(api_client, auth_client
         webhook_url, raw, content_type="application/json",
         HTTP_X_WEBHOOK_SIGNATURE=signature,
     )
-    assert w_res.status_code == 200, w_res.content
+    assert w_res.status_code == 503, w_res.content
 
     # 4bis) une requête NON signée doit être rejetée (régression sécurité)
     bad = api_client.post(webhook_url, webhook_payload, format="json")
     assert bad.status_code == 401
 
-    # 5) recharger depuis DB et valider : la confirmation fournisseur place en séquestre
+    # 5) rien n'a changé : le paiement reste en attente, non payé
     p.refresh_from_db()
-    assert p.status == "held"
-    assert p.is_paid is True
+    assert p.status == "pending"
+    assert p.is_paid is False

@@ -123,3 +123,44 @@ def notify_booking_status(booking_id, status, actor_id=None):
 @shared_task
 def notify_arrival_imminent(user_id, booking_id):
     _send_sms(_resolve_msisdn(user_id), "Votre artisan arrive. Merci de vous préparer.")
+
+
+# ---------- Paiements : réconciliation avec les prestataires ----------
+
+RECONCILE_MIN_AGE_S = 60              # laisse au client le temps de payer avant la première vérification
+RECONCILE_MAX_AGE_H = 72              # au-delà, une transaction restée « en attente » est laissée à l'examen du Back-Office
+RECONCILE_BATCH = 200
+
+
+@shared_task
+def reconcile_provider_payments():
+    """Filet de sécurité des webhooks perdus, tardifs ou impossibles à signer (Orange, MTN) : interroge le prestataire pour chaque
+    paiement en attente et applique SEULEMENT ce que la vérification serveur-à-serveur établit. Un prestataire non configuré ou
+    injoignable ne change rien (rejoué au prochain passage). Rejouable sans effet double."""
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    from handy.models import Payment
+    from handy.services import settlement
+    from handy.services.gateway import PROVIDER_METHODS, PaymentProviderError, PaymentProviderUnavailable
+
+    now = timezone.now()
+    ids = list(Payment.objects.filter(status="pending", method__in=PROVIDER_METHODS, transaction_id__isnull=False,
+                                      created_at__lte=now - timedelta(seconds=RECONCILE_MIN_AGE_S),
+                                      created_at__gte=now - timedelta(hours=RECONCILE_MAX_AGE_H))
+               .order_by("provider_checked_at", "id").values_list("pk", flat=True)[:RECONCILE_BATCH])
+    done = {"checked": 0, "settled": 0, "unavailable": 0}
+    for pk in ids:
+        try:
+            result = settlement.settle(pk, source="reconcile")
+        except (PaymentProviderUnavailable, PaymentProviderError):
+            done["unavailable"] += 1
+            continue
+        except Exception:    # noqa: BLE001 — un paiement en défaut ne doit pas bloquer les suivants
+            logger.warning("Réconciliation du paiement #%s impossible.", pk, exc_info=True)
+            continue
+        done["checked"] += 1
+        done["settled"] += int(result.get("state") in ("completed", "failed", "refunded"))
+    return done
+

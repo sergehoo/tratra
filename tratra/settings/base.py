@@ -232,6 +232,7 @@ REST_FRAMEWORK = {
         'webhook': config('THROTTLE_WEBHOOK', default='120/min'),
         'verify': config('THROTTLE_VERIFY', default='60/min'),  # vérification publique d'un QR Tratra ID
         'mfa': config('THROTTLE_MFA', default='20/min'),  # codes de double authentification du personnel
+        'payment_refresh': config('THROTTLE_PAYMENT_REFRESH', default='30/min'),  # vérifications de paiement auprès du prestataire
     },
 }
 
@@ -469,6 +470,11 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'engagements.tasks.tick',
         'schedule': 3600.0,
     },
+    # Paiements : vérification serveur-à-serveur des encaissements en attente (webhooks perdus ou non signés).
+    'payments-reconcile': {
+        'task': 'handy.tasks.reconcile_provider_payments',
+        'schedule': 120.0,
+    },
     # Suivi en direct : purge des positions (historique minimal, expiration).
     'live-purge-positions': {
         'task': 'live.tasks.purge_positions',
@@ -500,6 +506,34 @@ PAYMENT_WEBHOOK_SECRET = config('PAYMENT_WEBHOOK_SECRET', default='')
 PAYMENT_OM_WEBHOOK_SECRET = config('PAYMENT_OM_WEBHOOK_SECRET', default='')
 PAYMENT_MTN_WEBHOOK_SECRET = config('PAYMENT_MTN_WEBHOOK_SECRET', default='')
 PAYMENT_CARD_WEBHOOK_SECRET = config('PAYMENT_CARD_WEBHOOK_SECRET', default='')
+
+# Prestataires de paiement (voir docs/paiements.md). Chaque adaptateur n'est DISPONIBLE que si tous ses identifiants sont renseignés ;
+# sans eux, la méthode répond « prestataire indisponible » (jamais de faux paiement). Un encaissement n'est reconnu qu'après une
+# vérification serveur-à-serveur auprès du prestataire (handy/services/settlement.py) : un webhook ne suffit jamais.
+PAYMENT_HTTP_TIMEOUT = int(config('PAYMENT_HTTP_TIMEOUT', default='10'))
+# URLs publiques (HTTPS) vers lesquelles le prestataire renvoie le client / notifie Tratra.
+PAYMENT_RETURN_URL = config('PAYMENT_RETURN_URL', default='')
+PAYMENT_CANCEL_URL = config('PAYMENT_CANCEL_URL', default='')
+PAYMENT_NOTIFY_BASE_URL = config('PAYMENT_NOTIFY_BASE_URL', default='')      # ex. https://api.exemple.ci/handy
+# Orange Money — Web Payment (portail développeur Orange). OM_API_BASE : https://api.orange.com
+OM_API_BASE = config('OM_API_BASE', default='https://api.orange.com')
+OM_COUNTRY = config('OM_COUNTRY', default='ci')
+OM_CURRENCY = config('OM_CURRENCY', default='XOF')                            # « OUV » en bac à sable
+OM_CLIENT_ID = config('OM_CLIENT_ID', default='')
+OM_CLIENT_SECRET = config('OM_CLIENT_SECRET', default='')
+OM_MERCHANT_KEY = config('OM_MERCHANT_KEY', default='')
+# MTN MoMo — API Collection (portail MTN MoMo Developer). Bac à sable : https://sandbox.momodeveloper.mtn.com
+MTN_MOMO_BASE_URL = config('MTN_MOMO_BASE_URL', default='https://sandbox.momodeveloper.mtn.com')
+MTN_MOMO_TARGET_ENV = config('MTN_MOMO_TARGET_ENV', default='sandbox')       # sandbox | mtnivorycoast (production)
+MTN_MOMO_CURRENCY = config('MTN_MOMO_CURRENCY', default='XOF')                # « EUR » en bac à sable
+MTN_MOMO_SUBSCRIPTION_KEY = config('MTN_MOMO_SUBSCRIPTION_KEY', default='')
+MTN_MOMO_API_USER = config('MTN_MOMO_API_USER', default='')
+MTN_MOMO_API_KEY = config('MTN_MOMO_API_KEY', default='')
+# Carte — Stripe (clé secrète sk_test_… en essai, sk_live_… en production). STRIPE_WEBHOOK_SECRET : secret « whsec_… » du point de
+# terminaison Stripe (en-tête Stripe-Signature).
+STRIPE_API_BASE = config('STRIPE_API_BASE', default='https://api.stripe.com')
+STRIPE_SECRET_KEY = config('STRIPE_SECRET_KEY', default='')
+STRIPE_CURRENCY = config('STRIPE_CURRENCY', default='xof')
 
 # === SENTRY ===
 import sentry_sdk

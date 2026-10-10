@@ -64,7 +64,7 @@ def integrations_status() -> dict:
         "sms": _sms_status(),
         "email": {"backend": settings.EMAIL_BACKEND.rsplit(".", 2)[-2] if "." in settings.EMAIL_BACKEND else settings.EMAIL_BACKEND,
                   "real_delivery": "console" not in settings.EMAIL_BACKEND and "locmem" not in settings.EMAIL_BACKEND},
-        # Les fournisseurs Orange Money, MTN et carte ne sont pas branchés : seul « espèces » (à confirmer à la main) existe.
+        # Disponible = tous les identifiants du prestataire sont configurés (jamais leur valeur) ; « espèces » est manuel.
         "payments": {m: _provider_available(m) for m in ("om", "mtn", "card", "cash")},
         "routing_osrm": {"configured": bool(getattr(settings, "ROUTING_OSRM_URL", ""))},
         "object_storage": {"enabled": bool(getattr(settings, "MINIO_ENABLED", False))},

@@ -98,16 +98,17 @@ def test_webhook_non_signe_rejete(api_client):
 
 @pytest.mark.django_db
 @override_settings(PAYMENT_OM_WEBHOOK_SECRET="testsecret")
-def test_webhook_signe_accepte(api_client):
+def test_webhook_signe_sans_prestataire_configure_ne_valide_rien(api_client):
+    """Un webhook correctement signé n'est qu'un déclencheur : sans prestataire à interroger (vérification serveur-à-serveur),
+    aucun encaissement n'est reconnu. Le parcours complet vérifié est dans test_payments_providers.py."""
     p = _payment()
     url = reverse("payment-webhook", kwargs={"provider": "om"})
     body = json.dumps({"provider_ref": p.transaction_id, "status": "completed"}).encode()
     sig = hmac.new(b"testsecret", body, hashlib.sha256).hexdigest()
     res = api_client.post(url, body, content_type="application/json", HTTP_X_WEBHOOK_SIGNATURE=sig)
-    assert res.status_code == 200, res.content
+    assert res.status_code == 503, res.content
     p.refresh_from_db()
-    # confirmation fournisseur -> séquestre (escrow), is_paid vrai
-    assert p.status == "held" and p.is_paid is True
+    assert p.status == "pending" and p.is_paid is False
 
 
 @pytest.mark.django_db

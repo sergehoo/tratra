@@ -7,11 +7,12 @@ import { useBoList, useDebounced } from "@/lib/useBoList";
 import { DateRange, FilterBar, FilterSelect, KV, ListView, ReasonModal, SearchBox, Section, STATUS_FR, Tag, dt, useNotice, useTabParam } from "../_components/ui";
 
 interface Summary { gmv: string; commission_earned: string; commission_in_escrow: string; escrow_held: string; refunded: string; payouts: Record<string, { count: number; amount: string }>; by_status: Record<string, { count: number; amount: string }> }
-interface Payment { id: number; booking_id: number; client: string; artisan: string; amount: string; platform_fee: string; net: string; method: string; status: string; refunded_amount: string; created_at: string; payment_date: string | null }
+interface Payment { id: number; booking_id: number; client: string; artisan: string; amount: string; platform_fee: string; net: string; method: string; status: string; refunded_amount: string; created_at: string; payment_date: string | null; verification: "provider_verified" | "unverified" | "manual"; provider_verified_at: string | null; provider_checked_at: string | null; provider_status: string }
 interface PaymentDetail extends Payment { booking_status: string; discount: string; can_refund: boolean; logs: { previous_status: string; new_status: string; at: string; notes: string }[]; history: { action: string; at: string; by: string; reason: string }[] }
 interface Payout { id: number; artisan_id: number; artisan: string; amount: string; status: string; requested_at: string; processed_at: string | null; notes: string }
 interface Invoice { id: number; number: string; booking_id: number; client: string; artisan: string; amount: string; fee: string; total: string }
 
+const VERIFICATION_FR: Record<string, string> = { provider_verified: "Vérifié auprès du prestataire", unverified: "Non vérifié", manual: "Confirmation manuelle (sans prestataire)" };
 const METHOD_FR: Record<string, string> = { card: "Carte", transfer: "Virement", cash: "Espèces", check: "Chèque", om: "Orange Money", mtn: "MTN MoMo", moov: "Moov Money", wave: "Wave" };
 
 function PaymentPanel({ id, onClose, onChanged }: { id: number | null; onClose: () => void; onChanged: () => void }) {
@@ -32,6 +33,8 @@ function PaymentPanel({ id, onClose, onChanged }: { id: number | null; onClose: 
         {d ? (
           <div className="space-y-5">
             <KV items={[["Statut", <Tag key="s" value={d.status} label={STATUS_FR[d.status]} />], ["Moyen", METHOD_FR[d.method] ?? d.method], ["Montant", moneyLabel(d.amount)], ["Commission", moneyLabel(d.platform_fee)], ["Net artisan", moneyLabel(d.net)],
+              ["Preuve de l’encaissement", d.provider_verified_at ? `${VERIFICATION_FR[d.verification]} · ${dt(d.provider_verified_at)}` : VERIFICATION_FR[d.verification] ?? d.verification],
+              ...(d.provider_status ? [["Dernier statut du prestataire", d.provider_status] as [string, string]] : []),
               ["Remboursé", moneyLabel(d.refunded_amount)], ["Remise", moneyLabel(d.discount)], ["Client", d.client], ["Artisan", d.artisan], ["Statut de la réservation", STATUS_FR[d.booking_status] ?? d.booking_status]]} />
             <div><h3 className="mb-1.5 text-sm font-bold text-ink">Journal du paiement</h3>
               <ul className="divide-y divide-lineSoft text-sm">{d.logs.map((l, i) => <li key={i} className="py-1.5">{STATUS_FR[l.previous_status] ?? l.previous_status} → <strong>{STATUS_FR[l.new_status] ?? l.new_status}</strong> · {dt(l.at)}{l.notes ? <span className="block text-inkSoft">{l.notes}</span> : null}</li>)}</ul></div>

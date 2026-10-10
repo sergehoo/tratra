@@ -184,7 +184,10 @@ def _payment_row(p: Payment) -> dict:
     b = p.booking
     return {"id": p.pk, "booking_id": p.booking_id, "client": public_name(b.client), "artisan": public_name(b.handyman), "amount": _money(p.amount),
             "platform_fee": _money(p.platform_fee), "net": _net(p), "method": p.method, "status": p.status, "refunded_amount": _money(p.refunded_amount),
-            "currency": p.currency, "created_at": p.created_at, "payment_date": p.payment_date}
+            "currency": p.currency, "created_at": p.created_at, "payment_date": p.payment_date,
+            # Preuve de l'encaissement : vérifié auprès du prestataire (date) ou non ; jamais de donnée de session du prestataire.
+            "provider_verified_at": p.provider_verified_at, "provider_checked_at": p.provider_checked_at, "provider_status": p.provider_status,
+            "verification": "provider_verified" if p.provider_verified_at else ("unverified" if p.method in Payment.PROVIDER_VERIFIED_METHODS else "manual")}
 
 
 class FinanceSummary(BOView):

@@ -697,6 +697,13 @@ class Payment(models.Model):
     refunded_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)  # montant remboursé (partiel possible)
     coupon = models.ForeignKey('Coupon', on_delete=models.SET_NULL, null=True, blank=True, related_name='payments')
     discount = models.DecimalField(max_digits=10, decimal_places=2, default=0)  # réduction appliquée
+    # Vérification serveur-à-serveur auprès du prestataire (voir handy/services/settlement.py). `provider_verified_at` n'est posé
+    # QUE par ce service après un appel au prestataire dont montant, devise et référence concordent : sans elle, un paiement par
+    # prestataire ne peut pas passer en séquestre. `provider_session` : données de session du prestataire (jamais exposées).
+    provider_verified_at = models.DateTimeField(blank=True, null=True)
+    provider_checked_at = models.DateTimeField(blank=True, null=True)
+    provider_status = models.CharField(max_length=40, blank=True, default='')
+    provider_session = models.JSONField(default=dict, blank=True)
 
     payment_date = models.DateTimeField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
@@ -732,9 +739,17 @@ class Payment(models.Model):
                 f"Transition paiement invalide: {self.status} -> {new_status}."
             )
 
+    # Méthodes dont l'encaissement doit être vérifié auprès d'un prestataire avant toute mise sous séquestre.
+    PROVIDER_VERIFIED_METHODS = ('om', 'mtn', 'card', 'moov', 'wave')
+
     @transaction.atomic
     def mark_held(self, note: str = "provider confirmed"):
-        """Encaissement confirmé par le fournisseur -> fonds placés en séquestre."""
+        """Encaissement confirmé par le fournisseur -> fonds placés en séquestre.
+
+        Invariant : un paiement par prestataire ne passe JAMAIS sous séquestre sans `provider_verified_at` (vérification
+        serveur-à-serveur) — ni un webhook, ni un clic, ni un script ne peut déclarer un encaissement qui n'a pas eu lieu."""
+        if self.method in self.PROVIDER_VERIFIED_METHODS and not self.provider_verified_at:
+            raise ValidationError("Encaissement non vérifié auprès du prestataire : mise sous séquestre refusée.")
         self._check('held')
         self._set_status('held', note)
         return self

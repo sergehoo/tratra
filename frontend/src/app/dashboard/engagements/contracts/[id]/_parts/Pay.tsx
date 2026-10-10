@@ -161,6 +161,7 @@ function PaymentRow({ p, c, onDone, onContest }: { p: Payment; c: ContractDetail
         <Badge tone={tone}>{label}</Badge>
       </div>
       <p className="mt-1 text-xs text-ash">Déclaré par {p.mine ? "vous" : p.declared_by_role === "principal" ? c.principal.name : c.worker.name} · versé le {dateFr(p.paid_on)}{p.reference ? ` · réf. ${p.reference}` : ""}</p>
+      {p.status === "confirmed" && p.trust?.note ? <p className="mt-1 text-xs text-ash">{p.trust.note}</p> : null}
       {p.status === "rejected" && p.rejection_reason ? <p className="mt-1 text-xs text-dangerInk">Motif de contestation : {p.rejection_reason}</p> : null}
       {p.evidence ? <div className="mt-1"><EvidenceLink e={p.evidence} /></div> : null}
       {p.status === "declared" && p.mine ? <p className="mt-1 text-xs text-ash">En attente de confirmation de l’autre partie : un paiement ne se confirme jamais soi-même.</p> : null}

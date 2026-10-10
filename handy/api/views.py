@@ -1,10 +1,12 @@
 # handy/api/views.py
 import hashlib
 import hmac
+import json
 import logging
 import math
 import re
 import secrets
+import time
 from datetime import timedelta
 from decimal import Decimal, InvalidOperation
 from math import radians, cos, sqrt, sin, asin
@@ -1027,6 +1029,29 @@ class PaymentViewSet(OwnerScopedQuerysetMixin, viewsets.ReadOnlyModelViewSet):
     filterset_fields = ["status", "method"]
     ordering = ["-created_at"]
     pagination_class = DefaultPageNumberPagination
+    throttle_scope = None      # renseigné par l'action `refresh` (limite des appels aux prestataires)
+
+    @extend_schema(request=None, responses=PaymentSerializer, tags=["Paiements"],
+                   summary="Vérifier l'état réel du paiement auprès du prestataire")
+    @action(detail=True, methods=["post"], url_path="refresh", throttle_scope="payment_refresh")
+    def refresh(self, request, pk=None):
+        """Retour du client après le paiement (ou « j'ai payé ») : le serveur interroge LUI-MÊME le prestataire.
+
+        Aucune donnée du client n'est crue : seul le résultat de la vérification serveur-à-serveur change l'état. Sans
+        prestataire configuré ou joignable : 503, rien ne change."""
+        from handy.services import settlement
+        from handy.services.gateway import PROVIDER_METHODS, PaymentProviderError, PaymentProviderUnavailable
+
+        payment = self.get_object()
+        if payment.method not in PROVIDER_METHODS:
+            return Response({"detail": "Ce paiement ne passe pas par un prestataire : il se confirme manuellement."}, status=status.HTTP_400_BAD_REQUEST)
+        if payment.status == "pending" and payment.transaction_id:
+            try:
+                settlement.settle(payment.pk, source="client")
+            except (PaymentProviderUnavailable, PaymentProviderError) as exc:
+                return Response({"code": exc.code, "detail": "Vérification impossible pour le moment."}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+            payment.refresh_from_db()
+        return Response(self.get_serializer(payment).data)
 
 
 class PaymentLogViewSet(OwnerScopedQuerysetMixin, viewsets.ReadOnlyModelViewSet):
@@ -1454,7 +1479,7 @@ def payment_initiate(request):
     A method without a configured live provider returns 503; no placeholder
     transaction or predictable provider reference is created.
     """
-    from handy.services.gateway import PaymentProviderUnavailable
+    from handy.services.gateway import PaymentProviderError, PaymentProviderUnavailable
 
     ser = PaymentInitSerializer(data=request.data, context={"request": request})
     ser.is_valid(raise_exception=True)
@@ -1465,6 +1490,9 @@ def payment_initiate(request):
             {"code": exc.code, "detail": str(exc), "method": exc.method},
             status=status.HTTP_503_SERVICE_UNAVAILABLE,
         )
+    except PaymentProviderError as exc:
+        # Prestataire configuré mais en défaut : aucune ligne de paiement n'a été créée, le client peut réessayer.
+        return Response({"code": exc.code, "detail": str(exc), "method": exc.method}, status=status.HTTP_502_BAD_GATEWAY)
     return Response(payload, status=status.HTTP_201_CREATED)
 
 
@@ -1747,12 +1775,20 @@ class SubscriptionViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
 
 # ---- Webhook Paiement (idempotent + signé) ----
 class PaymentWebhook(APIView):
+    """Déclencheur de règlement : le webhook IDENTIFIE le paiement, il n'en décide jamais l'issue.
+
+    Après authentification (HMAC du corps brut, ou signature Stripe pour la carte), le serveur interroge lui-même le prestataire
+    (`handy.services.settlement.settle`) et n'applique que ce qu'il y lit : statut, montant, devise et référence. Un webhook
+    forgé, rejoué ou contradictoire ne peut donc rien valider ; sans prestataire configuré ou joignable, rien ne change (503)."""
     authentication_classes = []
-    permission_classes = []  # pas d'auth utilisateur : on authentifie via signature HMAC
+    permission_classes = []  # pas d'auth utilisateur : on authentifie via signature
     throttle_scope = "webhook"
 
     # En-tête portant la signature HMAC-SHA256 hex du corps brut.
     SIGNATURE_HEADER = "HTTP_X_WEBHOOK_SIGNATURE"
+    STRIPE_HEADER = "HTTP_STRIPE_SIGNATURE"
+    STRIPE_TOLERANCE_S = 300
+    STRIPE_EVENTS = {"payment_intent.succeeded", "payment_intent.payment_failed", "payment_intent.canceled", "charge.refunded"}
 
     PROVIDER_METHODS = {"om", "mtn", "card"}
     PROVIDER_STATUSES = {"completed", "failed", "refunded"}
@@ -1775,58 +1811,82 @@ class PaymentWebhook(APIView):
         ).hexdigest()
         return hmac.compare_digest(expected, provided)
 
+    def _stripe_reference(self, request):
+        """Référence (intention de paiement) d'un événement Stripe correctement signé ; None si signature invalide.
+        Retourne "" pour un événement authentique mais sans effet sur un paiement (ignoré)."""
+        secret = getattr(settings, "DJSTRIPE_WEBHOOK_SECRET", "") or ""
+        header = request.META.get(self.STRIPE_HEADER, "")
+        if not secret or not header:
+            return None
+        parts = dict(item.split("=", 1) for item in header.split(",") if "=" in item)
+        stamp = parts.get("t", "")
+        try:
+            if abs(time.time() - int(stamp)) > self.STRIPE_TOLERANCE_S:
+                return None
+        except ValueError:
+            return None
+        signed = f"{stamp}.".encode("utf-8") + request.body
+        expected = hmac.new(secret.encode("utf-8"), signed, hashlib.sha256).hexdigest()
+        candidates = [v for k, v in (item.split("=", 1) for item in header.split(",") if "=" in item) if k == "v1"]
+        if not any(hmac.compare_digest(expected, c) for c in candidates):
+            return None
+        try:
+            event = json.loads(request.body.decode("utf-8"))
+            obj = event["data"]["object"]
+        except (ValueError, KeyError, TypeError):
+            return ""
+        if event.get("type") not in self.STRIPE_EVENTS or not isinstance(obj, dict):
+            return ""
+        return str(obj.get("id") if obj.get("object") == "payment_intent" else obj.get("payment_intent") or "")
+
     @extend_schema(request=OpenApiTypes.OBJECT, responses=OpenApiTypes.OBJECT,
-                   tags=["Paiements"], summary="Webhook de paiement (signé HMAC)")
+                   tags=["Paiements"], summary="Webhook de paiement (signé) — déclenche une vérification serveur-à-serveur")
     def post(self, request, provider):
         """
         Provider path: 'om' | 'mtn' | 'card'
-        Header: X-Webhook-Signature: <hex HMAC-SHA256(raw_body, PAYMENT_WEBHOOK_SECRET)>
-        Body: { "provider_ref": "...", "status": "completed|failed|refunded" }
+        Header: X-Webhook-Signature: <hex HMAC-SHA256(raw_body, secret du prestataire)>  — ou Stripe-Signature (carte).
+        Body: { "provider_ref": "...", "status": "completed|failed|refunded" }  (le statut annoncé n'est PAS cru : il est vérifié)
         """
+        from handy.services import settlement
+        from handy.services.gateway import PaymentProviderError, PaymentProviderUnavailable
+
         provider = provider.lower()
         if provider not in self.PROVIDER_METHODS:
             return Response({"detail": "prestataire invalide."}, status=status.HTTP_400_BAD_REQUEST)
 
-        if not self._signature_ok(request, provider):
-            return Response({"detail": "Signature invalide."},
-                            status=status.HTTP_401_UNAUTHORIZED)
-
-        data = request.data
-        provider_ref = data.get("provider_ref")
-        new_status = data.get("status")
-
-        if not provider_ref or not new_status:
-            return Response({"detail": "provider_ref et status requis."},
-                            status=status.HTTP_400_BAD_REQUEST)
-
-        if new_status not in self.PROVIDER_STATUSES:
-            return Response({"detail": "status invalide."},
-                            status=status.HTTP_400_BAD_REQUEST)
-
-        with transaction.atomic():
-            p = get_object_or_404(
-                Payment.objects.select_for_update(), transaction_id=provider_ref
-            )
-            if p.method != provider:
-                return Response({"detail": "Référence de paiement incompatible avec ce prestataire."},
+        if provider == "card" and request.META.get(self.STRIPE_HEADER):
+            provider_ref = self._stripe_reference(request)
+            if provider_ref is None:
+                return Response({"detail": "Signature invalide."}, status=status.HTTP_401_UNAUTHORIZED)
+            if not provider_ref:
+                return Response({"ok": True, "ignored": True}, status=status.HTTP_200_OK)
+        else:
+            if not self._signature_ok(request, provider):
+                return Response({"detail": "Signature invalide."},
+                                status=status.HTTP_401_UNAUTHORIZED)
+            data = request.data
+            provider_ref = data.get("provider_ref")
+            new_status = data.get("status")
+            if not provider_ref or not new_status:
+                return Response({"detail": "provider_ref et status requis."},
                                 status=status.HTTP_400_BAD_REQUEST)
-            try:
-                # Le fournisseur ne fait que confirmer l'encaissement ou un remboursement.
-                # La LIBÉRATION (held -> released) est interne (à la complétion de la mission).
-                if new_status == 'completed':
-                    if p.status == 'pending':
-                        p.mark_held(note=f"prov={provider}")
-                elif new_status == 'refunded':
-                    if p.status in ('pending', 'held', 'completed'):
-                        p.refund(note=f"prov={provider}")
-                elif new_status == 'failed':
-                    if p.status == 'pending':
-                        p._set_status('failed', note=f"prov={provider}")
-            except DjangoValidationError as e:
-                msg = e.messages[0] if getattr(e, "messages", None) else str(e)
-                return Response({"detail": msg}, status=status.HTTP_400_BAD_REQUEST)
+            if new_status not in self.PROVIDER_STATUSES:
+                return Response({"detail": "status invalide."}, status=status.HTTP_400_BAD_REQUEST)
 
-        return Response({"ok": True, "status": p.status}, status=status.HTTP_200_OK)
+        p = get_object_or_404(Payment, transaction_id=provider_ref)
+        if p.method != provider:
+            return Response({"detail": "Référence de paiement incompatible avec ce prestataire."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        try:
+            result = settlement.settle(p.pk, source="webhook")
+        except (PaymentProviderUnavailable, PaymentProviderError) as exc:
+            # Rien n'a changé : le prestataire (ou la réconciliation) rejouera.
+            return Response({"code": exc.code, "detail": "Vérification impossible pour le moment."},
+                            status=status.HTTP_503_SERVICE_UNAVAILABLE)
+        except DjangoValidationError as e:
+            msg = e.messages[0] if getattr(e, "messages", None) else str(e)
+            return Response({"detail": msg}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({"ok": True, "status": result["status"], "verified": result.get("verified", False)}, status=status.HTTP_200_OK)
 
 class HeroSlideViewSet(viewsets.ReadOnlyModelViewSet):
     """

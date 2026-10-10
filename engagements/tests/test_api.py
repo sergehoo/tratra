@@ -125,6 +125,7 @@ def test_full_journey_posting_to_confirmed_payment_over_http(monkeypatch):
     assert declared.status_code == 201, declared.data
     pid_pay = declared.data["id"]
     assert declared.data["status"] == "declared" and declared.data["evidence"]["url"].endswith(f"/evidence/payment/{pid_pay}/")
+    assert declared.data["trust"]["level"] == "declared" and declared.data["trust"]["verified"] is False         # déclaré ≠ confirmé ≠ vérifié
     assert o.post(BASE + f"payments/{pid_pay}/respond/", {"confirm": True}, format="json").status_code == 403           # jamais confirmé par son auteur
     assert s.post(BASE + f"payments/{pid_pay}/respond/", {"confirm": True}, format="json").status_code == 404
     assert any(t["kind"] == "confirm_payment" for t in w.get(BASE + "me/overview/").data["todo"])
@@ -134,6 +135,7 @@ def test_full_journey_posting_to_confirmed_payment_over_http(monkeypatch):
     assert s.get(declared.data["evidence"]["url"]).status_code == 404 and client().get(declared.data["evidence"]["url"]).status_code == 401
     done = w.post(BASE + f"payments/{pid_pay}/respond/", {"confirm": True}, format="json")
     assert done.status_code == 200 and done.data["status"] == "confirmed"
+    assert done.data["trust"]["level"] == "confirmed" and done.data["trust"]["verified"] is False and "ne vérifie pas" in done.data["trust"]["note"]   # jamais « vérifié » sans prestataire
     inst = o.get(BASE + f"installments/{due['id']}/").data
     assert inst["status"] == "paid" and inst["balance"] == "0.00" and len(inst["payments"]) == 1 and not clean_of_sensitive_keys(inst)
     assert Notification.objects.filter(user=owner, notification_type="payment_confirmed").exists()

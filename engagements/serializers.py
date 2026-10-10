@@ -155,9 +155,22 @@ def line(l: InstallmentLine, user, contract_: EngagementContract) -> dict:
             "can_respond": l.status == "proposed" and role is not None and role != proposer, "evidence": evidence_ref("line", l), "created_at": l.created_at, "responded_at": l.responded_at}
 
 
+def payment_trust(p: InstallmentPayment) -> dict:
+    """Niveau de preuve d'un paiement entre les parties : « déclaré » (une partie l'affirme), « confirmé » (les deux parties
+    concordent) ou « contesté ». JAMAIS « vérifié » ici : aucun encaissement ne transite par Tratra et aucun prestataire de
+    paiement n'intervient dans un engagement — l'affirmer serait faux. (Un encaissement « vérifié » n'existe que pour les
+    réservations réglées par un prestataire : voir handy/services/settlement.py.)"""
+    if p.status == "confirmed":
+        return {"level": "confirmed", "verified": False,
+                "note": "Confirmé par les deux parties. Tratra ne vérifie pas ce paiement auprès d'un prestataire de paiement : il n'a pas transité par Tratra."}
+    if p.status == "rejected":
+        return {"level": "contested", "verified": False, "note": "Contesté : ce paiement n'est pas pris en compte."}
+    return {"level": "declared", "verified": False, "note": "Déclaré par une partie : il n'est pris en compte qu'une fois confirmé par l'autre."}
+
+
 def payment(p: InstallmentPayment, user, contract_: EngagementContract) -> dict:
     role = party_of(contract_, user)
-    return {"id": p.id, "amount": money(p.amount), "method": p.method, "reference": p.reference, "paid_on": p.paid_on, "is_advance": p.is_advance, "status": p.status,
+    return {"trust": payment_trust(p), "id": p.id, "amount": money(p.amount), "method": p.method, "reference": p.reference, "paid_on": p.paid_on, "is_advance": p.is_advance, "status": p.status,
             "declared_by_role": p.declared_by_role, "mine": p.declared_by_id == user.id, "can_respond": p.status == "declared" and role is not None and role != p.declared_by_role,
             "rejection_reason": p.rejection_reason, "evidence": evidence_ref("payment", p), "declared_at": p.declared_at, "responded_at": p.responded_at}
 
