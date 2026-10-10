@@ -7,13 +7,21 @@
 
 | Niveau | Qui l'établit | Où |
 |---|---|---|
-| **Déclaré** | une partie affirme avoir payé / reçu | engagements (`InstallmentPayment.status = declared`) |
-| **Confirmé** | l'**autre** partie confirme (jamais l'auteur) | engagements (`confirmed`) — affiché « Tratra ne vérifie pas ce paiement » |
+| **Déclaré** | une partie affirme avoir payé / reçu | engagements (`InstallmentPayment.status = declared`) ; **espèces d'une réservation** (`CashDeclaration.status = declared`) |
+| **Confirmé** | l'**autre** partie confirme (jamais l'auteur) | engagements (`confirmed`) — affiché « Tratra ne vérifie pas ce paiement » ; espèces (`confirmed`) — affiché « pas un encaissement vérifié par un prestataire » |
 | **Vérifié** | **le prestataire de paiement**, interrogé par le serveur Tratra | réservations (`Payment.provider_verified_at`) |
 
 * « Vérifié » n'existe que pour un encaissement passé par un prestataire configuré. Les paiements entre les parties d'un engagement
   (virement, espèces, Mobile Money direct) ne transitent pas par Tratra : ils restent **déclarés puis confirmés**, jamais « vérifiés ».
-* **Espèces** : mode manuel conservé tel quel — le paiement reste `pending` tant qu'une confirmation humaine réelle n'existe pas.
+* **Espèces d'une réservation** (`handy/services/cash.py`, API `bookings/{id}/payment/…`) :
+  une partie (client **ou** artisan) *déclare* un montant remis en main propre (date, précision, **justificatif facultatif** — image réencodée ou PDF simple) ;
+  l'**autre** partie *confirme* ou *conteste* (motif obligatoire) ; chaque déclaration, confirmation et contestation reste dans l'**historique**.
+  Disponible une fois la prestation commencée (`in_progress`/`completed`) ; montant plafonné au solde convenu, déclarations partielles possibles ; doublons refusés,
+  `Idempotency-Key` honorée. La confirmation **ne crée aucun gain retirable**, ne touche pas au séquestre (`Payment` reste `pending`, `provider_verified_at` vide) et
+  l'API renvoie `verification: "manual"` — jamais `provider_verified`. Seules les deux parties lisent le détail et le justificatif (404 pour toute autre personne, personnel
+  compris) ; le Back-Office voit l'état et l'historique en **lecture seule**, sans justificatif, et ne confirme jamais. Notifications `cash_declared` / `cash_confirmed` /
+  `cash_contested` (catégorie « paiement », lien vers la réservation ou la mission).
+  Non traité (décision métier) : la **commission** de la plateforme sur un paiement en espèces n'est pas recouvrée par Tratra (aucun fonds ne transite) — à définir.
 
 ## Règles de sécurité (testées : `handy/test_payments_providers.py`)
 

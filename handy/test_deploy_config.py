@@ -190,3 +190,33 @@ def test_production_relaxation_must_be_explicit_and_is_reported_by_the_deploy_ch
     check = ("import django; django.setup(); from backoffice.checks import admin_security; print(sorted(w.id for w in admin_security(None)))")
     r = _load_prod_settings(code=check, PUBLIC_WEB_URL="https://app.example.test", BACKOFFICE_MFA_REQUIRED="0", LEGACY_STAFF_BYPASS="1")
     assert "tratra.W001" in r.stdout and "tratra.W002" in r.stdout
+
+
+# Variables lues par les réglages mais volontairement ABSENTES du gabarit : propres au conteneur ou dangereuses en staging.
+UNDOCUMENTED_ON_PURPOSE = {
+    "GDAL_LIBRARY_PATH", "GEOS_LIBRARY_PATH",     # chemins des bibliothèques SIG : posés par l'image Docker
+    "CORS_ALLOW_ALL_ORIGINS",                     # ne doit JAMAIS être activé hors développement
+    "ENABLE_SSL_HARDENING",                       # réservé au poste de développement
+}
+
+
+def test_every_setting_read_from_the_environment_is_documented_in_the_staging_env_example():
+    """Aucune variable de réglage (Firebase, SMS, paiements, domaines, sécurité, stockage…) ne reste « secrète » : toute variable lue par
+    les réglages ou les modules d'envoi figure dans `.env.staging.example`, active (`NOM=`) ou facultative (`# NOM=`)."""
+    example = (ROOT / ".env.staging.example").read_text(encoding="utf-8")
+    documented = set(re.findall(r"^#?\s*([A-Za-z][A-Za-z0-9_]{2,})=", example, re.M))
+    read = set()
+    for name in ("tratra/settings/base.py", "tratra/settings/prod.py", "handy/sms.py", "handy/push.py", "handy/services/gateway.py"):
+        text = (ROOT / name).read_text(encoding="utf-8")
+        read |= set(re.findall(r"(?:config|env_bool|os\.getenv|os\.environ\.get|env)\(\s*['\"]([A-Z][A-Z0-9_]+)['\"]", text))
+    missing = sorted(read - documented - UNDOCUMENTED_ON_PURPOSE)
+    assert not missing, f"variables d'environnement lues mais absentes de .env.staging.example : {missing}"
+
+
+def test_images_are_built_on_a_supported_debian_release():
+    """Debian 11 « bullseye » n'est plus maintenu : son miroir de sécurité retire les paquets (404) et l'image ne se construit plus. Les
+    Dockerfile doivent partir d'une version supportée (bookworm ou plus récente, ou alpine)."""
+    for name in ("Dockerfile", "frontend/Dockerfile"):
+        for line in (ROOT / name).read_text(encoding="utf-8").splitlines():
+            if line.strip().upper().startswith("FROM "):
+                assert not re.search(r"bullseye|buster|stretch|jessie", line, re.I), f"{name} : image de base en fin de vie — {line.strip()}"

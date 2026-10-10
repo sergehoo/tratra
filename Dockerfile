@@ -1,5 +1,5 @@
 # ===== Base Python + deps GIS =====
-FROM python:3.12-bullseye AS base
+FROM python:3.12-bookworm AS base
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1
