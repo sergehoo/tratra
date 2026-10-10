@@ -75,6 +75,7 @@ def test_full_journey_posting_to_confirmed_payment_over_http(monkeypatch):
     assert o.post(BASE + f"postings/{pid}/publish/").data["status"] == "open"
     listing = w.get(BASE + "postings/?city=abidjan").data
     assert listing["count"] == 1 and listing["results"][0]["can_apply"] is True and not clean_of_sensitive_keys(listing)
+    assert listing["results"][0]["schedule"] == WEEK                                              # le planning figure dans la liste (jamais « aucun planning » à tort)
     # 2. Candidature, choix, contrat.
     app = w.post(BASE + f"postings/{pid}/apply/", {"message": "Dix ans d'expérience.", "proposed_amount": "175000"}, format="json")
     assert app.status_code == 201
@@ -113,6 +114,7 @@ def test_full_journey_posting_to_confirmed_payment_over_http(monkeypatch):
     insts = o.get(BASE + f"contracts/{cid}/installments/").data["results"]
     assert len(insts) == 4 and insts[0]["status"] == "scheduled" and insts[0]["total"] == "175000.00" and insts[0]["balance"] == "175000.00"
     due = insts[0]
+    assert o.get(BASE + f"installments/{due['id']}/").data["advance_remaining"] == "87500.00"       # période en cours : avance plafonnée à 50 %
     day = due["due_date"] if hasattr(due["due_date"], "year") else timezone.datetime.fromisoformat(due["due_date"]).date()
     tasks.run(day)
     monkeypatch.setattr(timezone, "localdate", lambda *a, **k: day)                              # on avance dans le temps : l'échéance est atteinte
@@ -216,3 +218,14 @@ def test_worker_search_returns_only_verified_professionals_with_public_names_and
     rows = c.get(BASE + "workers/?q=mar").data["results"]
     assert [r["name"] for r in rows] == ["Marie K."] and set(rows[0]) == {"id", "name", "commune"}   # jamais de téléphone ni d'e-mail ; non vérifié exclu
     assert client(verified).get(BASE + "workers/?q=marie").data["results"] == []                    # on ne se propose pas soi-même
+
+
+def test_browser_preflight_allows_the_idempotency_and_version_headers_and_exposes_the_replay_marker():
+    """Sans ces en-têtes dans la liste CORS, un navigateur refuse toute écriture idempotente du web (échec silencieux « service injoignable »)."""
+    c = APIClient()
+    r = c.options(BASE + "postings/", HTTP_ORIGIN="http://localhost:3000", HTTP_ACCESS_CONTROL_REQUEST_METHOD="POST",
+                  HTTP_ACCESS_CONTROL_REQUEST_HEADERS="content-type,authorization,idempotency-key,if-match")
+    allowed = [h.strip() for h in r["access-control-allow-headers"].split(",")]
+    assert r.status_code == 200 and {"idempotency-key", "if-match", "authorization", "content-type"} <= set(allowed)
+    ok = c.get(BASE + "rules/", HTTP_ORIGIN="http://localhost:3000")
+    assert "Idempotent-Replay" in ok["access-control-expose-headers"]                                  # exposé sur les réponses CORS (même refusées)

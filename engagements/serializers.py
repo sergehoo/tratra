@@ -3,6 +3,7 @@ partie : seul le nom public est exposé. Les pièces justificatives ne sont jama
 from datetime import timedelta
 from typing import Optional
 
+from django.db.models import Sum
 from django.urls import reverse
 from django.utils import timezone
 
@@ -60,12 +61,12 @@ def application(a: EngagementApplication, user, *, with_applicant: bool) -> dict
 def posting(p: EngagementPosting, user, *, detail: bool = False) -> dict:
     mine = bool(user and posting_side(p, user))
     out = {"id": p.id, "title": p.title, "category": {"id": p.category_id, "name": p.category.name}, "mission_type": p.mission_type, "work_relationship": p.work_relationship,
-           "city": p.city, "start_date": p.start_date, "end_date": p.end_date, "hours_per_week": money(p.hours_per_week), "amount": money(p.amount), "period": p.period, "currency": p.currency,
+           "city": p.city, "start_date": p.start_date, "end_date": p.end_date, "schedule": p.schedule, "hours_per_week": money(p.hours_per_week), "amount": money(p.amount), "period": p.period, "currency": p.currency,
            "status": p.status, "application_deadline": p.application_deadline, "published_at": p.published_at, "created_at": p.created_at, "version": p.version,
            "publisher": person(p.publisher), "organization": ({"id": p.organization_id, "name": p.organization.name} if p.organization_id else None), "mine": mine,
            "applications_count": p.applications.exclude(status__in=("withdrawn",)).count() if mine else None}
     if detail:
-        out.update({"description": p.description, "conditions": p.conditions, "schedule": p.schedule, "employment_notice_ack": p.employment_notice_ack,
+        out.update({"description": p.description, "conditions": p.conditions, "employment_notice_ack": p.employment_notice_ack,
                     "location_note": p.location_note if mine else ""})
         if p.work_relationship == "employment":
             out["legal_notice"] = ("Un emploi salarié relève du droit du travail applicable. Tratra n'est pas un conseil juridique et ne calcule ni cotisations ni impôts : "
@@ -170,6 +171,13 @@ def installment(i: ContractInstallment, user, *, detail: bool = False) -> dict:
            "platform_fee": money(i.platform_fee), "platform_fee_payer": i.platform_fee_payer, "platform_fee_status": i.platform_fee_status, "note": i.note, "closed_reason": i.closed_reason,
            "can_waive": party_of(c, user) == "worker" and i.status not in ("waived", "cancelled", "paid") and t["balance"] > 0}
     if detail:
+        # Avant la fin de la période, un paiement est une AVANCE plafonnée par la règle de la catégorie : le client l'affiche avant l'envoi.
+        advance_left = None
+        if i.base_amount is not None and timezone.localdate() <= i.period_end:
+            used = i.payments.exclude(status="rejected").filter(is_advance=True).aggregate(t=Sum("amount"))["t"] or 0
+            cap = inst_svc.q(i.base_amount * rules_mod.rules_for(c.category_id).max_advance_percent / 100)
+            advance_left = money(max(cap - used, 0))
+        out["advance_remaining"] = advance_left
         out["lines"] = [line(l, user, c) for l in i.lines.select_related("proposed_by").order_by("created_at", "id")]
         out["payments"] = [payment(p, user, c) for p in i.payments.order_by("declared_at", "id")]
     return out

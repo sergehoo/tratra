@@ -140,6 +140,12 @@ CORS_ALLOWED_ORIGINS = env_list(
     "http://localhost:3000,http://127.0.0.1:3000",
 )
 CORS_ALLOW_CREDENTIALS = True
+# En-têtes personnalisés du web : sans eux, la pré-requête du navigateur refuse toute écriture idempotente (réservations,
+# engagements) ou conditionnelle (`If-Match`). `Idempotent-Replay` est exposé pour savoir qu'une réponse a été rejouée.
+from corsheaders.defaults import default_headers  # noqa: E402
+
+CORS_ALLOW_HEADERS = (*default_headers, "idempotency-key", "if-match")
+CORS_EXPOSE_HEADERS = ["Idempotent-Replay"]
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
