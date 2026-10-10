@@ -89,6 +89,7 @@ INSTALLED_APPS = [
     'django.contrib.gis',
 
     'handy',
+    'trust',
     # Libs
     'allauth',
     'allauth.account',
@@ -408,7 +409,14 @@ INTERNAL_IPS = ['127.0.0.1']
 # === CELERY ===
 CELERY_BROKER_URL = config('REDIS_URL', default='redis://redis:6379/0')
 CELERY_RESULT_BACKEND = CELERY_BROKER_URL
-CELERY_BEAT_SCHEDULE = {}
+CELERY_BEAT_SCHEDULE = {
+    # Tratra Trust : réévaluation périodique des badges et des scores (la durée mini entre deux évaluations
+    # d'un profil est configurable dans l'administration : TrustConfig.reevaluation_hours).
+    'trust-reevaluate-profiles': {
+        'task': 'trust.tasks.reevaluate_all_profiles',
+        'schedule': 3600.0,
+    },
+}
 
 # === DJSTRIPE ===
 DJSTRIPE_WEBHOOK_SECRET = config('STRIPE_WEBHOOK_SECRET', default='')

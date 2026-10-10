@@ -105,6 +105,12 @@ class HandymanProfile(models.Model):
 
     online = models.BooleanField(default=False, db_index=True)  # dispo temps réel
 
+    # Tratra Trust — valeurs CALCULÉES par trust.engine (jamais saisies) : copie des badges actifs et du
+    # score de confiance pour les listes et la recherche. `trust_score` vaut NULL tant que rien n'est évaluable.
+    trust_score = models.PositiveSmallIntegerField(null=True, blank=True, db_index=True)
+    trust_badges = models.JSONField(default=list, blank=True)
+    trust_evaluated_at = models.DateTimeField(null=True, blank=True)
+
     class Meta:
         indexes = [
             models.Index(fields=["is_approved", "rating"]),
@@ -191,6 +197,17 @@ class HandymanProfile(models.Model):
         total = rating_pts + jobs_pts + kyc_pts + completion_pts
         return int(max(Decimal('0'), min(total, Decimal('100'))))
 
+    TRUST_FIELDS = ("trust_score", "trust_badges", "trust_evaluated_at")
+
+    def save(self, *args, **kwargs):
+        """Une sauvegarde complète n'écrit JAMAIS les champs Tratra Trust : ils appartiennent à trust.engine
+        (mise à jour ciblée) et un profil resté en mémoire ne doit pas écraser des badges plus récents."""
+        if (not args and self.pk and not self._state.adding and kwargs.get("update_fields") is None
+                and not kwargs.get("force_insert")):
+            kwargs["update_fields"] = [f.name for f in self._meta.concrete_fields
+                                       if not f.primary_key and f.name not in self.TRUST_FIELDS]
+        super().save(*args, **kwargs)
+
     def refresh_quality_score(self) -> int:
         self.quality_score = self.compute_quality_score()
         self.save(update_fields=['quality_score'])
@@ -227,6 +244,13 @@ class HandymanDocument(models.Model):
     document_type = models.CharField(max_length=50, choices=DOCUMENT_TYPES)
     file = models.FileField(upload_to=private_kyc_upload_path, storage=KycPrivateStorage())
     description = models.TextField(blank=True, null=True)
+    # Justificatif professionnel (document_type « certification ») : compétence attestée, émetteur, validité.
+    category = models.ForeignKey('ServiceCategory', on_delete=models.SET_NULL, null=True, blank=True,
+                                 related_name='certification_documents')
+    title = models.CharField(max_length=150, blank=True, default='')
+    issuer = models.CharField(max_length=150, blank=True, default='')
+    issued_on = models.DateField(null=True, blank=True)
+    expires_on = models.DateField(null=True, blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending', db_index=True)
     reviewed_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True,
                                     related_name='documents_reviewed')

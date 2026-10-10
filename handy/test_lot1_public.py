@@ -136,7 +136,7 @@ def test_featured_only_approved_active_and_no_sensitive_fields(api_client):
     assert set(card.keys()) == {
         "id", "display_name", "commune", "rating", "completed_jobs", "experience_years",
         "is_verified", "online", "photo", "user_id", "quartier", "hourly_rate", "skills",
-        "services_count"}
+        "services_count", "trust_score", "badges"}
     _assert_no_sensitive(r.content.decode())
 
 

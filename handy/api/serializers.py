@@ -112,15 +112,24 @@ class PublicArtisanMiniSerializer(serializers.ModelSerializer):
     display_name = serializers.SerializerMethodField()
     is_verified = serializers.BooleanField(source="is_approved", read_only=True)
     photo = serializers.SerializerMethodField()
+    # Tratra Trust : score expliqué (None tant que les données sont insuffisantes) et badges ACTUELS.
+    trust_score = serializers.IntegerField(read_only=True)
+    badges = serializers.SerializerMethodField()
 
     class Meta:
         model = HandymanProfile
         fields = ["id", "display_name", "commune", "rating", "completed_jobs",
-                  "experience_years", "is_verified", "online", "photo"]
+                  "experience_years", "is_verified", "online", "photo", "trust_score", "badges"]
         read_only_fields = fields
 
     def get_display_name(self, obj) -> str:
         return public_display_name(obj.user)
+
+    @extend_schema_field(OpenApiTypes.OBJECT)
+    def get_badges(self, obj):
+        from trust.models import BadgeAward
+
+        return [{"code": c, "label": BadgeAward.LABELS[c]} for c in (obj.trust_badges or []) if c in BadgeAward.LABELS]
 
     @extend_schema_field(OpenApiTypes.URI)
     def get_photo(self, obj):
@@ -932,6 +941,7 @@ class HandymanDocumentSerializer(serializers.ModelSerializer):
     class Meta:
         model = HandymanDocument
         fields = ["id", "handyman", "handyman_detail", "document_type", "file", "download_url", "description",
+                  "category", "title", "issuer", "issued_on", "expires_on",
                   "status", "reviewed_at", "rejection_reason", "uploaded_at"]
         # statut & revue posés par l'admin ; handyman par le serveur (anti-usurpation)
         read_only_fields = ["handyman", "status", "reviewed_at", "rejection_reason", "uploaded_at"]

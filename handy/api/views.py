@@ -276,6 +276,14 @@ def published_reviews():
                                  booking__handyman_id__in=publishable_user_ids())
 
 
+def _badge_param(params):
+    """?badge=EXPERT — code de badge Tratra Trust valide, sinon ignoré."""
+    from trust.models import BadgeAward
+
+    code = (params.get("badge") or "").strip().upper()
+    return code if code in BadgeAward.LABELS and code != BadgeAward.NOUVEAU else None
+
+
 def apply_public_service_filters(qs, params, *, restrict=True):
     """Filtres de recherche publics communs à /services/ et /services/nearby/.
 
@@ -305,6 +313,11 @@ def apply_public_service_filters(qs, params, *, restrict=True):
         qs = qs.filter(handyman__handyman_profile__online=True,
                        handyman__handyman_profile__is_approved=True)
 
+    badge = _badge_param(params)
+    if badge:
+        # Badges Tratra Trust ACTUELS (champ dénormalisé, tenu à jour par trust.engine).
+        qs = qs.filter(handyman__handyman_profile__trust_badges__contains=[badge])
+
     category_name = _text_param(params.get("category__name"))
     if category_name:
         # Compatibilité app mobile : filtre par nom de catégorie (insensible à la casse).
@@ -330,6 +343,7 @@ SERVICE_SORTS = {
     "price_asc": (F("price").asc(nulls_last=True), "-created_at", "-id"),
     "price_desc": (F("price").desc(nulls_last=True), "-created_at", "-id"),
     "rating": (F("handyman__handyman_profile__rating").desc(nulls_last=True), "-created_at", "-id"),
+    "trust": (F("handyman__handyman_profile__trust_score").desc(nulls_last=True), "-created_at", "-id"),
 }
 
 _PUBLIC_SERVICE_FILTER_PARAMS = [
@@ -339,6 +353,7 @@ _PUBLIC_SERVICE_FILTER_PARAMS = [
                      description="Commune ou quartier de l'artisan (contient)."),
     OpenApiParameter("verified", OpenApiTypes.BOOL, description="1 = artisans vérifiés uniquement."),
     OpenApiParameter("online", OpenApiTypes.BOOL, description="1 = artisans vérifiés et en ligne."),
+    OpenApiParameter("badge", OpenApiTypes.STR, description="Badge Tratra Trust actuel : VERIFIE, EXPERT ou SUR."),
     OpenApiParameter("min_price", OpenApiTypes.NUMBER, description="Prix minimum (FCFA)."),
     OpenApiParameter("max_price", OpenApiTypes.NUMBER, description="Prix maximum (FCFA)."),
 ]
@@ -500,6 +515,19 @@ class HandymanProfileViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
         response.data["stats"] = review_stats(profile.user_id)
         return response
 
+    @extend_schema(tags=["Public"], summary="Passeport professionnel Tratra Trust (public)",
+                   description="Identité vérifiée, badges, score de confiance EXPLIQUÉ (composantes, provenance : "
+                               "vérifié / plateforme / déclaré), compétences déclarées et certifiées, missions, "
+                               "satisfaction, ponctualité, réactivité. Aucun document ni donnée personnelle.")
+    @action(detail=True, methods=["get"], url_path="trust", permission_classes=[AllowAny],
+            authentication_classes=[], filter_backends=[])
+    def trust(self, request, pk=None):
+        """GET /handymen/{id}/trust/ — public ; 404 si l'artisan n'est pas publiable (même règle que la fiche)."""
+        from trust import passport
+
+        profile = generics.get_object_or_404(public_profile_queryset(), pk=pk)
+        return Response(passport.build(profile, request=request))
+
     @action(detail=False, methods=["post"], url_path="presence")
     def presence(self, request):
         """
@@ -578,6 +606,9 @@ class HandymanProfileViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
             qs = qs.filter(Q(commune__icontains=commune) | Q(quartier__icontains=commune))
         if _flag(params, "online"):
             qs = qs.filter(online=True)
+        badge = _badge_param(params)
+        if badge:
+            qs = qs.filter(trust_badges__contains=[badge])
 
         qs = qs.order_by("-online", "-quality_score", "-rating", "-completed_jobs", "id")
         total = qs.count()
@@ -643,7 +674,7 @@ def handyman_profile_required(user) -> HandymanProfile:
     list=extend_schema(parameters=_PUBLIC_SERVICE_FILTER_PARAMS + [
         OpenApiParameter("sort", OpenApiTypes.STR,
                          enum=list(SERVICE_SORTS.keys()),
-                         description="Tri public : recent | price_asc | price_desc | rating "
+                         description="Tri public : recent | price_asc | price_desc | rating | trust "
                                      "(ignoré si ?ordering= est fourni)."),
         OpenApiParameter("handyman", OpenApiTypes.INT,
                          description="Id utilisateur de l'artisan (égalité stricte ; valeur "

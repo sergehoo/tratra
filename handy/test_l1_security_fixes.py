@@ -137,7 +137,7 @@ def test_compat_bridge_serves_only_the_public_card(api_client, artisan, make_use
     body = r.json()
     assert set(body) == {"id", "display_name", "commune", "rating", "completed_jobs",
                          "experience_years", "is_verified", "online", "photo", "user_id",
-                         "quartier", "hourly_rate", "skills", "services_count"}
+                         "quartier", "hourly_rate", "skills", "services_count", "trust_score", "badges"}
     assert body["user_id"] == artisan.pk and body["display_name"] == "Awa K."
     assert body["services_count"] == 1
     text = r.content.decode()
