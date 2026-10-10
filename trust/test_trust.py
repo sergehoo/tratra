@@ -229,6 +229,16 @@ def test_score_is_withheld_without_measured_activity():
     assert data["identity"]["verified"] is True and [b["code"] for b in data["badges"]] == ["VERIFIE"]
 
 
+def test_reactivity_alone_does_not_publish_a_score_and_small_samples_stay_private():
+    art = artisan("t_react")
+    missions(art, 1, reviews=False, late=1)  # 1 mission en retard, 1 demande confirmée vite : échantillons trop petits
+    p = HandymanProfile.objects.get(user=art)
+    data = api().get(f"/handy/handymen/{p.pk}/trust/").json()
+    assert p.trust_score is None and data["score"]["value"] is None
+    assert data["punctuality"]["rate"] is None and data["punctuality"]["sample"] == 1  # pas de « 0 % » sur 1 mission
+    assert data["reactivity"]["median_minutes"] is None
+
+
 def test_score_is_explainable_and_computed_server_side_from_real_data():
     art = artisan("t_score")
     missions(art, 4, rating=4)

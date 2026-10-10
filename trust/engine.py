@@ -21,8 +21,9 @@ from trust.models import AuditEvent, BadgeAward, TrustConfig, audit
 logger = logging.getLogger(__name__)
 
 
-# Composantes issues de l'ACTIVITÉ réelle : au moins une doit être mesurable pour qu'un score soit publié.
-ACTIVITY_COMPONENTS = ("satisfaction", "reliability", "reactivity")
+# Un score n'est publié que s'il repose sur au moins UN résultat client mesuré (avis ou ponctualité) : la seule
+# réactivité aux demandes, ou l'identité, ne suffisent pas à noter un artisan.
+ACTIVITY_COMPONENTS = ("satisfaction", "reliability")
 
 
 def _pct(x) -> str:
@@ -103,10 +104,12 @@ def trust_score(m: Dict, c: TrustConfig) -> Dict:
         mn = rea["median_minutes"]
         rea_value = 1.0 if mn <= 30 else max(0.0, 1.0 - (mn - 30) / (1440 - 30))
     part("reactivity", "Réactivité aux demandes", c.weight_reactivity, rea_value,
-         f"Réponse médiane en {int(rea['median_minutes'] or 0)} min sur {rea['sample']} demandes", "plateforme",
+         ("Réponse médiane en moins d'une minute" if (rea["median_minutes"] or 0) < 1
+          else f"Réponse médiane en {int(rea['median_minutes'])} min") + f" sur {rea['sample']} demandes", "plateforme",
          available=rea["sample"] >= n, missing=f"Pas encore assez de demandes traitées ({rea['sample']}/{n})")
     part("track_record", "Missions terminées", c.weight_track_record, min(m["completed_total"], 30) / 30,
-         f"{m['completed_total']} mission(s) terminée(s)", "plateforme",
+         f"{m['completed_total']} mission{'s' if m['completed_total'] > 1 else ''} terminée{'s' if m['completed_total'] > 1 else ''}",
+         "plateforme",
          available=m["completed_total"] >= 1, missing="Aucune mission terminée pour le moment")
     certs = len(m["certifications"])
     part("certifications", "Justificatifs professionnels", c.weight_certifications, min(certs, 3) / 3,
@@ -119,8 +122,8 @@ def trust_score(m: Dict, c: TrustConfig) -> Dict:
     if not m["verified"]:
         score, reason = None, "Identité non vérifiée : aucun score n'est publié."
     elif not activity:
-        # L'identité seule ne fait pas un score : sans activité mesurée (avis, ponctualité, réactivité), on
-        # n'affiche rien plutôt qu'un chiffre flatteur ou punitif — un nouvel artisan reste « en démarrage ».
+        # L'identité (et la réactivité) seule ne fait pas un score : sans résultat client mesuré (avis, ponctualité),
+        # on n'affiche rien plutôt qu'un chiffre flatteur ou punitif — un nouvel artisan reste « en démarrage ».
         score, reason = None, "Pas encore assez d'activité mesurée pour publier un score (aucune pénalité)."
     else:
         score = round(100 * sum(p["weight"] * p["value"] for p in live) / total_weight)

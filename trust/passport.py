@@ -69,6 +69,7 @@ def build(profile, *, request=None, owner: bool = False, config=None) -> Dict:
     reviews = m["reviews"]
     data = {
         "profile_id": profile.id,
+        "user_id": profile.user_id,
         "display_name": public_display_name(profile.user),
         "photo": absolute_media_url(request, profile.photo),
         "commune": profile.commune,
@@ -86,8 +87,14 @@ def build(profile, *, request=None, owner: bool = False, config=None) -> Dict:
         "missions": {"completed": m["completed_total"], "completed_window": m["completed_window"],
                      "window_days": config.sure_window_days, "source": "plateforme"},
         "satisfaction": {**reviews, "source": "plateforme"},
-        "punctuality": {**m["punctuality"], "source": "plateforme"},
-        "reactivity": {**m["reactivity"], "source": "plateforme"},
+        # Un taux sur trop peu de missions n'est pas publié (un seul retard ne fait pas « 0 % de ponctualité »).
+        "punctuality": {**m["punctuality"], "source": "plateforme",
+                        "rate": m["punctuality"]["rate"] if m["punctuality"]["sample"] >= config.min_sample else None,
+                        "min_sample": config.min_sample},
+        "reactivity": {**m["reactivity"], "source": "plateforme",
+                       "median_minutes": (m["reactivity"]["median_minutes"]
+                                          if m["reactivity"]["sample"] >= config.min_sample else None),
+                       "min_sample": config.min_sample},
         "disputes": {"rate": m["disputes"]["rate"], "source": "plateforme"},
         "history": _history(profile, detailed=owner),
         "sources": SOURCES,
