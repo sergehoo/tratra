@@ -62,13 +62,14 @@ def delete_service_image_file(sender, instance, **kwargs):
 
 
 def refresh_handyman_rating(handyman_id):
-    """Note = moyenne des avis PUBLIABLES de l'artisan : mission terminée uniquement
-    (même règle que handy.api.views.published_reviews)."""
+    """Note = moyenne des avis RETENUS de l'artisan : missions terminées, non masqués, un avis par client
+    (le plus récent) — handy/reviews.py ; même règle que les statistiques publiques."""
     if not handyman_id:
         return
-    qs = Review.objects.filter(booking__handyman_id=handyman_id, booking__status='completed')
-    avg = qs.aggregate(avg=models.Avg('rating'))['avg'] or 0
-    HandymanProfile.objects.filter(user_id=handyman_id).update(rating=avg)
+    from handy.reviews import review_stats
+
+    average = review_stats(handyman_id)["average"] or 0
+    HandymanProfile.objects.filter(user_id=handyman_id).update(rating=average)
     profile = HandymanProfile.objects.filter(user_id=handyman_id).first()
     if profile:
         profile.refresh_quality_score()

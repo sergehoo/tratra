@@ -33,6 +33,7 @@ from drf_spectacular.utils import (
 )
 from drf_spectacular.types import OpenApiTypes
 from rest_framework.filters import OrderingFilter, SearchFilter
+from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -47,13 +48,14 @@ from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework_simplejwt.authentication import JWTAuthentication
 
 from handy.api.errors import CodedAPIException
+from handy.media.sanitize import sanitize_image
 from handy.eligibility import (
     can_receive_missions, not_on_timeoff, publishable, publishable_user_ids, published_services,
     restrict_public_services,
 )
 from handy.models import (
     User, HandymanProfile, ServiceCategory, Service, ServiceImage, Booking,
-    Payment, PaymentLog, Review, Conversation, Message, Notification,
+    Payment, PaymentLog, Review, ReviewMedia, Conversation, Message, Notification,
     HandymanDocument, Report, Device, Payout, Dispute, TimeOff, ReplacementSuggestion,
     Coupon, OTPCode, PayoutAccount, SubscriptionPlan, Subscription, CompanyProfile,
     artisan_available_earnings,
@@ -270,7 +272,8 @@ def published_reviews():
     Publics seulement pour un artisan éligible (handy/eligibility.py) : un avis ne met pas
     en avant un artisan qui n'est pas publié.
     """
-    return Review.objects.filter(booking__status="completed", booking__handyman_id__in=publishable_user_ids())
+    return Review.objects.filter(booking__status="completed", is_hidden=False,
+                                 booking__handyman_id__in=publishable_user_ids())
 
 
 def apply_public_service_filters(qs, params, *, restrict=True):
@@ -477,6 +480,25 @@ class HandymanProfileViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
             public = generics.get_object_or_404(public_profile_queryset(), pk=lookup)
             return Response(PublicArtisanSerializer(public, context=self.get_serializer_context()).data)
         return Response(self.get_serializer(instance).data)
+
+    @extend_schema(tags=["Public"], summary="Avis publiés d'un artisan éligible (public)",
+                   description="Avis de missions terminées, non masqués ; `stats` = moyenne, critères, répartition "
+                               "et taux de réponse calculés depuis ces avis (un avis par client, le plus récent).")
+    @action(detail=True, methods=["get"], url_path="reviews", permission_classes=[AllowAny],
+            authentication_classes=[], filter_backends=[])
+    def reviews(self, request, pk=None):
+        """GET /handymen/{id}/reviews/ — public ; 404 si l'artisan n'est pas publiable (même règle que la fiche)."""
+        from handy.reviews import published as published_for, review_stats
+
+        profile = generics.get_object_or_404(public_profile_queryset(), pk=pk)
+        qs = (published_for(profile.user_id)
+              .select_related("booking__client", "booking__handyman", "booking__service__category")
+              .prefetch_related("media").order_by("-created_at", "-id"))
+        page = self.paginate_queryset(qs)
+        data = PublicReviewSerializer(page, many=True, context={"request": request}).data
+        response = self.get_paginated_response(data)
+        response.data["stats"] = review_stats(profile.user_id)
+        return response
 
     @action(detail=False, methods=["post"], url_path="presence")
     def presence(self, request):
@@ -1030,29 +1052,100 @@ class ReviewViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
     pagination_class = DefaultPageNumberPagination
 
     def get_object(self):
-        # L'artisan noté peut LIRE l'avis (queryset cloisonné), jamais le réécrire
-        # ni le supprimer : seul l'auteur (client de la réservation) ou le staff.
+        # L'artisan noté peut LIRE l'avis (queryset cloisonné) et y répondre (`reply`), jamais le
+        # réécrire ni le supprimer : seul l'auteur (client de la réservation) — le staff passe par
+        # l'administration (masquage `is_hidden`).
         review = super().get_object()
         user = self.request.user
-        if (self.action in ("update", "partial_update", "destroy")
-                and not user.is_staff and review.booking.client_id != user.id):
+        if (self.action in ("update", "partial_update", "destroy", "photos", "delete_photo")
+                and review.booking.client_id != user.id):
             raise PermissionDenied("Seul l'auteur de l'avis peut le modifier ou le supprimer.")
         return review
 
     def perform_create(self, serializer):
         booking = serializer.validated_data["booking"]
         user = self.request.user
-        if not user.is_staff:
-            if booking.client_id != user.id:
-                raise PermissionDenied("Vous ne pouvez noter que vos propres réservations.")
-            # Auto-évaluation impossible : client != artisan (contrainte bk_client_not_handyman).
-            if booking.status != "completed":
-                raise drf_serializers.ValidationError(
-                    {"booking": "Seule une mission terminée peut être notée."})
+        # Seul le client de la mission peut l'évaluer (le staff n'évalue JAMAIS à la place d'un client).
+        if booking.client_id != user.id:
+            raise PermissionDenied("Vous ne pouvez noter que vos propres réservations.")
+        # Auto-évaluation impossible : client != artisan (contrainte bk_client_not_handyman).
+        if booking.status != "completed":
+            raise drf_serializers.ValidationError(
+                {"booking": "Seule une mission terminée peut être notée."})
         if Review.objects.filter(booking=booking).exists():
             # Un avis par mission (OneToOne) : 400 explicite plutôt qu'une IntegrityError (500).
             raise drf_serializers.ValidationError({"booking": "Cette mission a déjà été notée."})
         serializer.save()
+
+    def _ensure_editable(self, review):
+        from handy.reviews import can_edit
+
+        if not can_edit(review):
+            raise PermissionDenied(
+                f"Cet avis n'est plus modifiable (délai de {Review.EDIT_WINDOW_DAYS} jours dépassé).")
+
+    def perform_update(self, serializer):
+        self._ensure_editable(serializer.instance)
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        self._ensure_editable(instance)
+        instance.delete()
+
+    REPLY_MAX = 600
+    PHOTOS_MAX = 4
+
+    @extend_schema(request=OpenApiTypes.OBJECT, responses=ReviewSerializer, tags=["Avis"],
+                   summary="Réponse publique de l'artisan à un avis")
+    @action(detail=True, methods=["post"], url_path="reply")
+    def reply(self, request, pk=None):
+        """POST {text} — l'artisan évalué répond publiquement (une réponse, corrigeable 7 jours)."""
+        from handy.reviews import can_reply
+
+        review = self.get_object()
+        if review.booking.handyman_id != request.user.id:
+            raise PermissionDenied("Seul l'artisan évalué peut répondre à cet avis.")
+        if review.booking.status != "completed" or not can_reply(review):
+            raise PermissionDenied("Cette réponse n'est plus possible pour cet avis.")
+        text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", str(request.data.get("text") or "")).strip()
+        if not text:
+            raise drf_serializers.ValidationError({"text": "Saisissez votre réponse."})
+        if len(text) > self.REPLY_MAX:
+            raise drf_serializers.ValidationError({"text": f"La réponse ne peut pas dépasser {self.REPLY_MAX} caractères."})
+        review.reply_text = text
+        review.reply_at = review.reply_at or timezone.now()
+        review.save(update_fields=["reply_text", "reply_at", "updated_at"])
+        Notification.objects.create(
+            user=review.booking.client, notification_type="review_reply",
+            message="L'artisan a répondu à votre avis.", content_object=review)
+        return Response(self.get_serializer(review).data)
+
+    @extend_schema(request=OpenApiTypes.OBJECT, responses=ReviewSerializer, tags=["Avis"],
+                   summary="Ajouter une photo à son avis (4 maximum)")
+    @action(detail=True, methods=["post"], url_path="photos", parser_classes=[MultiPartParser, FormParser])
+    def photos(self, request, pk=None):
+        """POST multipart `image` — l'auteur ajoute une photo (JPEG/PNG/WebP, réencodée sans métadonnées)."""
+        review = self.get_object()
+        self._ensure_editable(review)
+        if review.media.count() >= self.PHOTOS_MAX:
+            raise drf_serializers.ValidationError({"image": f"{self.PHOTOS_MAX} photos au maximum par avis."})
+        upload = request.FILES.get("image")
+        if upload is None:
+            raise drf_serializers.ValidationError({"image": "Joignez une image."})
+        try:
+            cleaned = sanitize_image(upload)
+        except DjangoValidationError as exc:
+            raise drf_serializers.ValidationError({"image": list(exc.messages)})
+        ReviewMedia.objects.create(review=review, image=cleaned)
+        return Response(self.get_serializer(review).data, status=status.HTTP_201_CREATED)
+
+    @extend_schema(responses=ReviewSerializer, tags=["Avis"], summary="Retirer une photo de son avis")
+    @action(detail=True, methods=["delete"], url_path=r"photos/(?P<media_id>[0-9]+)")
+    def delete_photo(self, request, pk=None, media_id=None):
+        review = self.get_object()
+        self._ensure_editable(review)
+        review.media.filter(pk=media_id).delete()
+        return Response(self.get_serializer(review).data)
 
     @extend_schema(
         tags=["Public"],

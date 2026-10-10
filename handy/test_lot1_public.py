@@ -225,7 +225,10 @@ def test_public_reviews_count_average_order_and_privacy(api_client):
     assert first["artisan"] == "Awa K."
     assert first["category"] == "Plomberie R1"
     assert first["rating"] == 2
-    assert set(first.keys()) == {"id", "rating", "comment", "author", "artisan", "category", "created_at"}
+    # Contrat public étendu (additif) : critères notés, photos et réponse de l'artisan.
+    assert set(first.keys()) == {"id", "rating", "comment", "criteria", "photos", "reply", "author", "artisan",
+                                 "category", "created_at"}
+    assert first["criteria"] == {} and first["photos"] == [] and first["reply"] is None
     _assert_no_sensitive(r.content.decode())
 
     assert len(api_client.get(reverse("reviews-public"), {"limit": 1}).json()["results"]) == 1

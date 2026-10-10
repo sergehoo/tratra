@@ -4,11 +4,12 @@ import { Star } from "lucide-react";
 import { apiErrorMessage, post } from "@/lib/api";
 import { useDashboard } from "@/lib/dashboard";
 import { useData } from "@/lib/useData";
-import { Alert, Button, Card, EmptyState, Modal, PageHeader, SkeletonList, Tabs, TextareaField, cx } from "@/components/ds";
-import { StarRow } from "@/components/market/primitives";
+import type { ReviewRow } from "@/lib/reviews";
+import { Alert, Button, Card, EmptyState, Modal, PageHeader, SkeletonList, Tabs, TextareaField } from "@/components/ds";
+import { ReviewCard } from "@/components/reviews/ReviewCard";
+import { ReviewForm } from "@/components/reviews/ReviewForm";
 import { formatDateTimeShort } from "../_components/dates";
 
-interface ReviewRow { id: number; rating: number; comment: string; created_at: string; booking_id: number; service: string | null; author?: string; artisan?: string }
 interface ToWrite { booking_id: number; service: string; artisan: string; booking_date: string | null }
 interface Reviews { received: ReviewRow[]; given: ReviewRow[]; to_write: ToWrite[] }
 
@@ -18,8 +19,9 @@ export default function ReviewsPage() {
   const isProvider = dash.data?.capabilities.provider ?? false;
   const [tab, setTab] = useState<"write" | "received" | "given">("write");
   const [target, setTarget] = useState<ToWrite | null>(null);
-  const [rating, setRating] = useState(0);
-  const [comment, setComment] = useState("");
+  const [editing, setEditing] = useState<ReviewRow | null>(null);
+  const [replying, setReplying] = useState<ReviewRow | null>(null);
+  const [reply, setReply] = useState("");
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState("");
 
@@ -29,18 +31,22 @@ export default function ReviewsPage() {
     { id: "given" as const, label: "Donnés", count: data?.given.length },
   ];
 
-  async function submit() {
-    if (!target || rating < 1) return;
+  async function done() {
+    setTarget(null);
+    setEditing(null);
+    await Promise.all([reload(), dash.reload()]);
+  }
+
+  async function sendReply() {
+    if (!replying || !reply.trim()) return;
     setBusy(true);
     setFailure("");
     try {
-      await post("/reviews/", { booking: target.booking_id, rating, comment: comment.trim() });
-      setTarget(null);
-      setRating(0);
-      setComment("");
-      await Promise.all([reload(), dash.reload()]);
+      await post(`/reviews/${replying.id}/reply/`, { text: reply.trim() });
+      setReplying(null);
+      await reload();
     } catch (e) {
-      setFailure(apiErrorMessage(e, "L’avis n’a pas pu être enregistré."));
+      setFailure(apiErrorMessage(e, "La réponse n’a pas pu être publiée."));
     } finally {
       setBusy(false);
     }
@@ -49,7 +55,7 @@ export default function ReviewsPage() {
   const list = tab === "received" ? data?.received ?? [] : data?.given ?? [];
   return (
     <>
-      <PageHeader title="Avis" description="Donnez votre avis sur vos prestations et consultez ceux que vous avez reçus." />
+      <PageHeader title="Avis" description="Évaluez vos prestations (qualité, ponctualité, professionnalisme…) et répondez aux avis reçus." />
       {loading ? (
         <SkeletonList count={3} />
       ) : error || !data ? (
@@ -69,7 +75,7 @@ export default function ReviewsPage() {
                         <p className="truncate font-display text-[15px] font-bold text-ink">{t.service}</p>
                         <p className="text-xs text-ash">Artisan : {t.artisan}{t.booking_date ? ` · ${formatDateTimeShort(t.booking_date)}` : ""}</p>
                       </div>
-                      <Button size="sm" onClick={() => { setTarget(t); setFailure(""); }}>Donner mon avis</Button>
+                      <Button size="sm" onClick={() => setTarget(t)}>Donner mon avis</Button>
                     </Card>
                   </li>
                 ))}
@@ -82,14 +88,24 @@ export default function ReviewsPage() {
             <ul className="grid grid-cols-1 gap-3">
               {list.map((r) => (
                 <li key={r.id}>
-                  <Card padding="sm" radius="panel">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <StarRow value={r.rating} />
-                      <span className="text-xs text-ash">{formatDateTimeShort(r.created_at)}</span>
-                    </div>
-                    {r.comment ? <p className="mt-2 text-sm leading-relaxed text-inkSoft">{r.comment}</p> : null}
-                    <p className={cx("mt-2 text-xs text-ash")}>{r.service ?? "Prestation"} · {tab === "received" ? `par ${r.author}` : `pour ${r.artisan}`}</p>
-                  </Card>
+                  <ReviewCard
+                    rating={r.rating}
+                    comment={r.comment}
+                    criteria={r.criteria}
+                    photos={r.photos}
+                    reply={r.reply}
+                    createdAt={r.created_at}
+                    meta={`${r.service ?? "Prestation"} · ${tab === "received" ? `par ${r.author}` : `pour ${r.artisan}`}`}
+                    actions={
+                      tab === "received" && r.can_reply ? (
+                        <Button size="sm" variant="outline" onClick={() => { setReplying(r); setReply(r.reply?.text ?? ""); setFailure(""); }}>
+                          {r.reply ? "Modifier ma réponse" : "Répondre"}
+                        </Button>
+                      ) : tab === "given" && r.can_edit ? (
+                        <Button size="sm" variant="outline" onClick={() => setEditing(r)}>Modifier</Button>
+                      ) : undefined
+                    }
+                  />
                 </li>
               ))}
             </ul>
@@ -97,32 +113,30 @@ export default function ReviewsPage() {
         </>
       )}
 
+      <ReviewForm
+        open={Boolean(target) || Boolean(editing)}
+        onClose={() => { setTarget(null); setEditing(null); }}
+        onDone={() => void done()}
+        bookingId={target?.booking_id}
+        review={editing}
+        subtitle={target ? `${target.service} — ${target.artisan}` : editing ? `${editing.service ?? "Prestation"} — ${editing.artisan ?? ""}` : undefined}
+      />
+
       <Modal
-        open={Boolean(target)}
-        onClose={() => !busy && setTarget(null)}
-        title="Votre avis"
-        description={target ? `${target.service} — ${target.artisan}` : undefined}
-        size="sm"
+        open={Boolean(replying)}
+        onClose={() => !busy && setReplying(null)}
+        title="Répondre à cet avis"
+        description="Votre réponse est publique, sous l’avis du client."
+        size="md"
         footer={
           <>
-            <Button variant="outline" onClick={() => setTarget(null)} disabled={busy}>Annuler</Button>
-            <Button onClick={() => void submit()} loading={busy} disabled={rating < 1}>Publier</Button>
+            <Button variant="outline" onClick={() => setReplying(null)} disabled={busy}>Annuler</Button>
+            <Button onClick={() => void sendReply()} loading={busy} disabled={!reply.trim()}>Publier la réponse</Button>
           </>
         }
       >
-        <div className="space-y-4">
-          <div role="radiogroup" aria-label="Note sur 5" className="flex gap-1">
-            {[1, 2, 3, 4, 5].map((n) => (
-              <button
-                key={n} type="button" role="radio" aria-checked={rating === n} aria-label={`${n} sur 5`}
-                onClick={() => setRating(n)}
-                className="grid h-11 w-11 place-items-center rounded-xl transition hover:bg-lineSoft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-              >
-                <Star aria-hidden className={cx("h-7 w-7", n <= rating ? "fill-accent text-accent" : "text-fog")} />
-              </button>
-            ))}
-          </div>
-          <TextareaField label="Commentaire" optional rows={4} value={comment} onChange={(e) => setComment(e.target.value)} />
+        <div className="space-y-3">
+          <TextareaField label="Votre réponse" rows={4} maxLength={600} value={reply} onChange={(e) => setReply(e.target.value)} />
           {failure ? <Alert tone="danger">{failure}</Alert> : null}
         </div>
       </Modal>

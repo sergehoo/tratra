@@ -356,13 +356,24 @@ def me_reviews(request):
     user = request.user
 
     def row(r, other):
+        from handy.reviews import can_edit, can_reply
+
         service = r.booking.service
-        return {"id": r.id, "rating": r.rating, "comment": r.comment or "", "created_at": r.created_at.isoformat(),
+        item = {"id": r.id, "rating": r.rating, "comment": r.comment or "", "created_at": r.created_at.isoformat(),
                 "booking_id": r.booking_id, "service": service.title if service else None,
+                "criteria": {k: getattr(r, k) for k in Review.CRITERIA if getattr(r, k) is not None},
+                "photos": [m.image.url for m in r.media.all() if m.image],
+                "reply": ({"text": r.reply_text, "at": r.reply_at.isoformat() if r.reply_at else None}
+                          if (r.reply_text or "").strip() else None),
                 "author" if other == "client" else "artisan": public_name(
                     r.booking.client if other == "client" else r.booking.handyman)}
+        if other == "client":   # avis REÇU : l'artisan peut répondre
+            item["can_reply"] = bool(r.booking.status == "completed" and can_reply(r))
+        else:                   # avis DONNÉ : l'auteur peut le corriger pendant la fenêtre
+            item["can_edit"] = can_edit(r)
+        return item
 
-    base = Review.objects.select_related("booking", "booking__service", "booking__client", "booking__handyman")
+    base = Review.objects.select_related("booking", "booking__service", "booking__client", "booking__handyman").prefetch_related("media")
     received = [row(r, "client") for r in base.filter(booking__handyman=user).order_by("-created_at")[:50]]
     given = [row(r, "handyman") for r in base.filter(booking__client=user).order_by("-created_at")[:50]]
     to_write = (Booking.objects.filter(client=user, status="completed", review__isnull=True)

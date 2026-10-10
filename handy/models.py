@@ -8,7 +8,7 @@ from django.contrib.auth.models import AbstractUser, Group, Permission
 from django.contrib.contenttypes.fields import GenericForeignKey
 from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError
-from django.core.validators import MinValueValidator, RegexValidator
+from django.core.validators import MaxValueValidator, MinValueValidator, RegexValidator
 from django.db import models, transaction
 from django.db.models import Sum, UniqueConstraint, Q
 from django.utils import timezone
@@ -828,9 +828,28 @@ class FavoriteHandyman(models.Model):
 
 
 class Review(models.Model):
+    """Avis d'un CLIENT sur une mission TERMINÉE (un seul par réservation).
+
+    `rating` = note globale 1-5. Critères facultatifs (1-5) : qualité, ponctualité, professionnalisme,
+    communication, prix. L'artisan peut répondre publiquement (`reply_text`). Un avis masqué par la
+    modération (`is_hidden`) n'est plus publié ni compté."""
+    CRITERIA = ('quality', 'punctuality', 'professionalism', 'communication', 'price')
+    CRITERIA_LABELS = {'quality': 'Qualité du travail', 'punctuality': 'Ponctualité',
+                       'professionalism': 'Professionnalisme', 'communication': 'Communication',
+                       'price': 'Rapport qualité / prix'}
+    EDIT_WINDOW_DAYS = 7  # l'auteur peut corriger son avis pendant 7 jours
+
     booking = models.OneToOneField('Booking', on_delete=models.PROTECT, related_name='review')
     rating = models.PositiveSmallIntegerField(choices=[(i, i) for i in range(1, 6)])
     comment = models.TextField(blank=True, null=True)
+    quality = models.PositiveSmallIntegerField(null=True, blank=True, validators=[MinValueValidator(1), MaxValueValidator(5)])
+    punctuality = models.PositiveSmallIntegerField(null=True, blank=True, validators=[MinValueValidator(1), MaxValueValidator(5)])
+    professionalism = models.PositiveSmallIntegerField(null=True, blank=True, validators=[MinValueValidator(1), MaxValueValidator(5)])
+    communication = models.PositiveSmallIntegerField(null=True, blank=True, validators=[MinValueValidator(1), MaxValueValidator(5)])
+    price = models.PositiveSmallIntegerField(null=True, blank=True, validators=[MinValueValidator(1), MaxValueValidator(5)])
+    reply_text = models.TextField(blank=True, null=True)
+    reply_at = models.DateTimeField(null=True, blank=True)
+    is_hidden = models.BooleanField(default=False, db_index=True)  # modération : jamais publié ni compté
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -871,6 +890,7 @@ class Notification(models.Model):
         ('booking_cancelled', 'Réservation annulée'),
         ('payment_received', 'Paiement reçu'),
         ('review_received', 'Avis reçu'),
+        ('review_reply', "Réponse à un avis"),
         ('message_received', 'Message reçu'),
         ('booking_status', 'Changement de statut de réservation'),
     ]

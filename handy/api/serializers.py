@@ -145,15 +145,45 @@ class PublicArtisanSerializer(PublicArtisanMiniSerializer):
         return [{"id": c.id, "name": c.name, "slug": c.slug} for c in obj.skills.all()]
 
 
+def review_criteria(review) -> dict:
+    """Critères renseignés par le client (les critères non notés sont omis : jamais de valeur inventée)."""
+    return {k: getattr(review, k) for k in Review.CRITERIA if getattr(review, k) is not None}
+
+
+def review_photos(request, review) -> list:
+    return [url for url in (absolute_media_url(request, m.image) for m in review.media.all()) if url]
+
+
+def review_reply(review) -> Optional[dict]:
+    text = (review.reply_text or "").strip()
+    return {"text": text, "at": review.reply_at.isoformat() if review.reply_at else None} if text else None
+
+
 class PublicReviewSerializer(serializers.ModelSerializer):
     author = serializers.SerializerMethodField()
     artisan = serializers.SerializerMethodField()
     category = serializers.SerializerMethodField()
+    criteria = serializers.SerializerMethodField()
+    photos = serializers.SerializerMethodField()
+    reply = serializers.SerializerMethodField()
 
     class Meta:
         model = Review
-        fields = ["id", "rating", "comment", "author", "artisan", "category", "created_at"]
+        fields = ["id", "rating", "comment", "criteria", "photos", "reply", "author", "artisan", "category",
+                  "created_at"]
         read_only_fields = fields
+
+    @extend_schema_field(OpenApiTypes.OBJECT)
+    def get_criteria(self, obj):
+        return review_criteria(obj)
+
+    @extend_schema_field(OpenApiTypes.OBJECT)
+    def get_photos(self, obj):
+        return review_photos(self.context.get("request"), obj)
+
+    @extend_schema_field(OpenApiTypes.OBJECT)
+    def get_reply(self, obj):
+        return review_reply(obj)
 
     def get_author(self, obj) -> str:
         return public_display_name(obj.booking.client)
@@ -797,19 +827,50 @@ class PaymentLogSerializer(serializers.ModelSerializer):
 # ========= REVIEWS =========
 
 class ReviewSerializer(serializers.ModelSerializer):
+    """Avis d'un client sur une mission terminée : note globale 1-5, critères facultatifs, commentaire.
+    Photos et réponse de l'artisan passent par `/reviews/{id}/photos/` et `/reviews/{id}/reply/`."""
     booking = serializers.PrimaryKeyRelatedField(queryset=Booking.objects.all())
     booking_detail = BookingSerializer(source="booking", read_only=True)
+    photos = serializers.SerializerMethodField()
+    reply = serializers.SerializerMethodField()
+    can_edit = serializers.SerializerMethodField()
 
     class Meta:
         model = Review
-        fields = ["id", "booking", "booking_detail", "rating", "comment", "created_at", "updated_at"]
+        fields = ["id", "booking", "booking_detail", "rating", *Review.CRITERIA, "comment", "photos", "reply",
+                  "can_edit", "created_at", "updated_at"]
         read_only_fields = ["created_at", "updated_at"]
+
+    COMMENT_MAX = 1000
 
     def validate_booking(self, value):
         # Un avis reste attaché à SA mission : sinon il s'afficherait au nom d'un autre client.
         if self.instance is not None and value.pk != self.instance.booking_id:
             raise serializers.ValidationError("La réservation d'un avis n'est pas modifiable.")
         return value
+
+    def validate_comment(self, value):
+        import re
+
+        text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", (value or "")).strip()
+        if len(text) > self.COMMENT_MAX:
+            raise serializers.ValidationError(f"Le commentaire ne peut pas dépasser {self.COMMENT_MAX} caractères.")
+        return text or None
+
+    @extend_schema_field(OpenApiTypes.OBJECT)
+    def get_photos(self, obj):
+        return review_photos(self.context.get("request"), obj)
+
+    @extend_schema_field(OpenApiTypes.OBJECT)
+    def get_reply(self, obj):
+        return review_reply(obj)
+
+    @extend_schema_field(OpenApiTypes.BOOL)
+    def get_can_edit(self, obj):
+        from handy.reviews import can_edit
+
+        request = self.context.get("request")
+        return bool(request and request.user.pk == obj.booking.client_id and can_edit(obj))
 
 
 # ========= CONVERSATION / MESSAGE =========
