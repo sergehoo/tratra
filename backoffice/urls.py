@@ -2,7 +2,7 @@ from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
 from announcements.api import AnnouncementAdminViewSet
-from backoffice import api_core, api_money, api_ops, api_people
+from backoffice import api_core, api_money, api_ops, api_people, api_system
 
 router = DefaultRouter()
 router.register("announcements", AnnouncementAdminViewSet, basename="bo-announcements")
@@ -76,5 +76,33 @@ urlpatterns = [
     path("support/queue/", api_money.SupportQueue.as_view(), name="bo-support-queue"),
     path("support/users/<int:pk>/", api_money.SupportOverview.as_view(), name="bo-support-user"),
     path("support/users/<int:pk>/notes/", api_money.SupportNotes.as_view(), name="bo-support-notes"),
+    # Notifications
+    path("notifications/summary/", api_system.NotificationSummary.as_view(), name="bo-notifications-summary"),
+    path("notifications/", api_system.NotificationList.as_view(), name="bo-notifications"),
+    # Continuité
+    path("continuity/overview/", api_system.ContinuityOverview.as_view(), name="bo-continuity"),
+    path("continuity/stuck/", api_system.ContinuityStuck.as_view(), name="bo-continuity-stuck"),
+    # Statistiques et exports
+    path("analytics/overview/", api_system.AnalyticsOverview.as_view(), name="bo-analytics"),
+    path("analytics/export/<str:dataset>/", api_system.AnalyticsExport.as_view(), name="bo-export"),
+    # Réglages
+    path("settings/", api_system.SettingsOverview.as_view(), name="bo-settings"),
+    path("settings/pricing-rules/", api_system.PricingRuleCreate.as_view(), name="bo-pricing-rules"),
+    path("settings/pricing-rules/<int:pk>/", api_system.PricingRuleUpdate.as_view(), name="bo-pricing-rule"),
+    path("settings/cancellation-policies/", api_system.CancellationPolicyUpsert.as_view(), name="bo-cancellation-policies"),
+    path("settings/cancellation-policies/<int:pk>/", api_system.CancellationPolicyUpsert.as_view(), name="bo-cancellation-policy"),
+    path("settings/trust/", api_system.TrustSettingsUpdate.as_view(), name="bo-settings-trust"),
+    path("settings/coupons/", api_system.CouponList.as_view(), name="bo-coupons"),
+    path("settings/coupons/<int:pk>/", api_system.CouponUpdate.as_view(), name="bo-coupon"),
+    # Sécurité
+    path("security/roles/", api_system.RoleList.as_view(), name="bo-roles"),
+    path("security/staff/", api_system.StaffList.as_view(), name="bo-staff"),
+    path("security/staff/<int:pk>/roles/", api_system.StaffRoles.as_view(), name="bo-staff-roles"),
+    path("security/staff/<int:pk>/remove/", api_system.StaffRemove.as_view(), name="bo-staff-remove"),
+    path("security/sessions/", api_system.SessionList.as_view(), name="bo-sessions"),
+    path("security/sessions/<int:pk>/revoke/", api_system.SessionRevoke.as_view(), name="bo-session-revoke"),
+    path("security/users/<int:pk>/revoke-sessions/", api_system.UserSessionsRevoke.as_view(), name="bo-user-sessions-revoke"),
+    path("security/audit/", api_system.AuditList.as_view(), name="bo-audit"),
+    path("security/audit/actions/", api_system.AuditActions.as_view(), name="bo-audit-actions"),
     path("", include(router.urls)),
 ]
