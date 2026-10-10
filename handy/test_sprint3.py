@@ -10,6 +10,7 @@ from decimal import Decimal
 import pytest
 from django.core.exceptions import ValidationError
 from django.urls import reverse
+from django.utils import timezone
 from rest_framework.test import APIClient
 
 from handy.models import (
@@ -52,7 +53,11 @@ def test_escrow_release_a_la_completion_avec_facture_et_gains():
     b = _booking(c, h)
     pay = _payment(b, status="pending", ref="e1")
 
-    pay.mark_held()                 # fournisseur confirme -> séquestre
+    with pytest.raises(ValidationError):
+        pay.mark_held()             # sans vérification serveur-à-serveur auprès du prestataire : refusé
+    pay.provider_verified_at = timezone.now()     # ce que pose handy.services.settlement après vérification (voir test_payments_providers.py)
+    pay.save(update_fields=["provider_verified_at"])
+    pay.mark_held()                 # fournisseur confirme (vérifié) -> séquestre
     assert pay.status == "held" and pay.is_paid is True
 
     # Complétion via la machine à états -> libère le séquestre
