@@ -834,7 +834,7 @@ class BookingViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
     queryset = (
         # service__handyman__handyman_profile : champ `artisan` de service_detail sans N+1.
         Booking.objects.select_related("client", "handyman", "service", "service__category",
-                                       "service__handyman__handyman_profile")
+                                       "service__handyman__handyman_profile", "engagement_event")
         .prefetch_related("service__images")
         .all()
     )

@@ -94,6 +94,7 @@ INSTALLED_APPS = [
     'business',
     'announcements',
     'continuity',
+    'engagements',
     'backoffice',
     # Libs
     'allauth',
@@ -454,6 +455,11 @@ CELERY_BEAT_SCHEDULE = {
     'continuity-purge-idempotency': {
         'task': 'continuity.tasks.purge_idempotency',
         'schedule': 86400.0,
+    },
+    # Engagements longue durée : échéances, planning, renouvellements, rappels (rejouable sans effet double).
+    'engagements-tick': {
+        'task': 'engagements.tasks.tick',
+        'schedule': 3600.0,
     },
     # Suivi en direct : purge des positions (historique minimal, expiration).
     'live-purge-positions': {

@@ -10,6 +10,7 @@ ALL = {
     "org.manage", "org.delete", "members.manage", "sites.manage", "equipment.manage", "requests.create",
     "requests.view_all", "requests.approve", "requests.dispatch", "contracts.manage", "preventive.manage",
     "budgets.manage", "invoices.manage", "reports.view", "audit.view", "approval_rules.manage", "view.structure",
+    "engagements.manage",   # publier des besoins longue durée et signer des contrats au nom de l'organisation
 }
 
 ROLE_CAPS = {

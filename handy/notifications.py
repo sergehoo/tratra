@@ -29,6 +29,13 @@ CATEGORY_BY_TYPE: Dict[str, str] = {
     "live_en_route": "live", "live_arrived": "live",
     "business_request": "business", "business_update": "business", "business_reminder": "business",
     "announcement": "announcement", "system": "system",
+    # Engagements longue durée : contrats, échéances, planning, évaluations.
+    "engagement_application": "engagement", "engagement_interview": "engagement", "engagement_selected": "engagement",
+    "contract_proposed": "engagement", "contract_accepted": "engagement", "contract_active": "engagement",
+    "contract_amendment": "engagement", "contract_suspended": "engagement", "contract_notice": "engagement",
+    "contract_ended": "engagement", "contract_renewal": "engagement", "installment_due": "engagement",
+    "installment_overdue": "engagement", "payment_declared": "engagement", "payment_confirmed": "engagement",
+    "schedule_event": "engagement", "evaluation_received": "engagement", "engagement_dispute": "engagement",
 }
 
 # Catégories dont le push ne peut pas être désactivé (vérification d'identité, sécurité du compte).
@@ -38,6 +45,7 @@ LOCKED_CATEGORIES = {"account"}
 CHANNEL_BY_CATEGORY = {
     "booking": "tratra_default", "message": "tratra_default", "live": "tratra_default", "payment": "tratra_default",
     "account": "tratra_default", "review": "tratra_updates", "business": "tratra_updates", "system": "tratra_updates",
+    "engagement": "tratra_default",
     "announcement": "tratra_announcements",
 }
 # Durée de vie d'un push non délivré (appareil éteint) : un « artisan en route » périmé n'a aucun intérêt.

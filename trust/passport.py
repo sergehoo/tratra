@@ -61,6 +61,14 @@ def _history(profile, *, detailed: bool) -> list:
     return rows
 
 
+def _engagements(profile) -> Dict:
+    from engagements.services.experience import experience_for
+
+    xp = experience_for(profile.user)
+    return {"contracts_completed": xp["contracts_completed"], "contracts_active": xp["contracts_active"], "months_total": xp["months_total"],
+            "distinct_principals": xp["distinct_principals"], "categories": xp["categories"], "evaluations": xp["evaluations"], "source": "plateforme"}
+
+
 def build(profile, *, request=None, owner: bool = False, config=None) -> Dict:
     """Passeport complet. `owner=True` ajoute les critères restants pour EXPERT/SUR, la liste de contrôle du
     dossier, l'historique motivé et les justificatifs en attente ; jamais de document ni de fichier."""
@@ -98,6 +106,8 @@ def build(profile, *, request=None, owner: bool = False, config=None) -> Dict:
                                           if m["reactivity"]["sample"] >= config.min_sample else None),
                        "min_sample": config.min_sample},
         "disputes": {"rate": m["disputes"]["rate"], "source": "plateforme"},
+        # Expérience VÉRIFIABLE tirée des engagements acceptés par les deux parties (additif : ne modifie ni badges ni score).
+        "engagements": _engagements(profile),
         "history": _history(profile, detailed=owner),
         "sources": SOURCES,
     }

@@ -959,6 +959,24 @@ class Notification(models.Model):
         ('business_reminder', 'Rappel de maintenance'),
         ('announcement', 'Annonce'),
         ('system', 'Information Tratra'),
+        ('engagement_application', "Candidature à un besoin longue durée"),
+        ('engagement_interview', "Entretien d'embauche ou de prestation"),
+        ('engagement_selected', 'Candidature retenue'),
+        ('contract_proposed', 'Contrat proposé'),
+        ('contract_accepted', 'Contrat accepté'),
+        ('contract_active', 'Contrat en cours'),
+        ('contract_amendment', 'Avenant au contrat'),
+        ('contract_suspended', 'Contrat suspendu ou repris'),
+        ('contract_notice', 'Préavis donné'),
+        ('contract_ended', 'Contrat terminé'),
+        ('contract_renewal', 'Contrat renouvelé ou à renouveler'),
+        ('installment_due', 'Échéance à venir'),
+        ('installment_overdue', 'Échéance en retard'),
+        ('payment_declared', 'Paiement déclaré'),
+        ('payment_confirmed', 'Paiement confirmé'),
+        ('schedule_event', 'Événement de planning'),
+        ('evaluation_received', 'Évaluation reçue'),
+        ('engagement_dispute', "Litige sur un contrat"),
     ]
     CATEGORIES = [
         ('booking', 'Réservations et missions'),
@@ -970,6 +988,7 @@ class Notification(models.Model):
         ('business', 'Entreprise'),
         ('announcement', 'Annonces'),
         ('system', 'Informations'),
+        ('engagement', 'Contrats et engagements'),
     ]
     PUSH_STATUSES = [
         ('', 'Non concerné'), ('queued', 'En file'), ('sent', 'Envoyé'), ('no_device', 'Aucun appareil'),

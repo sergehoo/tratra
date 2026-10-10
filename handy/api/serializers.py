@@ -724,6 +724,19 @@ class BookingSerializer(serializers.ModelSerializer):
     service_detail = ServiceSerializer(source="service", read_only=True)
     type = serializers.CharField(source="booking_type", read_only=True)
     is_immediate = serializers.BooleanField(read_only=True)
+    mission_type = serializers.SerializerMethodField()
+    contract_id = serializers.SerializerMethodField()
+
+    def _engagement_event(self, obj):
+        return getattr(obj, "engagement_event", None)      # occurrence d'un contrat récurrent (aucune requête avec select_related)
+
+    def get_mission_type(self, obj) -> str:
+        """`one_off` (réservation classique) ou `recurring` (occurrence d'un contrat récurrent : voir /handy/engagements/)."""
+        return "recurring" if self._engagement_event(obj) is not None else "one_off"
+
+    def get_contract_id(self, obj):
+        event = self._engagement_event(obj)
+        return event.contract_id if event is not None else None
 
     class Meta:
         model = Booking
@@ -735,6 +748,7 @@ class BookingSerializer(serializers.ModelSerializer):
             "address", "city", "postal_code",
             "description", "proposed_price", "handyman_comment",
             "response_date", "status", "type", "is_immediate",
+            "mission_type", "contract_id",
             "created_at", "updated_at", "version",
         ]
         # 'status' n'est PAS modifiable via PATCH : passer par /bookings/{id}/transition/.

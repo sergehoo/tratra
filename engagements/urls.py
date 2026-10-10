@@ -1,0 +1,63 @@
+from django.urls import path
+
+from engagements import api
+
+urlpatterns = [
+    path("engagements/rules/", api.rules, name="engagements-rules"),
+    path("engagements/me/overview/", api.me_overview, name="engagements-overview"),
+    path("engagements/me/experience/", api.me_experience, name="engagements-experience"),
+    path("engagements/me/replacements/", api.me_replacements, name="engagements-replacements"),
+    # Besoins, candidatures, entretiens
+    path("engagements/postings/", api.postings, name="engagements-postings"),
+    path("engagements/postings/mine/", api.postings_mine, name="engagements-postings-mine"),
+    path("engagements/postings/<int:pk>/", api.posting_detail, name="engagements-posting"),
+    path("engagements/postings/<int:pk>/publish/", api.posting_publish),
+    path("engagements/postings/<int:pk>/close/", api.posting_close),
+    path("engagements/postings/<int:pk>/apply/", api.posting_apply),
+    path("engagements/postings/<int:pk>/applications/", api.posting_applications),
+    path("engagements/applications/mine/", api.applications_mine),
+    path("engagements/applications/<int:pk>/decision/", api.application_decision),
+    path("engagements/applications/<int:pk>/withdraw/", api.application_withdraw),
+    path("engagements/applications/<int:pk>/interviews/", api.application_interview),
+    path("engagements/interviews/<int:pk>/respond/", api.interview_respond),
+    # Contrats
+    path("engagements/contracts/", api.contracts, name="engagements-contracts"),
+    path("engagements/contracts/<int:pk>/", api.contract_detail, name="engagements-contract"),
+    path("engagements/contracts/<int:pk>/propose/", api.contract_propose),
+    path("engagements/contracts/<int:pk>/send-back/", api.contract_send_back),
+    path("engagements/contracts/<int:pk>/decline/", api.contract_decline),
+    path("engagements/contracts/<int:pk>/accept/", api.contract_accept),
+    path("engagements/contracts/<int:pk>/resume/", api.contract_resume),
+    path("engagements/contracts/<int:pk>/notice/", api.contract_notice),
+    path("engagements/contracts/<int:pk>/non-renewal/", api.contract_non_renewal),
+    path("engagements/contracts/<int:pk>/close/", api.contract_close),
+    path("engagements/contracts/<int:pk>/history/", api.contract_history),
+    path("engagements/contracts/<int:pk>/document/", api.contract_document),
+    path("engagements/contracts/<int:pk>/amendments/", api.contract_amendments),
+    path("engagements/amendments/<int:pk>/respond/", api.amendment_respond),
+    path("engagements/amendments/<int:pk>/withdraw/", api.amendment_withdraw),
+    # Argent
+    path("engagements/contracts/<int:pk>/installments/", api.contract_installments),
+    path("engagements/installments/<int:pk>/", api.installment_detail),
+    path("engagements/installments/<int:pk>/lines/", api.installment_lines),
+    path("engagements/installments/<int:pk>/payments/", api.installment_payments),
+    path("engagements/installments/<int:pk>/waive/", api.installment_waive),
+    path("engagements/lines/<int:pk>/respond/", api.line_respond),
+    path("engagements/payments/<int:pk>/respond/", api.payment_respond),
+    path("engagements/evidence/<str:kind>/<int:pk>/", api.evidence, name="engagements-evidence"),
+    # Planning
+    path("engagements/contracts/<int:pk>/calendar/", api.contract_calendar),
+    path("engagements/contracts/<int:pk>/events/", api.contract_events),
+    path("engagements/contracts/<int:pk>/replacements/", api.contract_replacements),
+    path("engagements/events/<int:pk>/respond/", api.event_respond),
+    path("engagements/events/<int:pk>/cancel/", api.event_cancel),
+    path("engagements/events/<int:pk>/attendance/", api.event_attendance),
+    path("engagements/events/<int:pk>/attendance/respond/", api.event_attendance_respond),
+    path("engagements/events/<int:pk>/replacement/respond/", api.replacement_respond),
+    # Évaluations et litiges
+    path("engagements/contracts/<int:pk>/evaluations/", api.contract_evaluations),
+    path("engagements/evaluations/<int:pk>/", api.evaluation_update),
+    path("engagements/evaluations/<int:pk>/reply/", api.evaluation_reply),
+    path("engagements/evaluations/<int:pk>/report/", api.evaluation_report),
+    path("engagements/contracts/<int:pk>/disputes/", api.contract_disputes),
+]
