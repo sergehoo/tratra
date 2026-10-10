@@ -147,7 +147,7 @@ def public_verification(raw_code: str, request=None) -> Tuple[int, Dict]:
                      "message": "Ce professionnel n'est plus vérifié par Tratra. Ne le laissez pas intervenir "
                                 "en son nom et contactez le support."}
     return 200, {"valid": True, "status": "active", "tratra_id": pro.code,
-                 "message": "Professionnel vérifié par Tratra.", "holder": holder(profile, request),
+                 "message": "Identité contrôlée par l'équipe Tratra, statut confirmé à l'instant.", "holder": holder(profile, request),
                  "checked_at": timezone.now()}
 
 
