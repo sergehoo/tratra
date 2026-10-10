@@ -61,6 +61,14 @@ def send_notification_push(self, notification_id, collapse_key=None):
     if not notifications.push_enabled(n.user_id, n.category):
         Notification.objects.filter(pk=n.pk).update(push_status='disabled')
         return {"skipped": "disabled"}
+    if n.notification_type == "announcement":
+        # Annonce annulée/expirée, ou promotion dont le consentement a été retiré entre-temps : jamais de push.
+        from announcements.models import Announcement
+
+        a = Announcement.objects.filter(pk=(n.data or {}).get("id")).first()
+        if a is None or a.status != "published" or (a.kind == "promotion" and not notifications.has_marketing_consent(n.user_id)):
+            Notification.objects.filter(pk=n.pk).update(push_status='disabled')
+            return {"skipped": "announcement_not_deliverable"}
     payload = {"t": n.notification_type, "cat": n.category, "nid": n.pk, "deeplink": notifications.deeplink(n.data), **(n.data or {})}
     result = push.send_to_user(
         n.user_id, n.title or notifications.TYPE_LABELS.get(n.notification_type, "Tratra"), n.message[:200], payload,

@@ -92,6 +92,8 @@ INSTALLED_APPS = [
     'trust',
     'live',
     'business',
+    'announcements',
+    'backoffice',
     # Libs
     'allauth',
     'allauth.account',
@@ -441,6 +443,11 @@ CELERY_BEAT_SCHEDULE = {
     'business-run-preventive': {
         'task': 'business.tasks.run_preventive_plans',
         'schedule': 86400.0,
+    },
+    # Annonces : publication des annonces programmées échues et expiration des annonces dépassées.
+    'announcements-tick': {
+        'task': 'announcements.tasks.tick',
+        'schedule': 60.0,
     },
     # Suivi en direct : purge des positions (historique minimal, expiration).
     'live-purge-positions': {

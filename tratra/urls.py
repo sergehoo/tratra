@@ -62,6 +62,8 @@ urlpatterns = [
     path("admin/", admin.site.urls),
 
     # API métier
+    path("handy/backoffice/", include("backoffice.urls")),
+    path("handy/", include("announcements.urls")),
     path("handy/", include("handy.api.urls")),
 
     # OpenAPI / documentation interactive

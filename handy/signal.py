@@ -131,3 +131,15 @@ def notify_message_received(sender, instance: Message, created, **kwargs):
 def notify_dispute_changed(sender, instance: Dispute, created, **kwargs):
     from handy import notification_events
     notification_events.dispute_changed(instance, created)
+
+
+# Image d'annonce : même réencodage sans métadonnées (EXIF/GPS) que les autres images publiques.
+def _register_announcement_image_sanitizer():
+    from announcements.models import Announcement
+
+    PUBLIC_IMAGE_FIELDS[Announcement] = ("image",)
+    pre_save.connect(sanitize_public_images, sender=Announcement, dispatch_uid="handy_sanitize_public_images_Announcement")
+
+
+_register_announcement_image_sanitizer()
+
