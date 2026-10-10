@@ -1,5 +1,6 @@
 """Tratra Live : suivi GPS consenti, limité à la mission, contrôlé côté serveur, temps réel et purge."""
 from datetime import timedelta
+from urllib.parse import quote
 
 import pytest
 from asgiref.sync import async_to_sync
@@ -412,8 +413,9 @@ def test_websocket_requires_a_valid_participant_ticket_and_streams_each_viewers_
         for path in bad:
             comm, connected, _ = await _connect(path)
             assert connected is False, path
-        art_comm, ok1, _ = await _connect(f"/ws/live/{b.id}/?ticket={realtime.make_ticket(art.id, b.id)}")
-        cli_comm, ok2, _ = await _connect(f"/ws/live/{b.id}/?ticket={realtime.make_ticket(cli.id, b.id)}")
+        # le navigateur encode le billet (« : » devient %3A) : il doit être décodé côté serveur
+        art_comm, ok1, _ = await _connect(f"/ws/live/{b.id}/?ticket={quote(realtime.make_ticket(art.id, b.id), safe='')}")
+        cli_comm, ok2, _ = await _connect(f"/ws/live/{b.id}/?ticket={quote(realtime.make_ticket(cli.id, b.id), safe='')}")
         assert ok1 and ok2
         first_art, first_cli = await art_comm.receive_json_from(), await cli_comm.receive_json_from()
         assert first_art["state"]["role"] == "artisan" and first_cli["state"]["role"] == "client"

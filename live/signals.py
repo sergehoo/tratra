@@ -10,7 +10,7 @@ def booking_changed(sender, instance, created, **kwargs):
     """Changement de statut de la réservation : fin des partages à la clôture, état poussé aux deux participants."""
     if kwargs.get("raw") or created:
         return
-    if instance.status in ("completed", "cancelled"):
+    if instance.status in ("in_progress", "completed", "cancelled"):  # l'intervention a commencé ou la mission est close
         services.end_session(instance)
     if instance.status in ("confirmed", "in_progress", "completed", "cancelled"):
         realtime.broadcast(instance)

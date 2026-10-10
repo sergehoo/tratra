@@ -1,3 +1,5 @@
+from urllib.parse import parse_qs
+
 from channels.generic.websocket import AsyncJsonWebsocketConsumer
 from channels.db import database_sync_to_async
 
@@ -14,8 +16,8 @@ class LiveConsumer(AsyncJsonWebsocketConsumer):
     async def connect(self):
         self.group = None
         booking_id = int(self.scope["url_route"]["kwargs"]["booking_id"])
-        query = self.scope.get("query_string", b"").decode()
-        ticket = dict(p.split("=", 1) for p in query.split("&") if "=" in p).get("ticket", "")
+        query = parse_qs(self.scope.get("query_string", b"").decode())  # décode %3A etc. (billet encodé par le navigateur)
+        ticket = (query.get("ticket") or [""])[0]
         parsed = realtime.read_ticket(ticket)
         if parsed is None or parsed[1] != booking_id:
             await self.close(code=4401)
