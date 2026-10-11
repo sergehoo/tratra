@@ -2,10 +2,10 @@ import type { Booking } from "@/lib/types";
 
 /** Utilitaires d'affichage de l'espace artisan (aucune règle métier : mise en forme uniquement). */
 
-/** Prénom du client, à défaut son identifiant ; `null` si l'API n'en fournit aucun. */
+/** Prénom du client ; `null` si l'API n'en fournit aucun (l'identifiant technique n'est jamais affiché). */
 export function clientName(b: Booking): string | null {
   const c = b.client_detail;
-  return c?.first_name || c?.username || null;
+  return c?.first_name || null;
 }
 
 /** Date lisible en français ; `null` si la date est absente ou invalide. */

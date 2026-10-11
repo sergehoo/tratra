@@ -67,6 +67,26 @@ def test_users_list_masks_contact_details_excludes_staff_and_filters():
     assert api(person("u_plain")).get(f"{BO}/users/").status_code == 403
 
 
+def test_users_list_is_one_list_with_offer_missions_kyc_and_badges_filters():
+    """Compte unique : pas de classe client/artisan, mais des faits (services proposés, missions, KYC, badges) et un filtre « propose des services »."""
+    req = person("u_req")
+    pro = artisan("u_pro")
+    service(pro)
+    Booking.objects.create(client=req, handyman=pro, address="x", city="x", booking_date=timezone.now(), status="completed")
+    ended = BadgeAward.objects.create(profile=pro.handyman_profile, code=BadgeAward.EXPERT, ended_at=timezone.now())
+    active = sorted(BadgeAward.objects.filter(profile=pro.handyman_profile, ended_at__isnull=True).values_list("code", flat=True))
+    ops = api(staff("u_ops_people", "ops"))
+    rows = {r["id"]: r for r in ops.get(f"{BO}/users/").json()["results"]}
+    assert rows[pro.pk]["offers_services"] is True and rows[pro.pk]["services"] == 1 and rows[pro.pk]["missions_done"] == 1
+    assert sorted(rows[pro.pk]["badges"]) == active and ended.code not in rows[pro.pk]["badges"]              # seuls les badges actifs
+    assert rows[req.pk]["offers_services"] is False and rows[req.pk]["services"] == 0 and rows[req.pk]["kyc_state"] is None
+    assert [r["id"] for r in ops.get(f"{BO}/users/?offers=true").json()["results"]] == [pro.pk]
+    assert req.pk in [r["id"] for r in ops.get(f"{BO}/users/?offers=false").json()["results"]]
+    approved = [r["id"] for r in ops.get(f"{BO}/users/?kyc=approved").json()["results"]]
+    assert approved == ([pro.pk] if pro.handyman_profile.is_approved else [])
+    assert rows[pro.pk]["kyc_state"] == ("approved" if pro.handyman_profile.is_approved else rows[pro.pk]["kyc_state"])
+
+
 def test_user_detail_shows_full_contact_but_never_device_tokens_or_staff_accounts():
     c = person("ud_cli", first_name="Awa", last_name="Kone", phone="+2250701234567")
     Device.objects.create(user=c, device_token="SECRET-FCM-TOKEN-123", device_type="android")

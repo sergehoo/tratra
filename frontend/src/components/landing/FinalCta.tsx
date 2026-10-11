@@ -39,12 +39,12 @@ export default function FinalCta() {
             {isArtisan ? (
               <CtaLink href="/dashboard/provide" variant="night" size="lg">
                 <LayoutDashboard aria-hidden className="h-5 w-5" />
-                Accéder à mon espace artisan
+                Gérer mes prestations
               </CtaLink>
             ) : (
               <CtaLink href={registerHref("handyman")} variant="night" size="lg">
                 <HardHat aria-hidden className="h-5 w-5" />
-                Devenir artisan Tratra
+                Proposer un service
               </CtaLink>
             )}
           </div>

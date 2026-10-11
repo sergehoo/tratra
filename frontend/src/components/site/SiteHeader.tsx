@@ -221,7 +221,7 @@ export default function SiteHeader({ variant = "overlay" }: { variant?: "overlay
                     variant="accent"
                     leftIcon={<HardHat aria-hidden className="h-4 w-4" />}
                   >
-                    Devenir artisan
+                    Proposer un service
                   </ButtonLink>
                 </>
               )}
@@ -314,7 +314,7 @@ export default function SiteHeader({ variant = "overlay" }: { variant?: "overlay
                         onClick={() => close()}
                         leftIcon={<HardHat aria-hidden className="h-5 w-5" />}
                       >
-                        Devenir artisan
+                        Proposer un service
                       </ButtonLink>
                       <ButtonLink
                         href="/login"

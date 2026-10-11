@@ -27,9 +27,9 @@ export interface NavItem {
 }
 
 const ROLE_LABEL: Record<string, string> = {
-  client: "Client",
-  employeur: "Employeur",
-  handyman: "Artisan",
+  client: "Membre",
+  employeur: "Membre",
+  handyman: "Membre",
   entreprise: "Entreprise",
   admin: "Administrateur",
 };
@@ -81,7 +81,7 @@ function UserMenu({ onLogout }: { onLogout: () => void }) {
   }, [open]);
 
   if (!user) return null;
-  const name = [user.first_name, user.last_name].filter(Boolean).join(" ") || user.phone || user.username;
+  const name = [user.first_name, user.last_name].filter(Boolean).join(" ") || user.phone || "Mon compte";
   const role = ROLE_LABEL[user.user_type] ?? user.user_type;
 
   return (

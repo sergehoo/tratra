@@ -99,7 +99,7 @@ export default function KycPage() {
   return (
     <>
       <PageHeader
-        eyebrow="Espace artisan"
+        eyebrow="Mes services"
         title="Vérification (KYC)"
         description="Envoyez vos pièces justificatives : notre équipe les examine, et chaque document affiche son statut réel. Un document n’est « Validé » qu’après cet examen."
       />

@@ -43,7 +43,7 @@ interface AuditRow { id: number; at: string; actor: string; action: string; targ
 interface Support { notes: { id: number; body: string; author: string; created_at: string }[] }
 interface KycDetail { profile_id: number; state_label: string; documents: Doc[] }
 
-const KIND_FR: Record<string, string> = { client: "Client", artisan: "Artisan", company: "Entreprise" };
+const KIND_FR: Record<string, string> = { client: "Demande des services", artisan: "Propose des services", company: "Entreprise" };
 const METHOD_FR: Record<string, string> = { card: "Carte", transfer: "Virement", cash: "Espèces", check: "Chèque", om: "Orange Money", mtn: "MTN MoMo", moov: "Moov Money", wave: "Wave" };
 const CONTRACT_FR: Record<string, string> = { draft: "Brouillon", pending_acceptance: "À accepter", accepted: "Accepté", active: "En cours", suspended: "Suspendu", notice: "Préavis", terminated: "Résilié", completed: "Terminé", cancelled: "Annulé" };
 const DOC_TONE = { pending: "warning", approved: "success", rejected: "danger" } as const;

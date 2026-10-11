@@ -22,7 +22,7 @@ export default function ReputationPage() {
   if (!data) {
     return (
       <>
-        <PageHeader eyebrow="Espace artisan" title="Ma réputation" />
+        <PageHeader eyebrow="Mes services" title="Ma réputation" />
         {error ? <Alert tone="danger">{error}</Alert> : null}
         {!provider ? (
           <EmptyState
@@ -39,7 +39,7 @@ export default function ReputationPage() {
   return (
     <>
       <PageHeader
-        eyebrow="Espace artisan"
+        eyebrow="Mes services"
         title="Ma réputation"
         description="Vos badges et votre score sont calculés automatiquement à partir de données réelles : vérification d’identité, justificatifs approuvés, missions, avis et ponctualité."
         actions={

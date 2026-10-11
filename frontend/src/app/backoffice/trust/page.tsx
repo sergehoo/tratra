@@ -41,7 +41,7 @@ export default function TrustPage() {
   }
 
   const columns: BoColumn<Row>[] = [
-    { key: "name", header: "Artisan", primary: true, cell: (r) => <span className="font-semibold text-ink">{r.name} <span className="font-normal text-ash">#{r.profile_id}</span></span> },
+    { key: "name", header: "Prestataire", primary: true, cell: (r) => <span className="font-semibold text-ink">{r.name} <span className="font-normal text-ash">#{r.profile_id}</span></span> },
     { key: "score", header: "Score", align: "right", sort: "score", cell: (r) => r.trust_score ?? <span className="text-ash">Non évaluable</span> },
     { key: "badges", header: "Badges", cell: (r) => r.badges.length ? <span className="flex flex-wrap gap-1.5">{r.badges.map((b) => <Badge key={b} tone={b === "VERIFIE" ? "success" : b === "EXPERT" ? "accent" : "primary"}>{BADGE_FR[b] ?? b}</Badge>)}</span> : <span className="text-ash">Aucun</span> },
     { key: "jobs", header: "Missions", align: "right", sort: "jobs", hideOnMobile: true, cell: (r) => r.completed_jobs },

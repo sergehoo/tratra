@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 import { Eye, Hammer, LifeBuoy, ShieldCheck, UserCheck, UserX, Users } from "lucide-react";
-import { Badge, PageHeader } from "@/components/ds";
+import { Badge, PageHeader, type BadgeTone } from "@/components/ds";
 import { bo } from "@/lib/bo";
 import { useBo } from "@/lib/BoProvider";
 import { useDashboardKpis } from "@/lib/boDashboard";
@@ -25,11 +25,22 @@ interface Row {
   artisan_approved: boolean;
   profile_id: number | null;
   bookings: number;
+  offers_services: boolean;
+  services: number;
+  missions_done: number;
+  open_disputes: number;
+  kyc_state: string | null;
+  kyc_label: string | null;
+  badges: string[];
+  rating: number | null;
 }
+
+const KYC_TONE: Record<string, BadgeTone> = { pending: "warning", ready: "info", approved: "success", rejected: "danger", incomplete: "gray" };
+const BADGE_FR: Record<string, string> = { NOUVEAU: "Nouveau", VERIFIE: "Vérifié", EXPERT: "Expert", SUR: "Sûr" };
 
 export default function UsersPage() {
   const { can } = useBo();
-  const m = useManagedList<Row, { type: string; active: string; verified: string; city: string; from: string; to: string }>("/users/", { type: "", active: "", verified: "", city: "", from: "", to: "" });
+  const m = useManagedList<Row, { offers: string; kyc: string; type: string; active: string; verified: string; city: string; from: string; to: string }>("/users/", { offers: "", kyc: "", type: "", active: "", verified: "", city: "", from: "", to: "" });
   const { values: f, list } = m;
   const kpis = useDashboardKpis(can("dashboard.view"))?.users;
   const counts = useCounts("/users/", { _all: "", true: "active=true", false: "active=false" }, list.version);
@@ -42,13 +53,24 @@ export default function UsersPage() {
     { key: "contact", header: "Contact", wrap: true, cell: (r) => <span className="text-inkSoft">{[r.phone, r.email].filter(Boolean).join(" · ") || "—"}</span> },
     { key: "city", header: "Ville", from: "3xl", hideOnMobile: true, cell: (r) => r.city ?? "—" },
     {
-      key: "roles", header: "Profil", cell: (r) => (
+      key: "activity", header: "Activité", wrap: true, cell: (r) => (
         <span className="flex flex-wrap gap-1.5">
-          {r.is_artisan ? <Badge tone={r.artisan_approved ? "success" : "warning"}>{r.artisan_approved ? "Artisan approuvé" : "Artisan en attente"}</Badge> : <Badge tone="gray">Client</Badge>}
+          {r.offers_services ? <Badge tone="primary">{r.services} service{r.services > 1 ? "s" : ""} proposé{r.services > 1 ? "s" : ""}</Badge> : <Badge tone="gray">Aucun service proposé</Badge>}
+          {r.missions_done ? <Badge tone="success">{r.missions_done} mission{r.missions_done > 1 ? "s" : ""} réalisée{r.missions_done > 1 ? "s" : ""}</Badge> : null}
           {!r.is_verified ? <Badge tone="warning">Téléphone non vérifié</Badge> : null}
         </span>
       ),
     },
+    {
+      key: "trust", header: "KYC · Trust", wrap: true, cell: (r) => (
+        <span className="flex flex-wrap gap-1.5">
+          {r.kyc_state ? <Badge tone={KYC_TONE[r.kyc_state] ?? "gray"}>KYC : {r.kyc_label}</Badge> : <span className="text-ash">—</span>}
+          {r.badges.map((b) => <Badge key={b} tone="success">{BADGE_FR[b] ?? b}</Badge>)}
+        </span>
+      ),
+    },
+    { key: "rep", header: "Réputation", from: "xl", hideOnMobile: true, cell: (r) => (r.rating ? `${r.rating.toFixed(1)} / 5` : "—") },
+    { key: "risk", header: "Risque", from: "xl", hideOnMobile: true, cell: (r) => (r.open_disputes ? <Badge tone="danger">{r.open_disputes} litige{r.open_disputes > 1 ? "s" : ""} ouvert{r.open_disputes > 1 ? "s" : ""}</Badge> : <span className="text-ash">—</span>) },
     { key: "bookings", header: "Réservations", align: "right", sort: "bookings", cell: (r) => r.bookings },
     { key: "last", header: "Dernière connexion", from: "3xl", hideOnMobile: true, sort: "last_login", cell: (r) => dd(r.last_login) },
     { key: "joined", header: "Inscrit le", from: "2xl", hideOnMobile: true, sort: "date_joined", cell: (r) => dd(r.date_joined) },
@@ -78,7 +100,7 @@ export default function UsersPage() {
     <>
       <PageHeader
         title="Utilisateurs"
-        description="Comptes clients, artisans et entreprises. Les coordonnées sont masquées en liste ; la fiche les affiche aux rôles autorisés et le Super Admin les voit complètes ici."
+        description="Un seul compte pour demander et proposer des services : la liste montre l’activité réelle (services, missions, KYC, badges). Les coordonnées sont masquées en liste ; la fiche les affiche aux rôles autorisés et le Super Admin les voit complètes ici."
         actions={<ExportButton dataset="users" from={f.from} to={f.to} />}
       />
       {notice ? <p role="status" className="mb-4 rounded-xl bg-successSoft px-4 py-3 text-sm font-semibold text-successInk">{notice}</p> : null}
@@ -86,7 +108,7 @@ export default function UsersPage() {
       {kpis ? (
         <KpiGrid className="mb-5">
           <Kpi icon={<Users className="h-5 w-5" />} label="Comptes" value={kpis.total} hint={`${kpis.new_7d} nouveaux sur 7 jours · ${kpis.new_30d} sur 30 jours`} />
-          <Kpi icon={<Hammer className="h-5 w-5" />} tone="accent" label="Artisans approuvés" value={`${kpis.artisans_approved} / ${kpis.artisans}`} hint="Profils approuvés par l’équipe KYC" />
+          <Kpi icon={<Hammer className="h-5 w-5" />} tone="accent" label="Profils prestataires approuvés" value={`${kpis.artisans_approved} / ${kpis.artisans}`} hint="Comptes dont le KYC est approuvé" />
           <Kpi tone="night" icon={<UserX className="h-5 w-5" />} label="Suspendus" value={counts.false ?? "—"} hint="Connexion impossible" />
           <Kpi label="Résultats de cette vue" value={list.loading && !list.rows.length ? "…" : list.count} hint={m.activeCount ? `${m.activeCount} filtre(s) actif(s)` : "Aucun filtre"} />
         </KpiGrid>
@@ -101,7 +123,9 @@ export default function UsersPage() {
         onRefresh={() => void list.reload()}
         refreshing={list.loading}
       >
-        <FilterSelect label="Type" value={f.type} onChange={(v) => m.set({ type: v })} options={[["", "Tous"], ["client", "Clients"], ["artisan", "Artisans"], ["company", "Entreprises"]]} />
+        <FilterSelect label="Services" value={f.offers} onChange={(v) => m.set({ offers: v })} options={[["", "Tous"], ["true", "Propose des services"], ["false", "N’en propose pas"]]} />
+        <FilterSelect label="KYC" value={f.kyc} onChange={(v) => m.set({ kyc: v })} options={[["", "Tous"], ["pending", "À examiner"], ["ready", "Prêt"], ["approved", "Approuvé"], ["rejected", "Refusé"], ["incomplete", "Incomplet"]]} />
+        <FilterSelect label="Entreprise" value={f.type} onChange={(v) => m.set({ type: v })} options={[["", "Tous"], ["company", "Compte entreprise"]]} />
         <FilterSelect label="Téléphone" value={f.verified} onChange={(v) => m.set({ verified: v })} options={[["", "Tous"], ["true", "Vérifié"], ["false", "Non vérifié"]]} />
         <div className="min-w-[10rem]">
           <label htmlFor="users-city" className="mb-1 block text-xs font-semibold text-ash">Ville</label>

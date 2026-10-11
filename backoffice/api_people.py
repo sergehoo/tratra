@@ -3,9 +3,11 @@
  - Aucune pièce d'identité dans une réponse JSON : un document se lit via un endpoint dédié, journalisé, en no-store ;
  - aucun badge ni validation créés à la main : on déclenche la réévaluation PAR LA RÈGLE (trust.engine) ;
  - suspension = effet immédiat par la règle d'éligibilité (publication, missions, validité du Tratra ID)."""
+from typing import Optional
+
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import Case, CharField, Count, Exists, F, IntegerField, Min, OuterRef, Q, Value, When
+from django.db.models import Case, CharField, Count, Exists, F, IntegerField, Min, OuterRef, Prefetch, Q, Value, When
 from django.http import FileResponse
 from rest_framework import status
 from rest_framework.response import Response
@@ -59,7 +61,44 @@ def _user_row(u: User, request) -> dict:
         "is_active": u.is_active, "is_verified": u.is_verified, "date_joined": u.date_joined, "last_login": u.last_login,
         "is_artisan": profile is not None, "artisan_approved": bool(profile and profile.is_approved),
         "profile_id": profile.pk if profile is not None else None, "bookings": getattr(u, "n_bookings", 0),
+        # Compte unique : un même compte demande ET propose des services ; ces indicateurs sont des faits, pas une classe de compte.
+        "offers_services": getattr(u, "n_services", 0) > 0, "services": getattr(u, "n_services", 0),
+        "missions_done": getattr(u, "n_missions_done", 0), "open_disputes": getattr(u, "n_open_disputes", 0),
+        "kyc_state": _user_kyc_state(u, profile), "kyc_label": KYC_STATES.get(_user_kyc_state(u, profile)) if profile else None,
+        "badges": [b.code for b in getattr(profile, "active_badges", [])] if profile else [],
+        "rating": round(float(profile.rating or 0), 2) if profile and profile.rating else None,
     }
+
+
+def _filter_kyc_state(qs, state: str):
+    """Filtre par état de dossier KYC, avec la même hiérarchie que `_user_kyc_state` (les comptes sans profil prestataire sont exclus)."""
+    qs = qs.filter(handyman_profile__isnull=False)
+    not_pending = Q(kyc_pending=False)
+    approved = Q(handyman_profile__is_approved=True)
+    if state == "pending":
+        return qs.filter(kyc_pending=True)
+    if state == "approved":
+        return qs.filter(not_pending, approved)
+    if state == "ready":
+        return qs.filter(not_pending, ~approved, kyc_id_ok=True)
+    if state == "rejected":
+        return qs.filter(not_pending, ~approved, kyc_id_ok=False, kyc_rejected=True)
+    return qs.filter(not_pending, ~approved, kyc_id_ok=False, kyc_rejected=False)
+
+
+def _user_kyc_state(u: User, profile) -> Optional[str]:
+    """Même hiérarchie que la file KYC (à examiner > approuvé > prêt > refusé > incomplet), lue sur les annotations de la liste."""
+    if profile is None:
+        return None
+    if getattr(u, "kyc_pending", False):
+        return "pending"
+    if profile.is_approved:
+        return "approved"
+    if getattr(u, "kyc_id_ok", False):
+        return "ready"
+    if getattr(u, "kyc_rejected", False):
+        return "rejected"
+    return "incomplete"
 
 
 class UserList(BOView):
@@ -67,8 +106,15 @@ class UserList(BOView):
 
     def get(self, request):
         p = request.query_params
+        docs = HandymanDocument.objects.filter(handyman__user=OuterRef("pk"))
         qs = (User.objects.filter(is_staff=False).select_related("handyman_profile")
-              .annotate(n_bookings=Count("client_bookings", distinct=True) + Count("handyman_bookings", distinct=True)))
+              .prefetch_related(Prefetch("handyman_profile__badge_awards", queryset=BadgeAward.objects.filter(ended_at__isnull=True), to_attr="active_badges"))
+              .annotate(n_bookings=Count("client_bookings", distinct=True) + Count("handyman_bookings", distinct=True),
+                        n_services=Count("services", distinct=True),
+                        n_missions_done=Count("handyman_bookings", filter=Q(handyman_bookings__status="completed"), distinct=True),
+                        n_open_disputes=Count("disputes_made", filter=Q(disputes_made__status__in=("open", "under_review")), distinct=True),
+                        kyc_pending=Exists(docs.filter(status="pending")), kyc_rejected=Exists(docs.filter(status="rejected")),
+                        kyc_id_ok=Exists(docs.filter(document_type="id_card", status="approved"))))
         q = (p.get("q") or "").strip()
         if q:
             qs = qs.filter(Q(first_name__icontains=q) | Q(last_name__icontains=q) | Q(username__icontains=q)
@@ -82,11 +128,15 @@ class UserList(BOView):
             qs = qs.filter(Q(company_profile__isnull=False) | Q(business_memberships__is_active=True)).distinct()
         elif kind == "client":
             qs = qs.filter(handyman_profile__isnull=True, company_profile__isnull=True)
+        if p.get("offers") in ("true", "false"):
+            qs = qs.filter(n_services__gt=0) if p["offers"] == "true" else qs.filter(n_services=0)
+        if p.get("kyc") in KYC_STATES:
+            qs = _filter_kyc_state(qs, p["kyc"])
         for param, field in (("active", "is_active"), ("verified", "is_verified")):
             if p.get(param) in ("true", "false"):
                 qs = qs.filter(**{field: p[param] == "true"})
         qs = apply_range(request, qs, "date_joined")
-        qs = qs.order_by(ordering(request, {"date_joined": "date_joined", "last_login": "last_login", "bookings": "n_bookings", "name": "first_name"}, "-date_joined"), "-id")
+        qs = qs.order_by(ordering(request, {"date_joined": "date_joined", "last_login": "last_login", "bookings": "n_bookings", "services": "n_services", "missions": "n_missions_done", "name": "first_name"}, "-date_joined"), "-id")
         return paginate(request, qs, lambda u: _user_row(u, request))
 
 

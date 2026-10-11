@@ -27,7 +27,7 @@ export default function KycPage() {
   const counts = useCounts("/kyc/", { _all: "", pending: "state=pending", ready: "state=ready", approved: "state=approved", rejected: "state=rejected", incomplete: "state=incomplete" }, list.version);
 
   const columns: BoColumn<Row>[] = [
-    { key: "name", header: "Artisan", primary: true, cell: (r) => <span className="font-semibold text-ink">{r.name} <span className="font-normal text-ash">#{r.profile_id}</span></span> },
+    { key: "name", header: "Prestataire", primary: true, cell: (r) => <span className="font-semibold text-ink">{r.name} <span className="font-normal text-ash">#{r.profile_id}</span></span> },
     { key: "commune", header: "Commune", from: "xl", hideOnMobile: true, cell: (r) => r.commune ?? "—" },
     { key: "state", header: "Dossier", cell: (r) => <span className="flex flex-wrap gap-1.5"><Badge tone={TONE[r.state] ?? "gray"}>{r.state_label}</Badge>{!r.account_active ? <Badge tone="danger">Compte suspendu</Badge> : null}</span> },
     { key: "docs", header: "Pièces", wrap: true, cell: (r) => <span className="text-inkSoft">{r.documents.pending} à examiner · {r.documents.approved} approuvée(s) · {r.documents.rejected} refusée(s)</span> },

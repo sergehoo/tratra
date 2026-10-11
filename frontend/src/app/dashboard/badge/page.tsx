@@ -20,7 +20,7 @@ export default function BadgePage() {
   if (!data) {
     return (
       <>
-        <PageHeader eyebrow="Espace artisan" title="Mon badge Tratra ID" />
+        <PageHeader eyebrow="Mes services" title="Mon badge Tratra ID" />
         {error ? <Alert tone="danger">{error}</Alert> : null}
         {!provider ? (
           <EmptyState
@@ -64,7 +64,7 @@ export default function BadgePage() {
   return (
     <>
       <PageHeader
-        eyebrow="Espace artisan"
+        eyebrow="Mes services"
         title="Mon badge Tratra ID"
         description="Votre identité professionnelle vérifiable : les clients scannent le QR pour confirmer en direct que vous êtes bien vérifié par Tratra."
       />

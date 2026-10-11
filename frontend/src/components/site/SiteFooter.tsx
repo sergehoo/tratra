@@ -26,8 +26,8 @@ const DEFAULT_TRADES: FooterLink[] = [
 ];
 
 const PLATFORM: FooterLink[] = [
-  { label: "Rechercher un artisan", href: "/search" },
-  { label: "Devenir artisan", href: registerHref("handyman") },
+  { label: "Rechercher un professionnel", href: "/search" },
+  { label: "Proposer un service", href: registerHref("handyman") },
   { label: "Créer un compte entreprise", href: registerHref("entreprise") },
   { label: "Connexion", href: "/login" },
 ];

@@ -38,12 +38,12 @@ function PublishTile({ wide }: { wide: boolean }) {
         {isArtisan ? (
           <CtaLink href="/dashboard/provide" variant="accent">
             <LayoutDashboard aria-hidden className="h-4 w-4" />
-            Mon espace artisan
+            Mes services
           </CtaLink>
         ) : (
           <CtaLink href={registerHref("handyman")} variant="accent">
             <HardHat aria-hidden className="h-4 w-4" />
-            Devenir artisan
+            Proposer un service
           </CtaLink>
         )}
       </div>
