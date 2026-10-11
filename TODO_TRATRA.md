@@ -15,7 +15,13 @@ Aucun push, aucun déploiement. Tout est en commits locaux sur `feat/compte-uniq
 - Actions : suspension puis réactivation d'un compte depuis la console, vérifiées en base ; audit `backoffice.user.suspended` / `reactivated` avec auteur et motif.
 - Backend `backoffice` : 93 tests OK. `tsc` OK. Build de production OK.
 
-## Nouveau brief (lots 1 à 9) — RIEN n'est commencé
+## Étapes de la reprise (11 oct. 2026) — état réel
+- **Étape 2 — Compte unique : fait.** « Proposer un service » / « Mes services » / « Gérer mes prestations » remplacent « Devenir artisan » (web et Flutter) ; plus d'identifiant technique affiché ; libellé « Membre » ; liste Utilisateurs unique du Back-Office (services proposés, missions réalisées, KYC, badges Trust, réputation, litiges ouverts, filtres « propose / ne propose pas de services » et KYC). Règles KYC inchangées. Reste : photo modifiable, nom/prénom, préférences et confidentialité regroupés dans un seul écran Flutter (raccourcis web faits).
+- **Étape 3 — Adresses : fait** (backend, web, Flutter). Principale/secondaires/favorites, autocomplétion et géocodage configurables (cache, limite, panne => saisie manuelle), sélection sur carte, position actuelle avec consentement (lecture unique), adresse différente par réservation (web). Non fait : sélecteur d'adresses enregistrées dans le parcours de réservation Flutter (la position et la saisie manuelle fonctionnent).
+- **Étape 4 — Transport : fait** (backend, Back-Office, web, Flutter). Voir `docs/adresses-transport.md`. Désactivé par défaut ; tout est configurable ; sans OSRM (`ROUTING_OSRM_URL`) la distance est « indisponible » et le forfait de secours s'applique.
+- **Étape 5 — Évaluations : fait** (backend, Back-Office, web, Flutter). Évaluation mutuelle par mission, notes masquées jusqu'à réciprocité ou 7 jours (`EVALUATION_REVEAL_DAYS`), scores sans moyenne sous 3 notes, contestation, surveillance proposée + décisions humaines avec recours, évaluation mensuelle des contrats (défaut 30 jours, invitations à chaque échéance et à la clôture). Limite : l'évaluation client → prestataire passe encore par l'écran « À rédiger » existant (photos) ; l'évaluation du demandeur par le prestataire est dans « Évaluations réciproques ».
+
+## Reste à faire du brief (lots 3, 4, 6, 8)
 Ordre prévu : 1 compte unique/profil → 2 adresses → 7 transport → 5 évaluations mutuelles → 3-4 IA fraude/KYC/Trust → 6 recommandations → 8 Back-Office → tests.
 - Lot 1 : la distinction client/artisan existe déjà côté compte unique ; reste à chercher les libellés « Devenir artisan » / « compte professionnel » dans `frontend/src` et `flutter_tratra/lib` (la recherche n'a pas abouti), à retirer l'affichage du username, et à ajouter dans le Back-Office les filtres « propose des services », nombres de services et de missions, et badges Trust.
 - Lots 2 à 8 : tout est à faire.
