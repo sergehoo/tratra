@@ -240,3 +240,16 @@ def test_dashboard_overview_and_exports_are_real_and_safe():
     inst_csv = ops.get("/handy/backoffice/analytics/export/engagement_installments/")
     assert inst_csv.status_code == 200 and "statut_commission" in inst_csv.content.decode()
     assert audited("export.downloaded", target_type="export").count() == 2
+
+
+def test_contracts_installments_and_disputes_filter_by_user_for_the_user_sheet():
+    owner, worker, contract, _today = world()
+    stranger = eng_person("bo_stranger")
+    ops = api(staff("bo_ops_user", "ops"))
+    ids = lambda path, qs: [r["id"] for r in ops.get(f"{BO}/{path}/?{qs}").json()["results"]]       # noqa: E731
+    assert ids("contracts", f"user={owner.id}") == [contract.id] and ids("contracts", f"user={worker.id}") == [contract.id]
+    assert ids("contracts", f"user={stranger.id}") == [] and ids("contracts", "user=abc") == [contract.id]       # valeur invalide ignorée
+    assert ids("installments", f"user={owner.id}") and ids("installments", f"user={stranger.id}") == []
+    dispute = EngagementDispute.objects.create(contract=contract, opened_by=worker, kind="payment", reason="Échéance contestée")
+    assert ids("disputes", f"user={owner.id}") == [dispute.id] and ids("disputes", f"user={worker.id}") == [dispute.id]
+    assert ids("disputes", f"user={stranger.id}") == []

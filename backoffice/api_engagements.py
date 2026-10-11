@@ -114,6 +114,8 @@ class ContractList(BOView):
                 qs = qs.filter(**{field: p[field]})
         if (p.get("category") or "").isdigit():
             qs = qs.filter(category_id=int(p["category"]))
+        if (p.get("user") or "").isdigit():  # contrats d'un compte (fiche utilisateur) : donneur d'ordre OU prestataire
+            qs = qs.filter(Q(principal_id=int(p["user"])) | Q(worker_id=int(p["user"])))
         if p.get("flag") == "overdue":
             qs = qs.filter(n_overdue__gt=0)
         elif p.get("flag") == "disputed":
@@ -250,6 +252,8 @@ class InstallmentList(BOView):
             qs = qs.filter(contract_id=int(p["contract"]))
         if p.get("fee") in ("due", "settled", "waived"):
             qs = qs.filter(platform_fee_status=p["fee"])
+        if (p.get("user") or "").isdigit():
+            qs = qs.filter(Q(contract__principal_id=int(p["user"])) | Q(contract__worker_id=int(p["user"])))
         start, stop = parse_date(p.get("from") or ""), parse_date(p.get("to") or "")
         if start:
             qs = qs.filter(due_date__gte=start)
@@ -302,6 +306,9 @@ class DisputeList(BOView):
             qs = qs.filter(status__in=[s for s in p["status"].split(",") if s])
         if p.get("kind"):
             qs = qs.filter(kind=p["kind"])
+        if (p.get("user") or "").isdigit():
+            uid = int(p["user"])
+            qs = qs.filter(Q(opened_by_id=uid) | Q(contract__principal_id=uid) | Q(contract__worker_id=uid))
         return paginate(request, apply_range(request, qs, "created_at").order_by("-created_at", "-id"), _dispute_row)
 
 

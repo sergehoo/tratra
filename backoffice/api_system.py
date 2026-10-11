@@ -576,7 +576,23 @@ class StaffList(BOView):
     bo_permission = "security.manage"
 
     def get(self, request):
-        qs = User.objects.filter(is_staff=True).order_by("-is_superuser", "first_name", "id")
+        p = request.query_params
+        qs = User.objects.filter(is_staff=True)
+        q = (p.get("q") or "").strip()
+        if q:
+            qs = qs.filter(Q(first_name__icontains=q) | Q(last_name__icontains=q) | Q(email__icontains=q) | Q(username__icontains=q))
+        if p.get("active") in ("true", "false"):
+            qs = qs.filter(is_active=p["active"] == "true")
+        role = p.get("role")
+        if role == "super_admin":
+            qs = qs.filter(is_superuser=True)
+        elif role in rbac.ROLES:
+            qs = qs.filter(groups__name=rbac.role_group_name(role)).distinct()
+        if p.get("mfa") in ("enrolled", "missing"):  # contrôle de la double authentification : qui n'a pas encore activé son appareil ?
+            from backoffice.models import StaffMFA
+            enrolled = StaffMFA.objects.filter(confirmed_at__isnull=False).values("user_id")
+            qs = qs.filter(pk__in=enrolled) if p["mfa"] == "enrolled" else qs.exclude(pk__in=enrolled)
+        qs = qs.order_by("-is_superuser", "first_name", "id")
         return paginate(request, qs, lambda u: _staff_row(u, request))
 
     @transaction.atomic

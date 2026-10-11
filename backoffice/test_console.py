@@ -130,6 +130,7 @@ def test_disputes_filter_by_text_user_period_and_sort():
     assert ids("user=999999") == []
     assert ids(f"from={timezone.localdate() - timedelta(days=2)}") == [recent.id]
     assert ids("ordering=created_at") == [old.id, recent.id] and ids("status=under_review") == [recent.id]
+    assert ids("status=todo") == [recent.id, old.id] and ids("status=resolved") == []         # « à traiter » = ouverts et en examen
 
 
 def test_reviews_keep_the_moderation_queue_by_default_and_accept_period_and_rating_sort():
@@ -193,3 +194,36 @@ def test_business_invoices_filter_by_status_text_and_period():
     assert ids("status=void") == [void.id] and ids("status=issued") == [done.id]
     assert ids("q=plateau") == sorted([done.id, void.id]) and ids("q=ci-2026-02") == [void.id] and ids("q=zzz") == []
     assert ids("ordering=total") == sorted([done.id, void.id]) and ids(f"to={timezone.localdate() - timedelta(days=1)}") == []
+
+
+def test_reports_filter_by_text_period_and_state():
+    from handy.models import Report
+
+    a = artisan("rp_art")
+    reporter = person("rp_cl", first_name="Nadia")
+    booking = make_booking(person("rp_c2"), a, "completed", svc=service(a, "Soudure"))
+    review = Review.objects.create(booking=booking, rating=1, comment="Arnaque totale")
+    fresh = Report.objects.create(reporter=reporter, report_type="review", review=review, reason="Propos injurieux")
+    done = Report.objects.create(reporter=reporter, report_type="review", review=review, reason="Doublon", is_resolved=True)
+    Report.objects.filter(pk=done.pk).update(created_at=timezone.now() - timedelta(days=15))
+    ops = api(staff("rp_ops", "ops"))
+    ids = lambda qs="": [r["id"] for r in ops.get(f"{BO}/reviews/reports/?{qs}").json()["results"]]       # noqa: E731
+    assert ids() == [fresh.id] and ids("resolved=true") == [done.id] and sorted(ids("resolved=all")) == sorted([fresh.id, done.id])
+    assert ids("q=injurieux") == [fresh.id] and ids("q=arnaque") == [fresh.id] and ids("q=nadia&resolved=all") and ids("q=zzzz") == []
+    assert ids(f"resolved=all&from={timezone.localdate() - timedelta(days=3)}") == [fresh.id]
+    assert ids("resolved=all&ordering=created_at") == [done.id, fresh.id]
+
+
+def test_staff_list_filters_by_text_role_status_and_mfa_enrolment():
+    from backoffice.models import StaffMFA
+
+    root = staff("st_root", superuser=True)
+    ops, support, gone = staff("st_ops", "ops"), staff("st_support", "support"), staff("st_gone", "ops")
+    type(gone).objects.filter(pk=gone.pk).update(is_active=False)
+    StaffMFA.objects.create(user=ops, secret_enc="chiffré-factice", confirmed_at=timezone.now())
+    boss = api(root)
+    names = lambda qs: sorted(r["name"] for r in boss.get(f"{BO}/security/staff/?{qs}").json()["results"])       # noqa: E731
+    assert names("q=support") == ["St_Support A."] and names("role=ops") == ["St_Gone A.", "St_Ops A."] and names("role=super_admin") == ["St_Root A."]
+    assert names("active=false") == ["St_Gone A."] and "St_Gone A." not in names("active=true")
+    assert names("mfa=enrolled") == ["St_Ops A."] and "St_Ops A." not in names("mfa=missing") and "St_Support A." in names("mfa=missing")
+    assert names("role=inconnu") == sorted(["St_Root A.", "St_Ops A.", "St_Support A.", "St_Gone A."])         # rôle inconnu : ignoré

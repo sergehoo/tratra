@@ -287,7 +287,7 @@ class DisputeList(BOView):
         p = request.query_params
         if p.get("status") in dict(Dispute.STATUS_CHOICES):
             qs = qs.filter(status=p["status"])
-        elif p.get("open") == "true":
+        elif p.get("status") == "todo" or p.get("open") == "true":   # « à traiter » = ouverts ET en examen
             qs = qs.filter(status__in=("open", "under_review"))
         if (p.get("user") or "").isdigit():
             uid = int(p["user"])
@@ -507,12 +507,19 @@ class ReportList(BOView):
     bo_permission = "reviews.moderate"
 
     def get(self, request):
+        p = request.query_params
         qs = Report.objects.select_related("reporter", "review", "message")
-        if request.query_params.get("resolved") in ("true", "false"):
-            qs = qs.filter(is_resolved=request.query_params["resolved"] == "true")
-        else:
+        if p.get("resolved") in ("true", "false"):
+            qs = qs.filter(is_resolved=p["resolved"] == "true")
+        elif p.get("resolved") != "all":
             qs = qs.filter(is_resolved=False)
-        return paginate(request, qs.order_by("-created_at", "-id"), _report_row)
+        q = (p.get("q") or "").strip()
+        if q:
+            cond = (Q(reason__icontains=q) | Q(reporter__first_name__icontains=q) | Q(reporter__last_name__icontains=q)
+                    | Q(review__comment__icontains=q) | Q(message__content__icontains=q))
+            qs = qs.filter(cond | Q(pk=int(q))) if q.isdigit() else qs.filter(cond)
+        qs = apply_range(request, qs, "created_at").order_by(ordering(request, {"created_at": "created_at"}, "-created_at"), "-id")
+        return paginate(request, qs, _report_row)
 
 
 class ReportResolve(BOView):
