@@ -8,11 +8,12 @@ Aucun push, aucun déploiement. Tout est en commits locaux sur `feat/compte-uniq
 - Vérifications : `tsc` OK ; `npm run test:bo` 11/11 ; backend `backoffice` 93 tests OK (avant le correctif des compteurs, qui ne touche que le front) ; balayage visuel à 1440 et 390 px, sans anomalie sur les 36 pages contrôlées.
 - SMS Orange avec bascule automatique depuis Twilio (`SMS_BACKEND=twilio,orange`), commit e9f5ed0.
 
-## Non vérifié, à refaire avant de livrer le Back-Office
-- Balayage visuel : pages `engagements` (onglets postings, installments, disputes, evaluations) et `finance` → `security` non revues après le correctif des compteurs ; largeurs 1920, 1280 et 768 px non rejouées.
-- `interact.mjs` (attente de la navigation « Retraits ») et `roles.mjs` (rôles non Super Admin) non exécutés.
-- Tests fonctionnels d'actions avec contrôle en base et audit (suspension, masquage en lot, rejet de retrait, exports) non faits.
-- Build de production non lancé : `NEXT_DIST_DIR=.next-build npm run build`, puis `git checkout frontend/tsconfig.json` s'il est réécrit.
+## Étape 1 (Back-Office) — vérifiée le 11 oct. 2026
+- Balayage visuel : 36 pages à 1440/390 px et 18 pages à 1280/768 px, sans débordement, troncature ni erreur console. Largeur 1920 : page Utilisateurs seulement.
+- `interact.mjs` : tous les scénarios OK (recherche, tri, filtres dans l'URL, fiche à 6 onglets, palette Ctrl+K, export CSV, menu de ligne, sous-menu Retraits). Un KO sur la recherche lors du premier chargement à froid du serveur de dev ; rejoué isolément, il passe (25 → 1 ligne, `?q=awa`).
+- `roles.mjs` : 6 rôles sur 6 conformes (menu = modules autorisés, module interdit refusé, 0 erreur JS).
+- Actions : suspension puis réactivation d'un compte depuis la console, vérifiées en base ; audit `backoffice.user.suspended` / `reactivated` avec auteur et motif.
+- Backend `backoffice` : 93 tests OK. `tsc` OK. Build de production OK.
 
 ## Nouveau brief (lots 1 à 9) — RIEN n'est commencé
 Ordre prévu : 1 compte unique/profil → 2 adresses → 7 transport → 5 évaluations mutuelles → 3-4 IA fraude/KYC/Trust → 6 recommandations → 8 Back-Office → tests.
