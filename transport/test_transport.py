@@ -115,7 +115,9 @@ def member(name="tr_client"):
 
 
 def book(client, pro, svc, **extra):
-    body = {"service": svc.pk, "booking_date": (timezone.now() + timedelta(days=1)).isoformat(), "address": "Rue 1", "city": "Abidjan",
+    # Demain 10 h à Abidjan (tranche « Journée ») : le test ne dépend pas de l'heure à laquelle il s'exécute.
+    tomorrow_10h = datetime.combine(timezone.localdate() + timedelta(days=1), time(10, 0), tzinfo=pricing.TZ)
+    body = {"service": svc.pk, "booking_date": tomorrow_10h.isoformat(), "address": "Rue 1", "city": "Abidjan",
             "postal_code": "00225", "lat": 5.4, "lng": -4.0, **extra}
     return client.post("/handy/bookings/", body, format="json")
 
@@ -127,7 +129,7 @@ def test_booking_freezes_server_computed_transport_and_rejects_stale_expected_am
     api.force_authenticate(c)
     with mock.patch(KM, return_value=8.0), mock.patch("transport.pricing.local", wraps=pricing.local):
         stale = book(api, pro, svc, expected_transport_fee=1)
-        assert stale.status_code == 409 and stale.json()["code"] == "transport_changed" and stale.json()["quote"]["amount"] in (4000, 1600, 1000)
+        assert stale.status_code == 409 and stale.json()["code"] == "transport_changed" and stale.json()["quote"]["amount"] == 1600
         assert Booking.objects.count() == 0                            # aucun enregistrement tant que le montant n'est pas confirmé
         expected = stale.json()["quote"]["amount"]
         ok = book(api, pro, svc, expected_transport_fee=expected)
