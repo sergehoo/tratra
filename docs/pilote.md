@@ -120,6 +120,34 @@ docker compose up -d
 MinIO : même version que l'ancienne image, volume `minio_data` relu tel quel (aucune migration de données). Administrateurs : la MFA est exigée et le passe-droit historique fermé par défaut ;
 pour la transition, voir le bloc « Sécurité de l'administration » de `.env.example` (relâcher explicitement, assigner les rôles, activer la MFA, puis remettre les défauts).
 
+### Si `migrate` échoue avec « column "image_url" of relation "handy_service" already exists » (serveur ancien)
+
+La migration `handy 0017` existait sous un autre nom dans l'historique (`0017_service_image_url_heroslide`, octobre 2025) : une base de production déployée à cette époque
+a déjà la colonne `image_url` et la table `handy_heroslide`, mais Django ne connaît pas le nouveau nom (`0017_service_image_url_alter_service_banner_heroslide`) et rejoue l'ajout.
+La seule différence est un `AlterField` : `service.banner` devient nullable. Réparation (une transaction, avec garde-fous) — **API arrêtée** (`docker compose stop tratraweb worker beat`) :
+
+```bash
+DBU="$(sed -n 's/^DB_USER=//p' .env)"; DBN="$(sed -n 's/^DB_NAME=//p' .env)"
+docker compose exec -T tratradb psql -U "$DBU" -d "$DBN" -v ON_ERROR_STOP=1 <<'SQL'
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM django_migrations WHERE app='handy' AND name='0017_service_image_url_heroslide') THEN
+    RAISE EXCEPTION 'ancien 0017 non enregistré : ne rien modifier';
+  END IF;
+  IF EXISTS (SELECT 1 FROM django_migrations WHERE app='handy' AND name='0017_service_image_url_alter_service_banner_heroslide') THEN
+    RAISE EXCEPTION 'nouveau 0017 déjà enregistré';
+  END IF;
+  IF to_regclass('public.handy_heroslide') IS NULL THEN
+    RAISE EXCEPTION 'table handy_heroslide absente : ne rien modifier';
+  END IF;
+  ALTER TABLE handy_service ALTER COLUMN banner DROP NOT NULL;          -- ce que fait le AlterField du nouveau 0017
+  INSERT INTO django_migrations (app, name, applied) VALUES ('handy', '0017_service_image_url_alter_service_banner_heroslide', now());
+END $$;
+SQL
+docker compose run --rm --no-deps tratraweb python manage.py migrate --plan | tail -30     # aperçu des migrations restantes
+docker compose run --rm --no-deps tratraweb python manage.py migrate                        # application, sortie visible
+```
+
 ## 9. Ce qui demande une intervention humaine 👤
 
 0. ~~Image MinIO de production~~ : corrigée — le compose de production construit `docker/minio` comme le staging (le serveur réel avait échoué sur « pull access denied for minio/mc »).
