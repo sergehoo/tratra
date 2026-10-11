@@ -163,6 +163,11 @@ services:
     volumes:
       - static_volume:/app/staticfiles
       - media_volume:/app/media
+    # L'adresse PUBLIQUE de MinIO (https://${MINIO_API_HOST}, celle des liens signés) doit aussi être joignable DEPUIS les conteneurs : depuis un
+    # conteneur, l'IP publique du serveur n'est souvent pas atteignable (hairpin / pare-feu) et chaque opération sur un fichier expire
+    # (« Connection to minioapi… timed out »). Ce nom pointe donc vers la passerelle de l'hôte, où Traefik écoute sur 443 (même certificat).
+    extra_hosts:
+      - "${MINIO_API_HOST}:host-gateway"
     networks:
       - web     # parle à db/redis
       - proxy   # exposé à Traefik
@@ -216,6 +221,11 @@ services:
         condition: service_healthy
       minio-init:
         condition: service_completed_successfully
+    # L'adresse PUBLIQUE de MinIO (https://${MINIO_API_HOST}, celle des liens signés) doit aussi être joignable DEPUIS les conteneurs : depuis un
+    # conteneur, l'IP publique du serveur n'est souvent pas atteignable (hairpin / pare-feu) et chaque opération sur un fichier expire
+    # (« Connection to minioapi… timed out »). Ce nom pointe donc vers la passerelle de l'hôte, où Traefik écoute sur 443 (même certificat).
+    extra_hosts:
+      - "${MINIO_API_HOST}:host-gateway"
     networks: [web]
     restart: unless-stopped
 

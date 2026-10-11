@@ -528,3 +528,13 @@ def test_check_env_refuses_a_local_provider_and_counts_duplicates_once(tmp_path,
     assert code != 0 and "liste ordonnée" in out
     code, out = _check_env_run(tmp_path, capsys, _GOOD_ENV.replace("SMS_BACKEND=twilio\n", "SMS_BACKEND=twilio,twilio\n"))
     assert code == 0 and "un seul fournisseur (twilio)" in out  # « twilio,twilio » n'est PAS une relève
+
+
+def test_app_and_worker_reach_the_public_minio_host_from_inside_the_containers():
+    """Les URL signées pointent vers l'hôte PUBLIC de MinIO ; depuis un conteneur, l'IP publique du serveur n'est souvent pas joignable (timeout de
+    60 s, 500 dans l'administration). L'API et le worker résolvent donc ce nom vers la passerelle de l'hôte, où Traefik écoute sur 443."""
+    import yaml
+
+    services = yaml.safe_load((ROOT / "docker-compose.yml").read_text(encoding="utf-8"))["services"]
+    for name in ("tratraweb", "worker"):
+        assert "${MINIO_API_HOST}:host-gateway" in services[name].get("extra_hosts", []), name
