@@ -233,7 +233,10 @@ def test_staff_management_never_allows_lockout_self_edit_or_unverified_promotion
     other_admin = staff("sc_other", "super_admin")
     ops_user = staff("sc_ops", "ops")
     listing = root.get(f"{BO}/security/staff/").json()["results"]
-    assert {r["name"] for r in listing} >= {"Sc_Root A.", "Sc_Other A.", "Sc_Ops A."} and "x.test" not in str(listing).replace("•••@x.test", "")
+    assert {r["name"] for r in listing} >= {"Sc_Root A.", "Sc_Other A.", "Sc_Ops A."}
+    # Vue réservée au Super Admin : e-mails COMPLETS (consultation journalisée) ; aucune donnée secrète n'y figure.
+    assert {r["email"] for r in listing} >= {"sc_root@x.test", "sc_other@x.test", "sc_ops@x.test"} and "password" not in str(listing).lower()
+    assert audited("contacts.unmasked_view", actor=root_user).exists()
     assert root.put(f"{BO}/security/staff/{root_user.id}/roles/", {"roles": ["ops"]}, format="json").json()["code"] == "self"             # pas d'auto-modification
     assert root.put(f"{BO}/security/staff/{ops_user.id}/roles/", {"roles": ["inconnu"]}, format="json").status_code == 400
     ok = root.put(f"{BO}/security/staff/{ops_user.id}/roles/", {"roles": ["support", "marketing"]}, format="json")

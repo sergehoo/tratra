@@ -11,7 +11,7 @@ from rest_framework import status
 from rest_framework.response import Response
 
 from backoffice import services
-from backoffice.common import BOView, apply_range, audit_op, bad_request, mask_email, mask_phone, ordering, paginate, public_name
+from backoffice.common import BOView, apply_range, audit_op, bad_request, email_for, ordering, paginate, phone_for, public_name
 from handy import eligibility
 from handy.models import Booking, Device, Dispute, HandymanDocument, HandymanProfile, MarketingConsent, Notification, Report, User
 from trust import engine, identity, metrics
@@ -51,13 +51,14 @@ def _kinds(u) -> list:
     return kinds
 
 
-def _user_row(u: User) -> dict:
+def _user_row(u: User, request) -> dict:
+    """Ligne de liste : coordonnées masquées pour tous les rôles, complètes pour le Super Admin seulement (consultation journalisée)."""
     profile = getattr(u, "handyman_profile", None)
     return {
-        "id": u.pk, "name": public_name(u), "phone": mask_phone(u.phone), "email": mask_email(u.email), "city": u.city or None,
+        "id": u.pk, "name": public_name(u), "phone": phone_for(request, u.phone), "email": email_for(request, u.email), "city": u.city or None,
         "is_active": u.is_active, "is_verified": u.is_verified, "date_joined": u.date_joined, "last_login": u.last_login,
         "is_artisan": profile is not None, "artisan_approved": bool(profile and profile.is_approved),
-        "bookings": getattr(u, "n_bookings", 0),
+        "profile_id": profile.pk if profile is not None else None, "bookings": getattr(u, "n_bookings", 0),
     }
 
 
@@ -72,6 +73,8 @@ class UserList(BOView):
         if q:
             qs = qs.filter(Q(first_name__icontains=q) | Q(last_name__icontains=q) | Q(username__icontains=q)
                            | Q(email__icontains=q) | Q(phone__icontains=q))
+        if p.get("city"):
+            qs = qs.filter(city__iexact=p["city"][:80])
         kind = p.get("type")
         if kind == "artisan":
             qs = qs.filter(handyman_profile__isnull=False)
@@ -83,8 +86,17 @@ class UserList(BOView):
             if p.get(param) in ("true", "false"):
                 qs = qs.filter(**{field: p[param] == "true"})
         qs = apply_range(request, qs, "date_joined")
-        qs = qs.order_by(ordering(request, {"date_joined": "date_joined", "last_login": "last_login", "bookings": "n_bookings"}, "-date_joined"), "-id")
-        return paginate(request, qs, _user_row)
+        qs = qs.order_by(ordering(request, {"date_joined": "date_joined", "last_login": "last_login", "bookings": "n_bookings", "name": "first_name"}, "-date_joined"), "-id")
+        return paginate(request, qs, lambda u: _user_row(u, request))
+
+
+def _audit_contact_view(request, u) -> None:
+    """La fiche affiche le téléphone et l'e-mail COMPLETS : une consultation = une trace (au plus une par administrateur et par compte
+    toutes les 10 minutes, pour ne pas noyer le journal quand la page se recharge)."""
+    from django.core.cache import cache
+
+    if cache.add(f"bo:contact_view:{request.user.pk}:{u.pk}", 1, 600):
+        audit_op(request, "user.contact_viewed", u)
 
 
 class UserDetail(BOView):
@@ -98,7 +110,7 @@ class UserDetail(BOView):
         consent = MarketingConsent.objects.filter(user=u).first()
         by_status = dict(Booking.objects.filter(client=u).values_list("status").annotate(n=Count("id")))
         missions = dict(Booking.objects.filter(handyman=u).values_list("status").annotate(n=Count("id")))
-        data = _user_row(u)
+        data = _user_row(u, request)
         data.update({
             # Le détail montre les coordonnées complètes (support, vérifications) ; la liste, elles, restent masquées.
             "phone_full": u.phone, "email_full": u.email, "username": u.username, "country": u.country,
@@ -117,6 +129,7 @@ class UserDetail(BOView):
             "notifications_unread": Notification.objects.filter(user=u, is_read=False).count(),
             "history": _history("user", u.pk),
         })
+        _audit_contact_view(request, u)
         return Response(data)
 
 

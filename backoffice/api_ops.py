@@ -15,9 +15,9 @@ from django.utils import timezone
 from rest_framework.response import Response
 
 from backoffice import rbac
-from backoffice.common import BOView, apply_range, audit_op, bad_request, mask_phone, ordering, paginate, public_name
+from backoffice.common import BOView, apply_range, audit_op, bad_request, phone_for, ordering, paginate, public_name
 from handy import eligibility
-from handy.models import Booking, Dispute, Message, Notification, Report, Review, Service, ServiceCategory
+from handy.models import Booking, Dispute, Message, Notification, Payment, Report, Review, Service, ServiceCategory
 from handy.notifications import notify
 from live import services as live_services
 from live.models import LivePosition, TrackingSession
@@ -193,6 +193,12 @@ class BookingList(BOView):
             qs = qs.filter(status=p["status"])
         if p.get("active") == "true":
             qs = qs.filter(status__in=("pending", "confirmed", "in_progress"))
+        if (p.get("user") or "").isdigit():  # toutes les réservations d'un compte, en tant que client OU artisan (fiche utilisateur)
+            qs = qs.filter(Q(client_id=int(p["user"])) | Q(handyman_id=int(p["user"])))
+        if (p.get("category") or "").isdigit():
+            qs = qs.filter(service__category_id=int(p["category"]))
+        if p.get("payment_status") in dict(Payment.PAYMENT_STATUS):
+            qs = qs.filter(payment__status=p["payment_status"])
         if p.get("disputed") == "true":
             qs = qs.filter(n_disputes__gt=0)
         q = (p.get("q") or "").strip()
@@ -226,7 +232,7 @@ class BookingDetail(BOView):
         row.update({
             "description": b.description,
             # L'adresse complète sert à la médiation : réservée aux rôles qui agissent (jamais finance / analyse).
-            "address": b.address if "bookings.manage" in perms else None, "client_phone": mask_phone(b.client.phone), "artisan_phone": mask_phone(b.handyman.phone),
+            "address": b.address if "bookings.manage" in perms else None, "client_phone": phone_for(request, b.client.phone), "artisan_phone": phone_for(request, b.handyman.phone),
             "timeline": [{"status": t.status, "previous_status": t.previous_status or None, "at": t.at,
                           "by": "system" if t.actor_id is None else ("client" if t.actor_id == b.client_id else "handyman" if t.actor_id == b.handyman_id else "admin")}
                          for t in b.timeline.order_by("at", "id")],
@@ -278,11 +284,21 @@ class DisputeList(BOView):
     def get(self, request):
         perms = rbac.user_permissions(request.user)
         qs = Dispute.objects.select_related("booking", "booking__payment", "reporter")
-        if request.query_params.get("status") in dict(Dispute.STATUS_CHOICES):
-            qs = qs.filter(status=request.query_params["status"])
-        elif request.query_params.get("open") == "true":
+        p = request.query_params
+        if p.get("status") in dict(Dispute.STATUS_CHOICES):
+            qs = qs.filter(status=p["status"])
+        elif p.get("open") == "true":
             qs = qs.filter(status__in=("open", "under_review"))
-        return paginate(request, qs.order_by("-created_at", "-id"), lambda d: _dispute_row(d, perms))
+        if (p.get("user") or "").isdigit():
+            uid = int(p["user"])
+            qs = qs.filter(Q(reporter_id=uid) | Q(booking__client_id=uid) | Q(booking__handyman_id=uid))
+        q = (p.get("q") or "").strip()
+        if q:
+            cond = (Q(reason__icontains=q) | Q(reporter__first_name__icontains=q) | Q(reporter__last_name__icontains=q)
+                    | Q(booking__service__title__icontains=q))
+            qs = qs.filter(cond | Q(pk=int(q)) | Q(booking_id=int(q))) if q.isdigit() else qs.filter(cond)
+        qs = apply_range(request, qs, "created_at").order_by(ordering(request, {"created_at": "created_at", "status": "status"}, "-created_at"), "-id")
+        return paginate(request, qs, lambda d: _dispute_row(d, perms))
 
 
 class DisputeDetail(BOView):
@@ -428,7 +444,10 @@ class ReviewList(BOView):
         q = (p.get("q") or "").strip()
         if q:
             qs = qs.filter(Q(comment__icontains=q) | Q(booking__handyman__first_name__icontains=q) | Q(booking__handyman__last_name__icontains=q))
-        return paginate(request, qs.order_by("-n_reports", "-created_at", "-id"), _review_row)
+        if not p.get("ordering"):  # par défaut : les plus signalés d'abord (file de modération) ; sinon tri choisi
+            return paginate(request, apply_range(request, qs, "created_at").order_by("-n_reports", "-created_at", "-id"), _review_row)
+        qs = apply_range(request, qs, "created_at").order_by(ordering(request, {"created_at": "created_at", "rating": "rating"}, "-created_at"), "-id")
+        return paginate(request, qs, _review_row)
 
 
 class ReviewDetail(BOView):

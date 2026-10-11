@@ -15,7 +15,7 @@ from django.utils.dateparse import parse_date
 from rest_framework.response import Response
 
 from backoffice import rbac
-from backoffice.common import BOView, apply_range, audit_op, bad_request, mask_phone, money, ordering, paginate, public_name
+from backoffice.common import BOView, apply_range, audit_op, bad_request, money, ordering, paginate, phone_for, public_name
 from engagements import rules as rules_mod
 from engagements import serializers as S
 from engagements.models import (
@@ -44,8 +44,8 @@ def _error(exc: EngagementError) -> Response:
     return Response({"code": exc.code, "detail": exc.message, **exc.extra}, status=exc.status)
 
 
-def _party(u) -> dict:
-    return {"id": u.pk, "name": public_name(u), "phone": mask_phone(u.phone), "is_active": u.is_active}
+def _party(u, request) -> dict:
+    return {"id": u.pk, "name": public_name(u), "phone": phone_for(request, u.phone), "is_active": u.is_active}
 
 
 def _contract_row(c: EngagementContract) -> dict:
@@ -146,7 +146,7 @@ class ContractDetail(BOView):
         events = [{"id": e.pk, "type": e.type, "actor": public_name(e.actor) if e.actor_id else "Système", "data": e.data, "at": e.created_at} for e in c.events.select_related("actor").order_by("-created_at", "-id")[:150]]
         return Response({
             **_contract_row(c), "terms": terms, "terms_version": c.terms_version, "terms_hash": c.terms_hash, "renewal_count": c.renewal_count, "end_reason": c.end_reason, "closed_at": c.closed_at,
-            "principal_detail": _party(c.principal), "worker_detail": _party(c.worker),
+            "principal_detail": _party(c.principal, request), "worker_detail": _party(c.worker, request),
             "acceptances": [{"role": a.role, "terms_version": a.terms_version, "terms_hash": a.terms_hash, "accepted_at": a.accepted_at} for a in c.acceptances.order_by("terms_version", "accepted_at")],
             "amendments": [{"id": a.pk, "kind": a.kind, "status": a.status, "changes": a.changes, "reason": a.reason, "effective_date": a.effective_date, "created_at": a.created_at} for a in c.amendments.order_by("-created_at")],
             "suspensions": [{"starts_on": s.starts_on, "ends_on": s.ends_on, "source": s.source, "reason": s.reason} for s in c.suspensions.all()],
@@ -313,7 +313,7 @@ class DisputeDetail(BOView):
         if d is None:
             return bad_request("not_found", "Litige introuvable.", 404)
         c = d.contract
-        return Response({**_dispute_row(d), "reason": d.reason, "resolution": d.resolution, "principal": _party(c.principal), "worker": _party(c.worker),
+        return Response({**_dispute_row(d), "reason": d.reason, "resolution": d.resolution, "principal": _party(c.principal, request), "worker": _party(c.worker, request),
                          "installment_detail": _installment_row(d.installment) if d.installment_id else None,
                          "events": [{"type": e.type, "at": e.created_at, "data": e.data} for e in c.events.order_by("-created_at")[:40]]})
 

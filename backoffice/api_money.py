@@ -14,7 +14,7 @@ from django.utils import timezone
 from rest_framework.response import Response
 
 from backoffice import rbac
-from backoffice.common import BOView, apply_range, audit_op, bad_request, mask_phone, money as _money, ordering, paginate, public_name
+from backoffice.common import BOView, apply_range, audit_op, bad_request, money as _money, ordering, paginate, phone_for, public_name
 from backoffice.models import SupportNote
 from business import services as business_services
 from business.models import (
@@ -87,7 +87,7 @@ class OrganizationDetail(BOView):
         row.update({
             "legal_name": o.legal_name, "registration_number": o.registration_number, "currency": o.currency, "address": o.address,
             "members_list": [{"id": m.pk, "name": public_name(m.user), "role": m.role, "role_label": Role.LABELS.get(m.role, m.role), "is_active": m.is_active,
-                              "phone": mask_phone(m.user.phone)} for m in o.memberships.select_related("user").order_by("role", "id")],
+                              "phone": phone_for(request, m.user.phone)} for m in o.memberships.select_related("user").order_by("role", "id")],
             # Sites : nom et ville seulement (aucune coordonnée).
             "sites_list": [{"id": s.pk, "name": s.name, "city": s.city or None, "is_active": s.is_active} for s in o.sites.all()],
             "equipment": o.equipment.exclude(status="retired").count(),
@@ -166,10 +166,17 @@ class BusinessInvoiceList(BOView):
     bo_permission = "business.manage"
 
     def get(self, request):
+        p = request.query_params
         qs = ConsolidatedInvoice.objects.select_related("organization")
-        if (request.query_params.get("organization") or "").isdigit():
-            qs = qs.filter(organization_id=int(request.query_params["organization"]))
-        return paginate(request, qs.order_by("-created_at", "-id"), lambda i: {
+        if (p.get("organization") or "").isdigit():
+            qs = qs.filter(organization_id=int(p["organization"]))
+        if p.get("status") in dict(ConsolidatedInvoice.STATUSES):
+            qs = qs.filter(status=p["status"])
+        q = (p.get("q") or "").strip()
+        if q:
+            qs = qs.filter(Q(number__icontains=q) | Q(organization__name__icontains=q))
+        qs = apply_range(request, qs, "created_at").order_by(ordering(request, {"created_at": "created_at", "total": "total"}, "-created_at"), "-id")
+        return paginate(request, qs, lambda i: {
             "id": i.pk, "number": i.number, "organization": i.organization.name, "organization_id": i.organization_id,
             "period_start": i.period_start, "period_end": i.period_end, "total": _money(i.total), "status": i.status, "lines": i.lines.count(), "created_at": i.created_at})
 
@@ -217,10 +224,15 @@ class PaymentList(BOView):
             qs = qs.filter(status=p["status"])
         if p.get("method") in dict(Payment.PAYMENT_METHODS):
             qs = qs.filter(method=p["method"])
+        if (p.get("user") or "").isdigit():  # paiements d'un compte (fiche utilisateur) : en tant que client OU artisan
+            qs = qs.filter(Q(booking__client_id=int(p["user"])) | Q(booking__handyman_id=int(p["user"])))
         q = (p.get("q") or "").strip()
         if q.isdigit():
             qs = qs.filter(Q(pk=int(q)) | Q(booking_id=int(q)))
-        qs = apply_range(request, qs, "created_at").order_by(ordering(request, {"created_at": "created_at", "amount": "amount"}, "-created_at"), "-id")
+        elif q:  # un texte filtre par nom (avant : ignoré, la liste revenait entière)
+            qs = qs.filter(Q(booking__client__first_name__icontains=q) | Q(booking__client__last_name__icontains=q)
+                           | Q(booking__handyman__first_name__icontains=q) | Q(booking__handyman__last_name__icontains=q))
+        qs = apply_range(request, qs, "created_at").order_by(ordering(request, {"created_at": "created_at", "amount": "amount", "status": "status"}, "-created_at"), "-id")
         return paginate(request, qs, _payment_row)
 
 
@@ -285,10 +297,16 @@ class PayoutList(BOView):
     bo_permission = "finance.view"
 
     def get(self, request):
+        p = request.query_params
         qs = Payout.objects.select_related("handyman")
-        if request.query_params.get("status") in ("pending", "sent", "failed"):
-            qs = qs.filter(status=request.query_params["status"])
-        return paginate(request, qs.order_by("-requested_at", "-id"), _payout_row)
+        if p.get("status") in ("pending", "sent", "failed"):
+            qs = qs.filter(status=p["status"])
+        q = (p.get("q") or "").strip()
+        if q:
+            cond = Q(handyman__first_name__icontains=q) | Q(handyman__last_name__icontains=q)
+            qs = qs.filter(cond | Q(pk=int(q))) if q.isdigit() else qs.filter(cond)
+        qs = apply_range(request, qs, "requested_at").order_by(ordering(request, {"requested_at": "requested_at", "amount": "amount", "status": "status"}, "-requested_at"), "-id")
+        return paginate(request, qs, _payout_row)
 
 
 class PayoutDecision(BOView):
@@ -326,8 +344,14 @@ class InvoiceList(BOView):
     bo_permission = "finance.view"
 
     def get(self, request):
+        p = request.query_params
         qs = Invoice.objects.select_related("booking", "booking__client", "booking__handyman")
-        return paginate(request, qs.order_by("-id"), lambda i: {
+        q = (p.get("q") or "").strip()
+        if q:
+            cond = Q(number__icontains=q) | Q(booking__client__first_name__icontains=q) | Q(booking__client__last_name__icontains=q)
+            qs = qs.filter(cond | Q(booking_id=int(q))) if q.isdigit() else qs.filter(cond)
+        qs = apply_range(request, qs, "issued_at").order_by(ordering(request, {"issued_at": "issued_at", "total": "total"}, "-issued_at"), "-id")
+        return paginate(request, qs, lambda i: {
             "id": i.pk, "number": i.number, "booking_id": i.booking_id, "client": public_name(i.booking.client), "artisan": public_name(i.booking.handyman),
             "amount": _money(i.amount), "fee": _money(i.fee), "total": _money(i.total)})
 
@@ -370,7 +394,7 @@ class SupportOverview(BOView):
             return bad_request("not_found", "Compte introuvable.", 404)
         bookings = Booking.objects.filter(Q(client=u) | Q(handyman=u)).select_related("service").order_by("-created_at")[:10]
         return Response({
-            "user": {"id": u.pk, "name": public_name(u), "phone": mask_phone(u.phone), "city": u.city, "is_active": u.is_active, "is_verified": u.is_verified,
+            "user": {"id": u.pk, "name": public_name(u), "phone": phone_for(request, u.phone), "city": u.city, "is_active": u.is_active, "is_verified": u.is_verified,
                      "date_joined": u.date_joined, "last_login": u.last_login},
             "bookings": [{"id": b.pk, "status": b.status, "role": "client" if b.client_id == u.pk else "artisan", "service": b.service.title if b.service_id else None,
                           "booking_date": b.booking_date} for b in bookings],

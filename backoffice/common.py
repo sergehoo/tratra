@@ -12,11 +12,13 @@ from datetime import datetime, time, timedelta
 from decimal import Decimal
 from typing import Callable, Iterable, Optional
 
+from django.core.cache import cache
 from django.http import HttpResponse
 from django.utils import timezone
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from backoffice import rbac
 from backoffice.permissions import HasBackOfficePermission
 from handy.api.views import DefaultPageNumberPagination
 from trust.models import audit
@@ -33,7 +35,10 @@ def paginate(request, queryset, to_dict: Callable, *, page_size: int = 25):
     paginator = DefaultPageNumberPagination()
     paginator.page_size = page_size
     page = paginator.paginate_queryset(queryset, request)
-    return paginator.get_paginated_response([to_dict(o) for o in page])
+    response = paginator.get_paginated_response([to_dict(o) for o in page])
+    if getattr(request, "_bo_contacts_unmasked", False):
+        _audit_unmasked_contacts(request)
+    return response
 
 
 def audit_op(request, action: str, target=None, **data):
@@ -84,6 +89,35 @@ def ordering(request, allowed: dict, default: str):
 
 
 # ---- Données personnelles ------------------------------------------------------------------------------------------
+
+def is_super_admin(request) -> bool:
+    """Vrai pour le rôle Super Admin (superutilisateur actif et membre du personnel) : seul rôle qui voit les coordonnées complètes
+    dans les LISTES. Les autres rôles gardent les coordonnées masquées ; la fiche d'un compte reste réservée aux rôles autorisés."""
+    return "super_admin" in rbac.user_roles(getattr(request, "user", None))
+
+
+def _audit_unmasked_contacts(request) -> None:
+    """Une trace par administrateur, module et tranche de 5 minutes : consulter des coordonnées complètes est un accès sensible, sans noyer
+    le journal d'une ligne par page affichée."""
+    module = getattr(getattr(request, "resolver_match", None), "url_name", "") or "liste"
+    if cache.add(f"bo:unmasked:{request.user.pk}:{module}", 1, 300):
+        audit_op(request, "contacts.unmasked_view", target_type="contacts", target_id=None, view=module)
+
+
+def phone_for(request, phone: Optional[str]) -> Optional[str]:
+    """Numéro masqué pour tous les rôles, complet pour le Super Admin (consultation journalisée)."""
+    if is_super_admin(request) and phone:
+        request._bo_contacts_unmasked = True
+        return phone
+    return mask_phone(phone)
+
+
+def email_for(request, email: Optional[str]) -> Optional[str]:
+    if is_super_admin(request) and email:
+        request._bo_contacts_unmasked = True
+        return email
+    return mask_email(email)
+
 
 def mask_phone(phone: Optional[str]) -> Optional[str]:
     """« +2250701234567 » → « +22507••••4567 » : identifie sans exposer le numéro complet dans les listes."""

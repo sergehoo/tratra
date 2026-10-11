@@ -19,7 +19,7 @@ from rest_framework.response import Response
 
 from backoffice import mfa, rbac, services
 from backoffice.common import (
-    BOView, apply_range, audit_op, bad_request, csv_response, day_bounds, last_days, mask_email, money, ordering, paginate, public_name,
+    BOView, apply_range, audit_op, bad_request, csv_response, day_bounds, last_days, email_for, money, ordering, paginate, public_name,
 )
 from continuity.models import IdempotencyRecord
 from handy import push, sms
@@ -552,8 +552,8 @@ class CouponUpdate(BOView):
 
 # ═══ Sécurité ═══════════════════════════════════════════════════════════════════════════════════════════════════════
 
-def _staff_row(u: User) -> dict:
-    return {"id": u.pk, "name": public_name(u), "email": mask_email(u.email), "is_active": u.is_active, "is_superuser": u.is_superuser,
+def _staff_row(u: User, request) -> dict:
+    return {"id": u.pk, "name": public_name(u), "email": email_for(request, u.email), "is_active": u.is_active, "is_superuser": u.is_superuser,
             "roles": sorted(rbac.user_roles(u)), "last_login": u.last_login, "date_joined": u.date_joined, "mfa_enrolled": mfa.confirmed_device(u) is not None}
 
 
@@ -577,7 +577,7 @@ class StaffList(BOView):
 
     def get(self, request):
         qs = User.objects.filter(is_staff=True).order_by("-is_superuser", "first_name", "id")
-        return paginate(request, qs, _staff_row)
+        return paginate(request, qs, lambda u: _staff_row(u, request))
 
     @transaction.atomic
     def post(self, request):
@@ -595,7 +595,7 @@ class StaffList(BOView):
         u.save(update_fields=["is_staff"])
         u.groups.add(*Group.objects.filter(name__in=[rbac.role_group_name(r) for r in roles]))
         audit_op(request, "security.staff_added", u, roles=sorted(roles))
-        return Response(_staff_row(u), status=201)
+        return Response(_staff_row(u, request), status=201)
 
 
 class StaffRoles(BOView):
@@ -620,7 +620,7 @@ class StaffRoles(BOView):
             transaction.set_rollback(True)
             return bad_request("last_super_admin", "Il doit rester au moins un super administrateur actif.", 409)
         audit_op(request, "security.roles_changed", u, before=before, after=sorted(roles))
-        return Response(_staff_row(u))
+        return Response(_staff_row(u, request))
 
 
 class StaffMfaReset(BOView):
