@@ -11,15 +11,24 @@ import sys
 from pathlib import Path
 
 
-def parse(path: Path) -> dict:
-    env = {}
+def parse(path: Path, issues=None) -> dict:
+    """Lit un .env comme Docker Compose (dernière valeur gagnante). `issues` reçoit (variable, règle) pour les lignes douteuses :
+    espaces autour de « = » (ni `docker run --env-file` ni l'entrée de l'API ne les tolèrent tous) et variable définie plusieurs fois."""
+    env, seen = {}, set()
     for line in path.read_text(encoding="utf-8").splitlines():
-        m = re.match(r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$", line)
+        m = re.match(r"^\s*([A-Za-z_][A-Za-z0-9_]*)(\s*)=(\s*)(.*)$", line)
         if m and not line.lstrip().startswith("#"):
-            value = m.group(2).strip()
+            name, before, after, value = m.groups()
+            if issues is not None:
+                if before or after:
+                    issues.append((name, "espaces autour du « = » : écrire NOM=valeur sans espace"))
+                if name in seen:
+                    issues.append((name, "définie plusieurs fois dans le fichier (la dernière l'emporte) : ne garder qu'une ligne"))
+            seen.add(name)
+            value = value.strip()
             if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
                 value = value[1:-1]
-            env[m.group(1)] = value
+            env[name] = value
     return env
 
 
@@ -55,6 +64,10 @@ def check(env: dict):
     hosts = [h.strip() for h in get("ALLOWED_HOSTS").split(",") if h.strip()]
     if not hosts or "*" in hosts:
         err("ALLOWED_HOSTS", "doit lister explicitement les hôtes de production (pas de *)")
+    elif any("://" in h or "/" in h for h in hosts):
+        err("ALLOWED_HOSTS", "des NOMS d'hôtes nus, sans https:// ni chemin (ex. api.exemple.ci,tratraweb) — un nom avec https:// ne correspond à aucune requête")
+    elif any(h.endswith("_HOST") for h in hosts):
+        err("ALLOWED_HOSTS", "contient un nom de variable (…_HOST) au lieu de sa valeur : le .env n'interprète pas les variables, écrire le nom d'hôte réel")
     elif api and api not in hosts:
         err("ALLOWED_HOSTS", "doit contenir l'hôte de l'API (tratraweb_HOST) — sinon 400 sur toutes les requêtes et sonde de santé en échec")
     for var in ("CORS_ALLOWED_ORIGINS", "CSRF_TRUSTED_ORIGINS"):
@@ -126,7 +139,9 @@ def main(argv=None) -> int:
     if not path.is_file():
         print(f"Fichier introuvable : {path}", file=sys.stderr)
         return 2
-    errors, warns = check(parse(path))
+    issues = []
+    errors, warns = check(parse(path, issues))
+    errors = [(v, r) for v, r in issues if "espaces" in r or "plusieurs fois" in r] + errors
     for var, rule in errors:
         print(f"[ERREUR] {var} : {rule}")
     for var, rule in warns:

@@ -346,3 +346,21 @@ def _write(tmp_path, text):
     p = tmp_path / "prod.env"
     p.write_text(text, encoding="utf-8")
     return p
+
+
+def test_check_env_catches_spaces_around_equals_urls_in_allowed_hosts_and_duplicates(tmp_path):
+    """Le cas réel : `ALLOWED_HOSTS = https://api…,tratraweb,tratraweb_HOST` (espaces, schéma, nom de variable littéral) et `NEXT_PUBLIC_API_BASE` en double."""
+    module = _check_env_module()
+    bad = _GOOD_ENV.replace("ALLOWED_HOSTS=api.tratra.test,tratraweb", "ALLOWED_HOSTS = https://api.tratra.test,tratraweb,tratraweb_HOST")
+    bad += "NEXT_PUBLIC_API_BASE=https://api.tratra.test/handy\n"
+    env = tmp_path / ".env"
+    env.write_text(bad, encoding="utf-8")
+    issues = []
+    errors, _ = module.check(module.parse(env, issues))
+    rules = {(v, r.split(" ")[0]) for v, r in issues}
+    assert ("ALLOWED_HOSTS", "espaces") in rules and ("NEXT_PUBLIC_API_BASE", "définie") in rules
+    assert any(v == "ALLOWED_HOSTS" and "sans https://" in r for v, r in errors)
+    fixed = _GOOD_ENV
+    env.write_text(fixed, encoding="utf-8")
+    issues = []
+    assert module.check(module.parse(env, issues))[0] == [] and issues == []
