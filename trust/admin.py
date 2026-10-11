@@ -1,6 +1,7 @@
 from django.contrib import admin
 from django.http import HttpResponseRedirect
 
+from handy.admin_utils import CascadeOnlyDeleteMixin
 from trust.models import AuditEvent, BadgeAward, TrustConfig
 
 
@@ -33,7 +34,7 @@ class TrustConfigAdmin(admin.ModelAdmin):
 
 
 @admin.register(BadgeAward)
-class BadgeAwardAdmin(admin.ModelAdmin):
+class BadgeAwardAdmin(CascadeOnlyDeleteMixin, admin.ModelAdmin):
     """Historique des badges : lecture seule (attribution et retrait sont automatiques et audités)."""
     list_display = ("profile", "code", "started_at", "ended_at", "start_reason", "end_reason")
     list_filter = ("code", ("ended_at", admin.EmptyFieldListFilter))
@@ -46,8 +47,7 @@ class BadgeAwardAdmin(admin.ModelAdmin):
     def has_change_permission(self, request, obj=None):
         return False
 
-    def has_delete_permission(self, request, obj=None):
-        return False
+    # Suppression : jamais isolée (l'historique reste intact), mais emportée avec le profil/compte supprimé par un superutilisateur.
 
 
 @admin.register(AuditEvent)
