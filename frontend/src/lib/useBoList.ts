@@ -1,6 +1,7 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { bo, boError, type Page } from "./bo";
+import { useUrlFilters } from "./useUrlFilters";
 
 /** Valeur « débattue » (saisie de recherche) : évite une requête par frappe. */
 export function useDebounced<T>(value: T, ms = 350): T {
@@ -64,4 +65,42 @@ export function useBoList<T>(path: string, params: Record<string, string | numbe
   }, [key, page, load]);
 
   return { rows, count, page, setPage, loading, error, reload: () => load(page), pageSize: pageSize ?? 25 };
+}
+
+/**
+ * Liste de gestion complète : filtres gardés dans l'URL (partageables), recherche débattue, tri serveur (`ordering`), taille de page,
+ * chargement paginé et actualisation. `defaults` = filtres propres à la page (valeur par défaut = « Tous »).
+ */
+export function useManagedList<T, D extends Record<string, string>>(path: string, defaults: D, extra: Record<string, string | number | undefined | null> = {}) {
+  const filters = useUrlFilters({ q: "", ordering: "", size: "25", ...defaults });
+  const { size, ...rest } = filters.values;
+  const pageSize = [25, 50, 100].includes(Number(size)) ? Number(size) : 25;
+  // Tous les filtres sont débattus ensemble : une frappe (recherche, ville…) ne lance pas une requête par lettre.
+  const params = JSON.parse(useDebounced(JSON.stringify(rest), 300)) as Record<string, string>;
+  const list = useBoList<T>(path, { ...params, ...extra }, pageSize);
+  const filterKeys = ["q", ...Object.keys(defaults)];
+  const activeCount = filterKeys.filter((k) => (filters.values[k] ?? "") !== (k === "q" ? "" : defaults[k])).length;
+  const reset = () => filters.set(Object.fromEntries(filterKeys.map((k) => [k, k === "q" ? "" : defaults[k]])) as Partial<typeof filters.values>);
+  return { values: filters.values as typeof filters.values & D, set: filters.set, reset, activeCount, list, pageSize };
+}
+
+/**
+ * Compteurs réels par état (ex. KYC : à examiner / prêts / approuvés…) : une requête légère (`page_size=1`) par variante,
+ * relancée quand `refresh` change. Une variante refusée (droit) ou en erreur reste « inconnue » (null), jamais 0.
+ */
+export function useCounts(path: string, variants: Record<string, string>, refresh: unknown = 0) {
+  const [counts, setCounts] = useState<Record<string, number | null>>({});
+  const key = JSON.stringify(variants);
+  useEffect(() => {
+    let alive = true;
+    for (const [name, query] of Object.entries(JSON.parse(key) as Record<string, string>)) {
+      bo.get<Page<unknown>>(`${path}?${query}${query ? "&" : ""}page_size=1`)
+        .then((p) => alive && setCounts((c) => ({ ...c, [name]: p.count })))
+        .catch(() => alive && setCounts((c) => ({ ...c, [name]: null })));
+    }
+    return () => {
+      alive = false;
+    };
+  }, [path, key, refresh]);
+  return counts;
 }

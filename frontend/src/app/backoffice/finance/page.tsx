@@ -2,11 +2,12 @@
 import { CashBlock } from "../_components/CashBlock";
 import type { CashSummary } from "@/lib/cash";
 import { useCallback, useEffect, useState } from "react";
-import { Alert, Badge, Button, Modal, PageHeader, SkeletonStats, Stat, Tabs, type Column } from "@/components/ds";
+import { Banknote, CalendarCheck, Check, Coins, Eye, Landmark, ShieldCheck, X } from "lucide-react";
+import { Alert, Button, Modal, PageHeader, SkeletonStats, Tabs } from "@/components/ds";
 import { bo, boError, moneyLabel } from "@/lib/bo";
 import { useBo } from "@/lib/BoProvider";
-import { useBoList, useDebounced } from "@/lib/useBoList";
-import { DateRange, FilterBar, FilterSelect, KV, ListView, ReasonModal, SearchBox, Section, STATUS_FR, Tag, dt, useNotice, useTabParam } from "../_components/ui";
+import { useCounts, useManagedList } from "@/lib/useBoList";
+import { DateRange, ExportButton, FilterBar, FilterSelect, Kpi, KpiGrid, KV, ListView, ReasonModal, SearchBox, STATUS_FR, StatusChips, Tag, dd, dt, useNotice, useTabParam, type BoColumn, type RowAction } from "../_components/ui";
 
 interface Summary { gmv: string; commission_earned: string; commission_in_escrow: string; escrow_held: string; refunded: string; payouts: Record<string, { count: number; amount: string }>; by_status: Record<string, { count: number; amount: string }> }
 interface Payment { id: number; booking_id: number; client: string; artisan: string; amount: string; platform_fee: string; net: string; method: string; status: string; refunded_amount: string; created_at: string; payment_date: string | null; verification: "provider_verified" | "unverified" | "manual"; provider_verified_at: string | null; provider_checked_at: string | null; provider_status: string }
@@ -53,96 +54,167 @@ function PaymentPanel({ id, onClose, onChanged }: { id: number | null; onClose: 
   );
 }
 
-export default function FinancePage() {
+function PaymentsTab({ onOpen, version }: { onOpen: (id: number) => void; version: number }) {
+  const m = useManagedList<Payment, { status: string; method: string; user: string; from: string; to: string }>("/finance/payments/", { status: "", method: "", user: "", from: "", to: "" });
+  const { values: f, list } = m;
+  const counts = useCounts("/finance/payments/", { _all: "", pending: "status=pending", held: "status=held", released: "status=released", refunded: "status=refunded", failed: "status=failed" }, `${list.count}-${version}`);
+  const columns: BoColumn<Payment>[] = [
+    { key: "id", header: "Paiement", primary: true, sort: "created_at", cell: (r) => <span className="font-semibold text-ink">#{r.id} · réservation #{r.booking_id}</span> },
+    { key: "status", header: "Statut", sort: "status", cell: (r) => <Tag value={r.status} label={STATUS_FR[r.status]} /> },
+    { key: "method", header: "Moyen", hideOnMobile: true, from: "lg", cell: (r) => METHOD_FR[r.method] ?? r.method },
+    { key: "amount", header: "Montant", align: "right", sort: "amount", cell: (r) => moneyLabel(r.amount) },
+    { key: "fee", header: "Commission", align: "right", hideOnMobile: true, from: "xl", cell: (r) => moneyLabel(r.platform_fee) },
+    { key: "parties", header: "Client → artisan", hideOnMobile: true, from: "xl", cell: (r) => `${r.client} → ${r.artisan}` },
+    { key: "date", header: "Créé le", hideOnMobile: true, from: "2xl", cell: (r) => dd(r.created_at) },
+  ];
+  const rowActions = (r: Payment): RowAction[] => [
+    { label: "Détail du paiement", icon: Eye, onClick: () => onOpen(r.id) },
+    { label: "Ouvrir la réservation", icon: CalendarCheck, href: `/backoffice/bookings/${r.booking_id}` },
+  ];
+  return (
+    <>
+      <StatusChips items={[["", "Tous"], ["pending", "En attente"], ["held", "Séquestre"], ["released", "Versés"], ["refunded", "Remboursés"], ["failed", "Échoués"]]} value={f.status} onChange={(v) => m.set({ status: v })} counts={counts} label="Statut du paiement" />
+      <FilterBar
+        search={<SearchBox value={f.q} onChange={(v) => m.set({ q: v })} placeholder="N° de paiement ou de réservation, nom du client ou de l’artisan…" />}
+        activeCount={m.activeCount}
+        onReset={m.reset}
+        onRefresh={() => void list.reload()}
+        refreshing={list.loading}
+        actions={<ExportButton dataset="payments" from={f.from} to={f.to} />}
+      >
+        <FilterSelect label="Moyen" value={f.method} onChange={(v) => m.set({ method: v })} options={[["", "Tous"], ...Object.entries(METHOD_FR)]} />
+        <DateRange from={f.from} to={f.to} onFrom={(v) => m.set({ from: v })} onTo={(v) => m.set({ to: v })} />
+        {f.user ? <Button size="sm" variant="soft" onClick={() => m.set({ user: "" })} title="Retirer le filtre par compte">Compte #{f.user} ✕</Button> : null}
+      </FilterBar>
+      <ListView
+        list={list}
+        columns={columns}
+        rowKey={(r) => r.id}
+        rowLabel={(r) => `paiement #${r.id}`}
+        caption="Paiements"
+        empty="Aucun paiement ne correspond."
+        emptyHint={m.activeCount ? "Modifiez ou réinitialisez les filtres." : undefined}
+        ordering={f.ordering}
+        onOrdering={(v) => m.set({ ordering: v })}
+        rowActions={rowActions}
+        pageSize={m.pageSize}
+        onPageSize={(n) => m.set({ size: String(n) })}
+      />
+    </>
+  );
+}
+
+function PayoutsTab({ onChanged, version }: { onChanged: () => void; version: number }) {
   const { can } = useBo();
-  const [tab, setTab] = useTabParam(["payments", "payouts", "invoices"] as const, "payments");
-  const [notice, setNotice] = useNotice();
-  const [summary, setSummary] = useState<Summary | null>(null);
-  const [summaryError, setSummaryError] = useState("");
-  const [q, setQ] = useState("");
-  const [status, setStatus] = useState("");
-  const [method, setMethod] = useState("");
-  const [from, setFrom] = useState("");
-  const [to, setTo] = useState("");
-  const [pStatus, setPStatus] = useState("pending");
-  const [open, setOpen] = useState<number | null>(null);
+  const manage = can("finance.manage");
+  const m = useManagedList<Payout, { status: string; from: string; to: string }>("/finance/payouts/", { status: "pending", from: "", to: "" });
+  const { values: f, list } = m;
+  const counts = useCounts("/finance/payouts/", { pending: "status=pending", sent: "status=sent", failed: "status=failed", _all: "" }, `${list.count}-${version}`);
   const [approve, setApprove] = useState<Payout | null>(null);
   const [reject, setReject] = useState<Payout | null>(null);
-  const payments = useBoList<Payment>("/finance/payments/", { q: useDebounced(q), status, method, from, to });
-  const payouts = useBoList<Payout>("/finance/payouts/", { status: pStatus });
-  const invoices = useBoList<Invoice>("/finance/invoices/", {});
+  const [notice, setNotice] = useNotice();
+  const columns: BoColumn<Payout>[] = [
+    { key: "id", header: "Retrait", primary: true, sort: "requested_at", cell: (r) => <span className="font-semibold text-ink">#{r.id} · {r.artisan}</span> },
+    { key: "amount", header: "Montant", align: "right", sort: "amount", cell: (r) => moneyLabel(r.amount) },
+    { key: "status", header: "Statut", sort: "status", cell: (r) => <Tag value={r.status} label={STATUS_FR[r.status]} /> },
+    { key: "req", header: "Demandé le", hideOnMobile: true, from: "lg", cell: (r) => dd(r.requested_at) },
+    { key: "note", header: "Référence / note", wrap: true, hideOnMobile: true, from: "xl", cell: (r) => <span className="text-inkSoft">{r.notes || "—"}</span> },
+    {
+      key: "act", header: "Décision", align: "right", cell: (r) => (r.status === "pending" && manage ? (
+        <span className="flex justify-end gap-2">
+          <Button size="sm" leftIcon={<Check aria-hidden className="h-4 w-4" />} onClick={() => setApprove(r)}>Valider</Button>
+          <Button size="sm" variant="danger" leftIcon={<X aria-hidden className="h-4 w-4" />} onClick={() => setReject(r)}>Rejeter</Button>
+        </span>
+      ) : <span className="text-ash">—</span>),
+    },
+  ];
+  const rowActions = (r: Payout): RowAction[] => [
+    { label: "Valider le retrait", icon: Check, onClick: () => setApprove(r), hidden: !manage || r.status !== "pending" },
+    { label: "Rejeter le retrait", icon: X, tone: "danger", onClick: () => setReject(r), hidden: !manage || r.status !== "pending" },
+    { label: "Fiche de l’artisan", icon: ShieldCheck, href: `/backoffice/users/${r.artisan_id}`, hidden: !can("users.view") },
+  ];
+  return (
+    <>
+      {notice ? <p role="status" className="mb-4 rounded-xl bg-successSoft px-4 py-3 text-sm font-semibold text-successInk">{notice}</p> : null}
+      <StatusChips items={[["pending", "En attente"], ["sent", "Envoyés"], ["failed", "Rejetés"], ["", "Tous"]]} value={f.status} onChange={(v) => m.set({ status: v })} counts={counts} label="Statut du retrait" />
+      <FilterBar search={<SearchBox value={f.q} onChange={(v) => m.set({ q: v })} placeholder="N° de retrait ou nom de l’artisan…" />} activeCount={m.activeCount} onReset={m.reset} onRefresh={() => void list.reload()} refreshing={list.loading}>
+        <DateRange from={f.from} to={f.to} onFrom={(v) => m.set({ from: v })} onTo={(v) => m.set({ to: v })} />
+      </FilterBar>
+      <ListView
+        list={list}
+        columns={columns}
+        rowKey={(r) => r.id}
+        rowLabel={(r) => `retrait #${r.id}`}
+        caption="Retraits"
+        empty="Aucun retrait dans cet état."
+        emptyHint={f.status === "pending" && !m.activeCount ? "Aucun retrait en attente de validation." : undefined}
+        ordering={f.ordering}
+        onOrdering={(v) => m.set({ ordering: v })}
+        rowActions={rowActions}
+        pageSize={m.pageSize}
+        onPageSize={(n) => m.set({ size: String(n) })}
+      />
+      <ReasonModal open={Boolean(approve)} title={`Valider le retrait #${approve?.id ?? ""} ?`} description={`Confirmez que le virement de ${approve ? moneyLabel(approve.amount) : ""} à ${approve?.artisan ?? ""} a RÉELLEMENT été effectué, et saisissez sa référence. L’artisan en est informé.`}
+        confirmLabel="Marquer comme envoyé" reasonKey="reference" reasonLabel="Référence du virement" onClose={() => setApprove(null)}
+        request={(b) => bo.post(`/finance/payouts/${approve?.id}/approve/`, { reference: b.reference })} onDone={() => { setApprove(null); setNotice("Retrait marqué comme envoyé."); void list.reload(); onChanged(); }} />
+      <ReasonModal open={Boolean(reject)} title={`Rejeter le retrait #${reject?.id ?? ""} ?`} description="Les gains redeviennent disponibles pour l’artisan, qui est informé du motif." confirmLabel="Rejeter" tone="danger" onClose={() => setReject(null)}
+        request={(b) => bo.post(`/finance/payouts/${reject?.id}/reject/`, { reason: b.reason })} onDone={() => { setReject(null); setNotice("Retrait rejeté."); void list.reload(); onChanged(); }} />
+    </>
+  );
+}
+
+function InvoicesTab() {
+  const m = useManagedList<Invoice, { from: string; to: string }>("/finance/invoices/", { from: "", to: "" });
+  const { values: f, list } = m;
+  const columns: BoColumn<Invoice>[] = [
+    { key: "n", header: "Facture", primary: true, sort: "issued_at", cell: (r) => <span className="font-semibold text-ink">{r.number}</span> },
+    { key: "b", header: "Réservation", cell: (r) => <a className="font-semibold text-primaryDark underline underline-offset-2" href={`/backoffice/bookings/${r.booking_id}`}>#{r.booking_id}</a> },
+    { key: "p", header: "Client → artisan", hideOnMobile: true, from: "lg", cell: (r) => `${r.client} → ${r.artisan}` },
+    { key: "amount", header: "Montant", align: "right", hideOnMobile: true, cell: (r) => moneyLabel(r.amount) },
+    { key: "fee", header: "Commission", align: "right", hideOnMobile: true, from: "xl", cell: (r) => moneyLabel(r.fee) },
+    { key: "total", header: "Total", align: "right", sort: "total", cell: (r) => moneyLabel(r.total) },
+  ];
+  return (
+    <>
+      <FilterBar search={<SearchBox value={f.q} onChange={(v) => m.set({ q: v })} placeholder="N° de facture, de réservation ou nom du client…" />} activeCount={m.activeCount} onReset={m.reset} onRefresh={() => void list.reload()} refreshing={list.loading}>
+        <DateRange from={f.from} to={f.to} onFrom={(v) => m.set({ from: v })} onTo={(v) => m.set({ to: v })} />
+      </FilterBar>
+      <ListView list={list} columns={columns} rowKey={(r) => r.id} rowLabel={(r) => r.number} caption="Factures" empty="Aucune facture ne correspond." ordering={f.ordering} onOrdering={(v) => m.set({ ordering: v })}
+        pageSize={m.pageSize} onPageSize={(n) => m.set({ size: String(n) })} />
+    </>
+  );
+}
+
+export default function FinancePage() {
+  const [tab, setTab] = useTabParam(["payments", "payouts", "invoices"] as const, "payments");
+  const [summary, setSummary] = useState<Summary | null>(null);
+  const [summaryError, setSummaryError] = useState("");
+  const [open, setOpen] = useState<number | null>(null);
+  const [version, setVersion] = useState(0);
 
   const loadSummary = useCallback(() => {
     setSummaryError("");
     void bo.get<Summary>("/finance/summary/").then(setSummary).catch((e) => { setSummary(null); setSummaryError(boError(e, "La synthèse financière n’a pas pu être chargée.")); });
   }, []);
   useEffect(loadSummary, [loadSummary]);
-
-  const payCols: Column<Payment>[] = [
-    { key: "id", header: "Paiement", primary: true, cell: (r) => <span className="font-semibold text-ink">#{r.id} · réservation #{r.booking_id}</span> },
-    { key: "status", header: "Statut", cell: (r) => <Tag value={r.status} label={STATUS_FR[r.status]} /> },
-    { key: "method", header: "Moyen", hideOnMobile: true, cell: (r) => METHOD_FR[r.method] ?? r.method },
-    { key: "amount", header: "Montant", align: "right", cell: (r) => moneyLabel(r.amount) },
-    { key: "fee", header: "Commission", align: "right", hideOnMobile: true, cell: (r) => moneyLabel(r.platform_fee) },
-    { key: "parties", header: "Client → artisan", hideOnMobile: true, cell: (r) => `${r.client} → ${r.artisan}` },
-    { key: "date", header: "Créé le", hideOnMobile: true, cell: (r) => dt(r.created_at) },
-    { key: "act", header: "", align: "right", cell: (r) => <Button size="sm" variant="outline" onClick={() => setOpen(r.id)}>Détail</Button> },
-  ];
-  const outCols: Column<Payout>[] = [
-    { key: "id", header: "Retrait", primary: true, cell: (r) => <span className="font-semibold text-ink">#{r.id} · {r.artisan}</span> },
-    { key: "amount", header: "Montant", align: "right", cell: (r) => moneyLabel(r.amount) },
-    { key: "status", header: "Statut", cell: (r) => <Tag value={r.status} label={STATUS_FR[r.status]} /> },
-    { key: "req", header: "Demandé le", hideOnMobile: true, cell: (r) => dt(r.requested_at) },
-    { key: "note", header: "Référence / note", hideOnMobile: true, cell: (r) => <span className="text-inkSoft">{r.notes || "—"}</span> },
-    { key: "act", header: "", align: "right", cell: (r) => (r.status === "pending" && can("finance.manage") ? <span className="flex justify-end gap-2"><Button size="sm" onClick={() => setApprove(r)}>Valider</Button><Button size="sm" variant="danger" onClick={() => setReject(r)}>Rejeter</Button></span> : null) },
-  ];
-  const invCols: Column<Invoice>[] = [
-    { key: "n", header: "Facture", primary: true, cell: (r) => <span className="font-semibold text-ink">{r.number}</span> },
-    { key: "b", header: "Réservation", cell: (r) => `#${r.booking_id}` },
-    { key: "p", header: "Client → artisan", hideOnMobile: true, cell: (r) => `${r.client} → ${r.artisan}` },
-    { key: "amount", header: "Montant", align: "right", cell: (r) => moneyLabel(r.amount) },
-    { key: "fee", header: "Commission", align: "right", hideOnMobile: true, cell: (r) => moneyLabel(r.fee) },
-    { key: "total", header: "Total", align: "right", cell: (r) => moneyLabel(r.total) },
-  ];
+  const changed = () => { setVersion((v) => v + 1); loadSummary(); };
 
   return (
     <>
       <PageHeader title="Finances" description="Paiements sous séquestre, commissions, remboursements et retraits. Aucun paiement ne se crée ni ne se valide à la main : les montants viennent des réservations." />
-      {notice ? <Alert tone="success" className="mb-4">{notice}</Alert> : null}
       {summary ? (
-        <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <Stat label="Volume payé" value={moneyLabel(summary.gmv)} />
-          <Stat label="Commissions gagnées" value={moneyLabel(summary.commission_earned)} hint={`${moneyLabel(summary.commission_in_escrow)} encore sous séquestre`} tone="accent" />
-          <Stat label="Sous séquestre" value={moneyLabel(summary.escrow_held)} tone="night" />
-          <Stat label="Remboursé" value={moneyLabel(summary.refunded)} hint={`Retraits en attente : ${summary.payouts.pending?.count ?? 0} (${moneyLabel(summary.payouts.pending?.amount ?? "0")})`} />
-        </div>
-      ) : summaryError ? <Alert tone="danger" className="mb-6" action={<Button size="sm" variant="outline" onClick={loadSummary}>Réessayer</Button>}>{summaryError}</Alert> : <SkeletonStats count={4} className="mb-6 sm:grid-cols-2 lg:grid-cols-4" />}
-      <Tabs ariaLabel="Sections" value={tab} onChange={setTab} className="mb-4" items={[{ id: "payments", label: "Paiements" }, { id: "payouts", label: "Retraits" }, { id: "invoices", label: "Factures" }]} />
-      {tab === "payments" ? (
-        <>
-          <FilterBar>
-            <SearchBox value={q} onChange={setQ} placeholder="N° de paiement ou de réservation…" />
-            <FilterSelect label="Statut" value={status} onChange={setStatus} options={[["", "Tous"], ["pending", "En attente"], ["held", "Séquestre"], ["released", "Versé"], ["refunded", "Remboursé"], ["failed", "Échoué"]]} />
-            <FilterSelect label="Moyen" value={method} onChange={setMethod} options={[["", "Tous"], ...Object.entries(METHOD_FR)]} />
-            <DateRange from={from} to={to} onFrom={setFrom} onTo={setTo} />
-          </FilterBar>
-          <ListView list={payments} columns={payCols} rowKey={(r) => r.id} caption="Paiements" empty="Aucun paiement ne correspond." />
-        </>
-      ) : null}
-      {tab === "payouts" ? (
-        <>
-          <FilterBar><FilterSelect label="Statut" value={pStatus} onChange={setPStatus} options={[["pending", "En attente"], ["sent", "Envoyés"], ["failed", "Rejetés"], ["", "Tous"]]} /></FilterBar>
-          <ListView list={payouts} columns={outCols} rowKey={(r) => r.id} caption="Retraits" empty="Aucun retrait dans cet état." />
-        </>
-      ) : null}
-      {tab === "invoices" ? <Section title="Factures de plateforme"><ListView list={invoices} columns={invCols} rowKey={(r) => r.id} caption="Factures" empty="Aucune facture." /></Section> : null}
-
-      <PaymentPanel id={open} onClose={() => setOpen(null)} onChanged={() => { payments.reload(); loadSummary(); }} />
-      <ReasonModal open={Boolean(approve)} title={`Valider le retrait #${approve?.id ?? ""} ?`} description={`Confirmez que le virement de ${approve ? moneyLabel(approve.amount) : ""} à ${approve?.artisan ?? ""} a RÉELLEMENT été effectué, et saisissez sa référence. L’artisan en est informé.`}
-        confirmLabel="Marquer comme envoyé" reasonKey="reference" reasonLabel="Référence du virement" onClose={() => setApprove(null)}
-        request={(b) => bo.post(`/finance/payouts/${approve?.id}/approve/`, { reference: b.reference })} onDone={() => { setApprove(null); setNotice("Retrait marqué comme envoyé."); payouts.reload(); loadSummary(); }} />
-      <ReasonModal open={Boolean(reject)} title={`Rejeter le retrait #${reject?.id ?? ""} ?`} description="Les gains redeviennent disponibles pour l’artisan, qui est informé du motif." confirmLabel="Rejeter" tone="danger" onClose={() => setReject(null)}
-        request={(b) => bo.post(`/finance/payouts/${reject?.id}/reject/`, { reason: b.reason })} onDone={() => { setReject(null); setNotice("Retrait rejeté."); payouts.reload(); loadSummary(); }} />
+        <KpiGrid className="mb-5">
+          <Kpi icon={<Banknote className="h-5 w-5" />} label="Volume payé" value={moneyLabel(summary.gmv)} />
+          <Kpi icon={<Coins className="h-5 w-5" />} tone="accent" label="Commissions gagnées" value={moneyLabel(summary.commission_earned)} hint={`${moneyLabel(summary.commission_in_escrow)} encore sous séquestre`} />
+          <Kpi icon={<Landmark className="h-5 w-5" />} tone="night" label="Sous séquestre" value={moneyLabel(summary.escrow_held)} />
+          <Kpi label="Remboursé" value={moneyLabel(summary.refunded)} hint={`Retraits en attente : ${summary.payouts.pending?.count ?? 0} (${moneyLabel(summary.payouts.pending?.amount ?? "0")})`} />
+        </KpiGrid>
+      ) : summaryError ? <Alert tone="danger" className="mb-5" action={<Button size="sm" variant="outline" onClick={loadSummary}>Réessayer</Button>}>{summaryError}</Alert> : <SkeletonStats count={4} className="mb-5 sm:grid-cols-2 lg:grid-cols-4" />}
+      <Tabs ariaLabel="Sections" value={tab} onChange={setTab} className="mb-4" items={[{ id: "payments", label: "Paiements" }, { id: "payouts", label: "Retraits", count: summary?.payouts.pending?.count }, { id: "invoices", label: "Factures" }]} />
+      {tab === "payments" ? <PaymentsTab onOpen={setOpen} version={version} /> : null}
+      {tab === "payouts" ? <PayoutsTab onChanged={changed} version={version} /> : null}
+      {tab === "invoices" ? <InvoicesTab /> : null}
+      <PaymentPanel id={open} onClose={() => setOpen(null)} onChanged={changed} />
     </>
   );
 }

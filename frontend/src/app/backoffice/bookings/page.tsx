@@ -1,12 +1,16 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
-import { Alert, Badge, Button, Modal, PageHeader, Tabs, type Column } from "@/components/ds";
+import { Ban, CalendarCheck, Eye, Gavel, UserRound } from "lucide-react";
+import { Alert, Badge, Button, Modal, PageHeader, Tabs } from "@/components/ds";
 import { bo, boError, moneyLabel } from "@/lib/bo";
 import { useBo } from "@/lib/BoProvider";
-import { useBoList, useDebounced } from "@/lib/useBoList";
-import { DateRange, FilterBar, FilterSelect, KV, ListView, ReasonModal, SearchBox, STATUS_FR, Tag, dt, useNotice, useTabParam } from "../_components/ui";
+import { useBoList, useCounts, useManagedList } from "@/lib/useBoList";
+import {
+  DateRange, ExportButton, FilterBar, FilterSelect, KV, ListView, ReasonModal, SearchBox, STATUS_FR, StatusChips, Tag, dd, dt, postTo, useNotice, useTabParam,
+  type BoColumn, type RowAction,
+} from "../_components/ui";
 
-interface Booking { id: number; status: string; service: string | null; client: string; artisan: string; booking_date: string; city: string | null; payment_status: string | null; disputes: number; created_at: string }
+interface Booking { id: number; status: string; service: string | null; client: string; client_id: number; artisan: string; artisan_id: number; booking_date: string; city: string | null; payment_status: string | null; disputes: number; created_at: string }
 interface Dispute { id: number; booking_id: number; status: string; reporter: string; reason: string; created_at: string; resolved_at: string | null; resolution_action: string | null; payment_status: string | null; amount: string | null }
 interface DisputeDetail extends Dispute { client: string; artisan: string; reporter_role: string; resolution: string; resolved_by: string | null; can_decide: boolean; can_move_money: boolean; history: { action: string; at: string; by: string; reason: string }[] }
 
@@ -91,68 +95,149 @@ function DisputePanel({ id, onClose, onChanged }: { id: number | null; onClose: 
   );
 }
 
-export default function BookingsPage() {
+const BOOKING_STATES = ["pending", "confirmed", "in_progress", "completed", "cancelled"] as const;
+
+function BookingsTab() {
   const { can } = useBo();
+  const m = useManagedList<Booking, { status: string; disputed: string; payment_status: string; user: string; from: string; to: string }>("/bookings/", { status: "", disputed: "", payment_status: "", user: "", from: "", to: "" });
+  const { values: f, list } = m;
+  const counts = useCounts("/bookings/", { _all: "", ...Object.fromEntries(BOOKING_STATES.map((s) => [s, `status=${s}`])) }, list.count);
+  const [cancel, setCancel] = useState<Booking | null>(null);
+  const [notice, setNotice] = useNotice();
+  const canManage = can("bookings.manage");
+
+  const columns: BoColumn<Booking>[] = [
+    { key: "id", header: "N°", primary: true, sort: "created_at", cell: (r) => <span className="font-semibold text-ink">#{r.id}</span> },
+    { key: "status", header: "Statut", sort: "status", cell: (r) => <Tag value={r.status} label={STATUS_FR[r.status]} /> },
+    { key: "service", header: "Service", wrap: true, cell: (r) => r.service ?? "—" },
+    { key: "parties", header: "Client → artisan", hideOnMobile: true, from: "xl", cell: (r) => `${r.client} → ${r.artisan}` },
+    { key: "date", header: "Prévue le", sort: "date", cell: (r) => dd(r.booking_date) },
+    { key: "pay", header: "Paiement", hideOnMobile: true, from: "xl", cell: (r) => (r.payment_status ? <Tag value={r.payment_status} label={STATUS_FR[r.payment_status]} /> : "—") },
+    { key: "disp", header: "Litiges", align: "right", cell: (r) => (r.disputes ? <Badge tone="danger">{r.disputes}</Badge> : "—") },
+  ];
+  const rowActions = (r: Booking): RowAction[] => [
+    { label: "Ouvrir la réservation", icon: Eye, href: `/backoffice/bookings/${r.id}` },
+    { label: "Fiche du client", icon: UserRound, href: `/backoffice/users/${r.client_id}`, hidden: !can("users.view") },
+    { label: "Fiche de l’artisan", icon: UserRound, href: `/backoffice/users/${r.artisan_id}`, hidden: !can("users.view") },
+    { label: "Litiges de cette réservation", icon: Gavel, href: `/backoffice/bookings?tab=disputes&q=${r.id}`, hidden: !r.disputes },
+    { label: "Annuler la réservation", icon: Ban, tone: "danger", onClick: () => setCancel(r), hidden: !canManage || !["pending", "confirmed", "in_progress"].includes(r.status) },
+  ];
+
+  return (
+    <>
+      {notice ? <p role="status" className="mb-4 rounded-xl bg-successSoft px-4 py-3 text-sm font-semibold text-successInk">{notice}</p> : null}
+      <StatusChips items={[["", "Toutes"], ["pending", "En attente"], ["confirmed", "Confirmées"], ["in_progress", "En cours"], ["completed", "Terminées"], ["cancelled", "Annulées"]]} value={f.status} onChange={(v) => m.set({ status: v })} counts={counts} label="Statut de la réservation" />
+      <FilterBar
+        search={<SearchBox value={f.q} onChange={(v) => m.set({ q: v })} placeholder="N°, client, artisan, ville, service…" />}
+        activeCount={m.activeCount}
+        onReset={m.reset}
+        onRefresh={() => void list.reload()}
+        refreshing={list.loading}
+        actions={<ExportButton dataset="bookings" from={f.from} to={f.to} />}
+      >
+        <FilterSelect label="Litiges" value={f.disputed} onChange={(v) => m.set({ disputed: v })} options={[["", "Tous"], ["true", "Avec litige"]]} />
+        <FilterSelect label="Paiement" value={f.payment_status} onChange={(v) => m.set({ payment_status: v })} options={[["", "Tous"], ["pending", "En attente"], ["held", "Sous séquestre"], ["released", "Versé"], ["refunded", "Remboursé"], ["failed", "Échoué"]]} />
+        <DateRange from={f.from} to={f.to} onFrom={(v) => m.set({ from: v })} onTo={(v) => m.set({ to: v })} />
+        {f.user ? (
+          <Button size="sm" variant="soft" onClick={() => m.set({ user: "" })} title="Retirer le filtre par compte">Compte #{f.user} ✕</Button>
+        ) : null}
+      </FilterBar>
+      <ListView
+        list={list}
+        columns={columns}
+        rowKey={(r) => r.id}
+        rowHref={(r) => `/backoffice/bookings/${r.id}`}
+        rowLabel={(r) => `réservation #${r.id}`}
+        caption="Réservations"
+        empty="Aucune réservation ne correspond."
+        emptyHint={m.activeCount ? "Modifiez ou réinitialisez les filtres." : undefined}
+        ordering={f.ordering}
+        onOrdering={(v) => m.set({ ordering: v })}
+        rowActions={rowActions}
+        pageSize={m.pageSize}
+        onPageSize={(n) => m.set({ size: String(n) })}
+      />
+      <ReasonModal
+        open={Boolean(cancel)}
+        title={`Annuler la réservation #${cancel?.id ?? ""} ?`}
+        description="L’annulation suit la politique de pénalité et l’escrow (remboursement net). Le client et l’artisan sont informés."
+        confirmLabel="Annuler la réservation"
+        tone="danger"
+        onClose={() => setCancel(null)}
+        request={cancel ? postTo(`/bookings/${cancel.id}/cancel/`) : async () => undefined}
+        onDone={() => { setCancel(null); setNotice("Réservation annulée."); void list.reload(); }}
+      />
+    </>
+  );
+}
+
+type DisputeFilters = { status: string; user: string; from: string; to: string };
+
+function DisputesTab({ openDispute }: { openDispute: (id: number) => void }) {
+  const { can } = useBo();
+  const m = useManagedList<Dispute, DisputeFilters>("/disputes/", { status: "todo", user: "", from: "", to: "" });
+  const { values: f, list } = m;
+  const counts = useCounts("/disputes/", { todo: "status=todo", open: "status=open", under_review: "status=under_review", resolved: "status=resolved", rejected: "status=rejected", _all: "" }, list.count);
+  const columns: BoColumn<Dispute>[] = [
+    { key: "id", header: "Litige", primary: true, sort: "created_at", cell: (r) => <span className="font-semibold text-ink">#{r.id} · réservation #{r.booking_id}</span> },
+    { key: "status", header: "Statut", sort: "status", cell: (r) => <Tag value={r.status} label={STATUS_FR[r.status]} /> },
+    { key: "reporter", header: "Ouvert par", cell: (r) => r.reporter },
+    { key: "reason", header: "Motif", wrap: true, hideOnMobile: true, from: "xl", cell: (r) => <span className="text-inkSoft">{r.reason}</span> },
+    { key: "amount", header: "Montant", align: "right", hideOnMobile: true, from: "xl", cell: (r) => (r.amount ? moneyLabel(r.amount) : "—") },
+    { key: "date", header: "Ouvert le", hideOnMobile: true, from: "lg", cell: (r) => dd(r.created_at) },
+  ];
+  const rowActions = (r: Dispute): RowAction[] => [
+    { label: can("bookings.manage") && (r.status === "open" || r.status === "under_review") ? "Traiter le litige" : "Voir le litige", icon: Gavel, onClick: () => openDispute(r.id) },
+    { label: "Ouvrir la réservation", icon: CalendarCheck, href: `/backoffice/bookings/${r.booking_id}` },
+  ];
+  return (
+    <>
+      <StatusChips items={[["todo", "À traiter"], ["open", "Ouverts"], ["under_review", "En examen"], ["resolved", "Résolus"], ["rejected", "Rejetés"], ["", "Tous"]]} value={f.status} onChange={(v) => m.set({ status: v })} counts={counts} label="Statut du litige" />
+      <FilterBar
+        search={<SearchBox value={f.q} onChange={(v) => m.set({ q: v })} placeholder="N° de litige ou de réservation, motif, plaignant…" />}
+        activeCount={m.activeCount}
+        onReset={m.reset}
+        onRefresh={() => void list.reload()}
+        refreshing={list.loading}
+      >
+        <DateRange from={f.from} to={f.to} onFrom={(v) => m.set({ from: v })} onTo={(v) => m.set({ to: v })} />
+        {f.user ? <Button size="sm" variant="soft" onClick={() => m.set({ user: "" })} title="Retirer le filtre par compte">Compte #{f.user} ✕</Button> : null}
+      </FilterBar>
+      <ListView
+        list={list}
+        columns={columns}
+        rowKey={(r) => r.id}
+        rowLabel={(r) => `litige #${r.id}`}
+        caption="Litiges"
+        empty="Aucun litige dans cet état."
+        emptyHint={m.activeCount ? "Modifiez ou réinitialisez les filtres." : undefined}
+        ordering={f.ordering}
+        onOrdering={(v) => m.set({ ordering: v })}
+        rowActions={rowActions}
+        pageSize={m.pageSize}
+        onPageSize={(n) => m.set({ size: String(n) })}
+      />
+    </>
+  );
+}
+
+export default function BookingsPage() {
   const [tab, setTab] = useTabParam(["bookings", "disputes"] as const, "bookings");
-  const [notice] = useNotice();
-  const [q, setQ] = useState("");
-  const [status, setStatus] = useState("");
-  const [disputed, setDisputed] = useState("");
-  const [from, setFrom] = useState("");
-  const [to, setTo] = useState("");
-  const [dStatus, setDStatus] = useState("open_only");
   const [openDispute, setOpenDispute] = useState<number | null>(null);
-  const bookings = useBoList<Booking>("/bookings/", { q: useDebounced(q), status, disputed, from, to });
-  const disputes = useBoList<Dispute>("/disputes/", dStatus === "open_only" ? { open: "true" } : { status: dStatus });
+  const disputesVersion = useBoList<Dispute>("/disputes/", { status: "todo" }, 1); // compteur de l'onglet : litiges à traiter
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     const id = new URLSearchParams(window.location.search).get("id");
     if (id && /^\d+$/.test(id)) setOpenDispute(Number(id));
   }, []);
 
-  const bColumns: Column<Booking>[] = [
-    { key: "id", header: "N°", primary: true, cell: (r) => <span className="font-semibold text-ink">#{r.id}</span> },
-    { key: "status", header: "Statut", cell: (r) => <Tag value={r.status} label={STATUS_FR[r.status]} /> },
-    { key: "service", header: "Service", cell: (r) => r.service ?? "—" },
-    { key: "parties", header: "Client → artisan", hideOnMobile: true, cell: (r) => `${r.client} → ${r.artisan}` },
-    { key: "date", header: "Prévue le", cell: (r) => dt(r.booking_date) },
-    { key: "pay", header: "Paiement", hideOnMobile: true, cell: (r) => (r.payment_status ? <Tag value={r.payment_status} label={STATUS_FR[r.payment_status]} /> : "—") },
-    { key: "disp", header: "Litiges", align: "right", cell: (r) => (r.disputes ? <Badge tone="danger">{r.disputes}</Badge> : "—") },
-  ];
-  const dColumns: Column<Dispute>[] = [
-    { key: "id", header: "Litige", primary: true, cell: (r) => <span className="font-semibold text-ink">#{r.id} · réservation #{r.booking_id}</span> },
-    { key: "status", header: "Statut", cell: (r) => <Tag value={r.status} label={STATUS_FR[r.status]} /> },
-    { key: "reporter", header: "Ouvert par", cell: (r) => r.reporter },
-    { key: "reason", header: "Motif", hideOnMobile: true, cell: (r) => <span className="text-inkSoft">{r.reason}</span> },
-    { key: "amount", header: "Montant", align: "right", hideOnMobile: true, cell: (r) => (r.amount ? moneyLabel(r.amount) : "—") },
-    { key: "date", header: "Ouvert le", hideOnMobile: true, cell: (r) => dt(r.created_at) },
-    { key: "act", header: "", align: "right", cell: (r) => <Button size="sm" variant="outline" onClick={() => setOpenDispute(r.id)}>{can("bookings.manage") && (r.status === "open" || r.status === "under_review") ? "Traiter" : "Voir"}</Button> },
-  ];
-
   return (
     <>
       <PageHeader title="Réservations et litiges" description="Consultation et médiation. L’administration passe par la machine à états et l’escrow : rien ne contourne le circuit normal." />
-      {notice ? <Alert tone="success" className="mb-4">{notice}</Alert> : null}
-      <Tabs ariaLabel="Sections" value={tab} onChange={setTab} className="mb-4" items={[{ id: "bookings", label: "Réservations", count: tab === "bookings" ? bookings.count : undefined }, { id: "disputes", label: "Litiges", count: tab === "disputes" ? disputes.count : undefined }]} />
-      {tab === "bookings" ? (
-        <>
-          <FilterBar>
-            <SearchBox value={q} onChange={setQ} placeholder="N°, client, artisan, ville, service…" />
-            <FilterSelect label="Statut" value={status} onChange={setStatus} options={[["", "Tous"], ...Object.entries(STATUS_FR).filter(([k]) => ["pending", "confirmed", "in_progress", "completed", "cancelled"].includes(k))]} />
-            <FilterSelect label="Litiges" value={disputed} onChange={setDisputed} options={[["", "Tous"], ["true", "Avec litige"]]} />
-            <DateRange from={from} to={to} onFrom={setFrom} onTo={setTo} />
-          </FilterBar>
-          <ListView list={bookings} columns={bColumns} rowKey={(r) => r.id} rowHref={(r) => `/backoffice/bookings/${r.id}`} caption="Réservations" empty="Aucune réservation ne correspond." />
-        </>
-      ) : (
-        <>
-          <FilterBar>
-            <FilterSelect label="Statut" value={dStatus} onChange={setDStatus} options={[["open_only", "À traiter"], ["open", "Ouverts"], ["under_review", "En examen"], ["resolved", "Résolus"], ["rejected", "Rejetés"]]} />
-          </FilterBar>
-          <ListView list={disputes} columns={dColumns} rowKey={(r) => r.id} caption="Litiges" empty="Aucun litige dans cet état." />
-        </>
-      )}
-      <DisputePanel id={openDispute} onClose={() => setOpenDispute(null)} onChanged={() => disputes.reload()} />
+      <Tabs ariaLabel="Sections" value={tab} onChange={setTab} className="mb-4" items={[{ id: "bookings", label: "Réservations" }, { id: "disputes", label: "Litiges", count: disputesVersion.count }]} />
+      {tab === "bookings" ? <BookingsTab /> : <DisputesTab key={reloadKey} openDispute={setOpenDispute} />}
+      <DisputePanel id={openDispute} onClose={() => setOpenDispute(null)} onChanged={() => { setReloadKey((k) => k + 1); void disputesVersion.reload(); }} />
     </>
   );
 }

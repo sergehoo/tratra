@@ -1,10 +1,11 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
-import { Alert, Badge, Button, Modal, PageHeader, Tabs, type Column } from "@/components/ds";
+import { CalendarCheck, CheckCheck, Eye, EyeOff, Undo2 } from "lucide-react";
+import { Alert, Badge, Button, Modal, PageHeader, Tabs } from "@/components/ds";
 import { bo, boError } from "@/lib/bo";
 import { useBo } from "@/lib/BoProvider";
-import { useBoList, useDebounced } from "@/lib/useBoList";
-import { FilterBar, FilterSelect, KV, ListView, ReasonModal, SearchBox, Tag, dt, postTo, useNotice, useTabParam } from "../_components/ui";
+import { useCounts, useManagedList } from "@/lib/useBoList";
+import { DateRange, ExportButton, FilterBar, FilterSelect, KV, ListView, ReasonModal, SearchBox, StatusChips, Tag, dd, dt, postTo, useNotice, useTabParam, type BoColumn, type BulkAction, type RowAction } from "../_components/ui";
 
 interface Review { id: number; booking_id: number; rating: number; comment: string; author: string; artisan: string; is_hidden: boolean; reports: number; has_reply: boolean; created_at: string }
 interface ReviewDetail extends Review { reply: string; reply_at: string | null; criteria: Record<string, number>; photos: number; history: { action: string; at: string; by: string; reason: string }[]; }
@@ -54,61 +55,137 @@ function ReviewPanel({ id, onClose, onChanged }: { id: number | null; onClose: (
   );
 }
 
-export default function ReviewsPage() {
+function ReviewsTab({ onOpen, onChanged, version }: { onOpen: (id: number) => void; onChanged: () => void; version: number }) {
   const { can } = useBo();
-  const [tab, setTab] = useTabParam(["reviews", "reports"] as const, "reviews");
+  const manage = can("reviews.moderate");
+  const m = useManagedList<Review, { hidden: string; reported: string; rating: string; from: string; to: string }>("/reviews/", { hidden: "", reported: "", rating: "", from: "", to: "" });
+  const { values: f, list } = m;
+  const counts = useCounts("/reviews/", { _all: "", false: "hidden=false", true: "hidden=true" }, `${list.count}-${version}`);
+  const [target, setTarget] = useState<{ row: Review; op: "hide" | "restore" } | null>(null);
   const [notice, setNotice] = useNotice();
-  const [q, setQ] = useState("");
-  const [hidden, setHidden] = useState("");
-  const [reported, setReported] = useState("");
-  const [rating, setRating] = useState("");
-  const [open, setOpen] = useState<number | null>(null);
-  const [resolve, setResolve] = useState<ReportRow | null>(null);
-  const [resolved, setResolved] = useState("false");
-  const reviews = useBoList<Review>("/reviews/", { q: useDebounced(q), hidden, reported, rating });
-  const reports = useBoList<ReportRow>("/reviews/reports/", { resolved });
 
-  const rColumns: Column<Review>[] = [
-    { key: "rating", header: "Note", primary: true, cell: (r) => <span className="font-semibold text-ink">{r.rating} / 5 <span className="font-normal text-ash">· avis #{r.id}</span></span> },
-    { key: "comment", header: "Commentaire", cell: (r) => <span className="text-inkSoft">{r.comment || "—"}</span> },
-    { key: "who", header: "Auteur → artisan", hideOnMobile: true, cell: (r) => `${r.author} → ${r.artisan}` },
+  const columns: BoColumn<Review>[] = [
+    { key: "rating", header: "Note", primary: true, sort: "rating", cell: (r) => <span className="font-semibold text-ink">{r.rating} / 5 <span className="font-normal text-ash">· avis #{r.id}</span></span> },
+    { key: "comment", header: "Commentaire", wrap: true, cell: (r) => <span className="text-inkSoft">{r.comment || "—"}</span> },
+    { key: "who", header: "Auteur → artisan", hideOnMobile: true, from: "xl", cell: (r) => `${r.author} → ${r.artisan}` },
     { key: "state", header: "État", cell: (r) => <span className="flex flex-wrap gap-1.5">{r.is_hidden ? <Badge tone="danger">Masqué</Badge> : <Badge tone="success">Publié</Badge>}{r.reports ? <Badge tone="warning">{r.reports} signalement(s)</Badge> : null}</span> },
-    { key: "date", header: "Publié le", hideOnMobile: true, cell: (r) => dt(r.created_at) },
-    { key: "act", header: "", align: "right", cell: (r) => <Button size="sm" variant="outline" onClick={() => setOpen(r.id)}>Examiner</Button> },
+    { key: "date", header: "Publié le", sort: "created_at", hideOnMobile: true, from: "lg", cell: (r) => dd(r.created_at) },
   ];
-  const pColumns: Column<ReportRow>[] = [
+  const rowActions = (r: Review): RowAction[] => [
+    { label: "Examiner l’avis", icon: Eye, onClick: () => onOpen(r.id) },
+    { label: "Masquer l’avis", icon: EyeOff, tone: "danger", onClick: () => setTarget({ row: r, op: "hide" }), hidden: !manage || r.is_hidden },
+    { label: "Republier l’avis", icon: Undo2, onClick: () => setTarget({ row: r, op: "restore" }), hidden: !manage || !r.is_hidden },
+    { label: "Ouvrir la réservation", icon: CalendarCheck, href: `/backoffice/bookings/${r.booking_id}`, hidden: !can("bookings.view") },
+  ];
+  const bulk: BulkAction<Review>[] | undefined = manage
+    ? [
+        { id: "hide", label: "Masquer", icon: EyeOff, tone: "danger", title: "Masquer les avis sélectionnés ?", confirmLabel: "Masquer", description: "Les signalements ouverts sont clos et la note de chaque artisan est recalculée.", eligible: (r) => !r.is_hidden, run: (r, b) => bo.post(`/reviews/${r.id}/hide/`, b) },
+        { id: "restore", label: "Republier", icon: Undo2, title: "Republier les avis sélectionnés ?", confirmLabel: "Republier", eligible: (r) => r.is_hidden, run: (r, b) => bo.post(`/reviews/${r.id}/restore/`, b) },
+      ]
+    : undefined;
+
+  return (
+    <>
+      {notice ? <p role="status" className="mb-4 rounded-xl bg-successSoft px-4 py-3 text-sm font-semibold text-successInk">{notice}</p> : null}
+      <StatusChips items={[["", "Tous"], ["false", "Publiés"], ["true", "Masqués"]]} value={f.hidden} onChange={(v) => m.set({ hidden: v })} counts={counts} label="Visibilité" />
+      <FilterBar
+        search={<SearchBox value={f.q} onChange={(v) => m.set({ q: v })} placeholder="Texte de l’avis ou nom de l’artisan…" />}
+        activeCount={m.activeCount}
+        onReset={m.reset}
+        onRefresh={() => void list.reload()}
+        refreshing={list.loading}
+        actions={<ExportButton dataset="reviews" from={f.from} to={f.to} />}
+      >
+        <FilterSelect label="Signalements" value={f.reported} onChange={(v) => m.set({ reported: v })} options={[["", "Tous"], ["true", "Signalés"]]} />
+        <FilterSelect label="Note" value={f.rating} onChange={(v) => m.set({ rating: v })} options={[["", "Toutes"], ["1", "1"], ["2", "2"], ["3", "3"], ["4", "4"], ["5", "5"]]} />
+        <DateRange from={f.from} to={f.to} onFrom={(v) => m.set({ from: v })} onTo={(v) => m.set({ to: v })} />
+      </FilterBar>
+      <ListView
+        list={list}
+        columns={columns}
+        rowKey={(r) => r.id}
+        rowLabel={(r) => `avis #${r.id}`}
+        caption="Avis"
+        empty="Aucun avis ne correspond."
+        emptyHint={m.activeCount ? "Modifiez ou réinitialisez les filtres." : "Par défaut, les avis les plus signalés passent en premier."}
+        ordering={f.ordering}
+        onOrdering={(v) => m.set({ ordering: v })}
+        rowActions={rowActions}
+        bulk={bulk}
+        pageSize={m.pageSize}
+        onPageSize={(n) => m.set({ size: String(n) })}
+      />
+      <ReasonModal open={target?.op === "hide"} title="Masquer cet avis ?" description="Les signalements ouverts sur cet avis sont clos. La note de l’artisan est recalculée." confirmLabel="Masquer" tone="danger" onClose={() => setTarget(null)}
+        request={target ? postTo(`/reviews/${target.row.id}/hide/`) : async () => undefined} onDone={() => { setTarget(null); setNotice("Avis masqué."); void list.reload(); onChanged(); }} />
+      <ReasonModal open={target?.op === "restore"} title="Republier cet avis ?" confirmLabel="Republier" onClose={() => setTarget(null)}
+        request={target ? postTo(`/reviews/${target.row.id}/restore/`) : async () => undefined} onDone={() => { setTarget(null); setNotice("Avis republié."); void list.reload(); onChanged(); }} />
+    </>
+  );
+}
+
+function ReportsTab({ onOpen, version }: { onOpen: (id: number) => void; version: number }) {
+  const { can } = useBo();
+  const manage = can("reviews.moderate");
+  const m = useManagedList<ReportRow, { resolved: string; from: string; to: string }>("/reviews/reports/", { resolved: "false", from: "", to: "" });
+  const { values: f, list } = m;
+  const counts = useCounts("/reviews/reports/", { false: "resolved=false", true: "resolved=true" }, `${list.count}-${version}`);
+  const [resolve, setResolve] = useState<ReportRow | null>(null);
+  const [notice, setNotice] = useNotice();
+
+  const columns: BoColumn<ReportRow>[] = [
     { key: "type", header: "Signalement", primary: true, cell: (r) => <span className="font-semibold text-ink">{r.type === "review" ? "Avis" : "Message"} · #{r.id}</span> },
-    { key: "reason", header: "Motif", cell: (r) => <span className="text-inkSoft">{r.reason}</span> },
-    { key: "excerpt", header: "Contenu signalé", hideOnMobile: true, cell: (r) => <span className="text-inkSoft">{r.excerpt || "—"}</span> },
-    { key: "who", header: "Signalé par", hideOnMobile: true, cell: (r) => r.reporter },
-    { key: "date", header: "Le", hideOnMobile: true, cell: (r) => dt(r.created_at) },
-    { key: "act", header: "", align: "right", cell: (r) => <span className="flex justify-end gap-2">{r.review_id ? <Button size="sm" variant="outline" onClick={() => setOpen(r.review_id)}>Voir l’avis</Button> : null}{!r.is_resolved && can("reviews.moderate") ? <Button size="sm" onClick={() => setResolve(r)}>Clore</Button> : <Tag value="true" label="Traité" />}</span> },
+    { key: "reason", header: "Motif", wrap: true, cell: (r) => <span className="text-inkSoft">{r.reason}</span> },
+    { key: "excerpt", header: "Contenu signalé", wrap: true, hideOnMobile: true, from: "xl", cell: (r) => <span className="text-inkSoft">{r.excerpt || "—"}</span> },
+    { key: "who", header: "Signalé par", hideOnMobile: true, from: "xl", cell: (r) => r.reporter },
+    { key: "state", header: "État", cell: (r) => (r.is_resolved ? <Tag value="true" label="Traité" /> : <Badge tone="warning">À traiter</Badge>) },
+    { key: "date", header: "Le", hideOnMobile: true, from: "lg", cell: (r) => dd(r.created_at) },
   ];
+  const rowActions = (r: ReportRow): RowAction[] => [
+    { label: "Voir l’avis signalé", icon: Eye, onClick: () => onOpen(r.review_id as number), hidden: !r.review_id },
+    { label: "Clore le signalement", icon: CheckCheck, onClick: () => setResolve(r), hidden: !manage || r.is_resolved },
+  ];
+  const bulk: BulkAction<ReportRow>[] | undefined = manage
+    ? [{ id: "resolve", label: "Clore", icon: CheckCheck, title: "Clore les signalements sélectionnés ?", confirmLabel: "Clore", description: "Notez la décision prise : elle est conservée dans le journal de chaque signalement.", eligible: (r) => !r.is_resolved, run: (r, b) => bo.post(`/reviews/reports/${r.id}/resolve/`, b) }]
+    : undefined;
+
+  return (
+    <>
+      {notice ? <p role="status" className="mb-4 rounded-xl bg-successSoft px-4 py-3 text-sm font-semibold text-successInk">{notice}</p> : null}
+      <StatusChips items={[["false", "À traiter"], ["true", "Traités"]]} value={f.resolved} onChange={(v) => m.set({ resolved: v })} counts={counts} label="État du signalement" />
+      <FilterBar search={<SearchBox value={f.q} onChange={(v) => m.set({ q: v })} placeholder="Motif, contenu ou auteur du signalement…" />} activeCount={m.activeCount} onReset={m.reset} onRefresh={() => void list.reload()} refreshing={list.loading}>
+        <DateRange from={f.from} to={f.to} onFrom={(v) => m.set({ from: v })} onTo={(v) => m.set({ to: v })} />
+      </FilterBar>
+      <ListView
+        list={list}
+        columns={columns}
+        rowKey={(r) => r.id}
+        rowLabel={(r) => `signalement #${r.id}`}
+        caption="Signalements"
+        empty="Aucun signalement dans cet état."
+        emptyHint={m.activeCount ? "Modifiez ou réinitialisez les filtres." : undefined}
+        rowActions={rowActions}
+        bulk={bulk}
+        pageSize={m.pageSize}
+        onPageSize={(n) => m.set({ size: String(n) })}
+      />
+      <ReasonModal open={Boolean(resolve)} title="Clore ce signalement ?" description="Notez la décision prise (conservée dans le journal)." confirmLabel="Clore" reasonLabel="Décision prise" onClose={() => setResolve(null)}
+        request={resolve ? postTo(`/reviews/reports/${resolve.id}/resolve/`) : async () => undefined} onDone={() => { setResolve(null); setNotice("Signalement clos."); void list.reload(); }} />
+    </>
+  );
+}
+
+export default function ReviewsPage() {
+  const [tab, setTab] = useTabParam(["reviews", "reports"] as const, "reviews");
+  const [open, setOpen] = useState<number | null>(null);
+  const [version, setVersion] = useState(0);
+  const bump = () => setVersion((v) => v + 1);
 
   return (
     <>
       <PageHeader title="Avis et signalements" description="Modération : on masque, on ne réécrit jamais. Chaque décision est motivée et journalisée." />
-      {notice ? <Alert tone="success" className="mb-4">{notice}</Alert> : null}
       <Tabs ariaLabel="Sections" value={tab} onChange={setTab} className="mb-4" items={[{ id: "reviews", label: "Avis" }, { id: "reports", label: "Signalements" }]} />
-      {tab === "reviews" ? (
-        <>
-          <FilterBar>
-            <SearchBox value={q} onChange={setQ} placeholder="Texte de l’avis ou nom de l’artisan…" />
-            <FilterSelect label="Visibilité" value={hidden} onChange={setHidden} options={[["", "Tous"], ["false", "Publiés"], ["true", "Masqués"]]} />
-            <FilterSelect label="Signalements" value={reported} onChange={setReported} options={[["", "Tous"], ["true", "Signalés"]]} />
-            <FilterSelect label="Note" value={rating} onChange={setRating} options={[["", "Toutes"], ["1", "1"], ["2", "2"], ["3", "3"], ["4", "4"], ["5", "5"]]} />
-          </FilterBar>
-          <ListView list={reviews} columns={rColumns} rowKey={(r) => r.id} caption="Avis" empty="Aucun avis ne correspond." />
-        </>
-      ) : (
-        <>
-          <FilterBar><FilterSelect label="État" value={resolved} onChange={setResolved} options={[["false", "À traiter"], ["true", "Traités"]]} /></FilterBar>
-          <ListView list={reports} columns={pColumns} rowKey={(r) => r.id} caption="Signalements" empty="Aucun signalement dans cet état." />
-        </>
-      )}
-      <ReviewPanel id={open} onClose={() => setOpen(null)} onChanged={() => { reviews.reload(); reports.reload(); }} />
-      <ReasonModal open={Boolean(resolve)} title="Clore ce signalement ?" description="Notez la décision prise (conservée dans le journal)." confirmLabel="Clore" reasonLabel="Décision prise" onClose={() => setResolve(null)}
-        request={postTo(`/reviews/reports/${resolve?.id}/resolve/`)} onDone={() => { setResolve(null); setNotice("Signalement clos."); reports.reload(); }} />
+      {tab === "reviews" ? <ReviewsTab key={version} onOpen={setOpen} onChanged={bump} version={version} /> : <ReportsTab key={version} onOpen={setOpen} version={version} />}
+      <ReviewPanel id={open} onClose={() => setOpen(null)} onChanged={bump} />
     </>
   );
 }

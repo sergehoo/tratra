@@ -1,18 +1,21 @@
 "use client";
 import { useEffect, useId, useState, type ReactNode } from "react";
 import { Search } from "lucide-react";
-import { Alert, Badge, Button, Card, DataTable, EmptyState, Input, Modal, Select, Textarea, TextField, type BadgeTone, type Column } from "@/components/ds";
+import { Alert, Badge, Button, Card, Input, Modal, Select, Textarea, TextField, type BadgeTone } from "@/components/ds";
 import { bo, boError, fieldErrors, MIN_REASON } from "@/lib/bo";
 import { formatDateTimeShort } from "../../dashboard/_components/dates";
-import type { useBoList } from "@/lib/useBoList";
 
 export const dt = (value: string | null | undefined): string => (value ? formatDateTimeShort(value) ?? "—" : "—");
 
-// ── Filtres ────────────────────────────────────────────────────────────────────────────────────────────────────────
-
-export function FilterBar({ children }: { children: ReactNode }) {
-  return <div className="mb-4 flex flex-wrap items-end gap-3">{children}</div>;
+/** Date courte pour les tableaux (« 11 oct. 2026 ») ; l'heure reste dans l'infobulle. */
+export function dd(value: string | null | undefined): ReactNode {
+  if (!value) return "—";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "—";
+  return <time dateTime={value} title={dt(value)}>{d.toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric" })}</time>;
 }
+
+// ── Filtres ────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 export function SearchBox({ value, onChange, placeholder = "Rechercher…", label = "Recherche" }: { value: string; onChange: (v: string) => void; placeholder?: string; label?: string }) {
   const id = useId();
@@ -65,69 +68,11 @@ export function DateRange({ from, to, onFrom, onTo }: { from: string; to: string
   );
 }
 
-// ── Liste paginée avec états ───────────────────────────────────────────────────────────────────────────────────────
+// ── Liste paginée avec états (tri, actions par ligne et groupées, pagination) : voir list.tsx ───────────────────────────
 
-export function Pager({ page, count, pageSize, onPage }: { page: number; count: number; pageSize: number; onPage: (p: number) => void }) {
-  const pages = Math.max(1, Math.ceil(count / pageSize));
-  if (count === 0) return null;
-  return (
-    <nav aria-label="Pagination" className="mt-4 flex items-center justify-between gap-3 text-sm text-inkSoft">
-      <span>
-        {count} résultat{count > 1 ? "s" : ""} · page {Math.min(page, pages)} / {pages}
-      </span>
-      <span className="flex gap-2">
-        <Button size="sm" variant="outline" disabled={page <= 1} onClick={() => onPage(page - 1)}>
-          Précédent
-        </Button>
-        <Button size="sm" variant="outline" disabled={page >= pages} onClick={() => onPage(page + 1)}>
-          Suivant
-        </Button>
-      </span>
-    </nav>
-  );
-}
-
-type List<T> = ReturnType<typeof useBoList<T>>;
-
-/** Tableau paginé : chargement, erreur réelle avec « Réessayer », état vide explicite. */
-export function ListView<T>({
-  list,
-  columns,
-  rowKey,
-  caption,
-  empty,
-  rowHref,
-}: {
-  list: List<T>;
-  columns: Column<T>[];
-  rowKey: (row: T) => string | number;
-  caption: string;
-  empty: string;
-  rowHref?: (row: T) => string;
-}) {
-  if (list.error && list.rows.length === 0) {
-    return (
-      <Alert tone="danger" title="Liste indisponible" action={<Button size="sm" variant="outline" onClick={() => void list.reload()}>Réessayer</Button>}>
-        {list.error}
-      </Alert>
-    );
-  }
-  return (
-    <>
-      {list.error ? <Alert tone="warning" className="mb-3">{list.error}</Alert> : null}
-      <DataTable
-        caption={caption}
-        columns={columns}
-        rows={list.rows}
-        rowKey={rowKey}
-        rowHref={rowHref}
-        loading={list.loading && list.rows.length === 0}
-        empty={<EmptyState title={empty} compact />}
-      />
-      <Pager page={list.page} count={list.count} pageSize={list.pageSize} onPage={list.setPage} />
-    </>
-  );
-}
+export { ExportButton, FilterBar, Kpi, KpiGrid, ListView, RowMenu, StatusChips } from "./list";
+export { Drawer } from "./Drawer";
+export type { BoColumn, BulkAction, RowAction } from "./list";
 
 // ── Présentation ───────────────────────────────────────────────────────────────────────────────────────────────────
 

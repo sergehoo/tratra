@@ -2,21 +2,10 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { AlertTriangle, ArrowRight, CalendarCheck, Hammer, MapPin, Users, Wallet } from "lucide-react";
-import { Alert, Button, Card, PageHeader, SkeletonStats, Stat } from "@/components/ds";
+import { Alert, Button, Card, PageHeader, SkeletonStats } from "@/components/ds";
 import { bo, boError, moneyLabel, pct } from "@/lib/bo";
-import { Bars, Section, STATUS_FR, dt } from "./_components/ui";
-
-interface Dashboard {
-  generated_at: string;
-  kpis: {
-    users?: { total: number; new_7d: number; new_30d: number; artisans: number; artisans_approved: number };
-    bookings?: { total: number; by_status: Record<string, number>; active: number; created_7d: number; completed_30d: number };
-    finance?: { gmv_30d: string; commission_30d: string; refunded_30d: string; escrow_held: string; payouts_pending: number; payouts_pending_amount: string };
-    live?: { sharing_sessions: number };
-  };
-  series: { signups?: { date: string; count: number }[]; bookings?: { date: string; count: number }[] };
-  alerts: { key: string; label: string; count: number; href: string; severity: "warning" | "danger" | "info" }[];
-}
+import type { Dashboard } from "@/lib/boDashboard";
+import { Bars, Kpi, KpiGrid, Section, STATUS_FR, dt } from "./_components/ui";
 
 /** Indicateurs RÉELS filtrés par droit : une section absente = le rôle n'a pas le droit de la consulter. */
 export default function BackOfficeHome() {
@@ -81,21 +70,21 @@ export default function BackOfficeHome() {
         <Alert tone="success" className="mb-6">Rien à traiter pour votre rôle en ce moment.</Alert>
       )}
 
-      <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {users ? <Stat icon={<Users className="h-6 w-6" />} label="Utilisateurs" value={users.total} hint={`${users.new_7d} nouveaux sur 7 jours`} /> : null}
-        {users ? <Stat icon={<Hammer className="h-6 w-6" />} tone="accent" label="Artisans approuvés" value={`${users.artisans_approved}\u00A0/\u00A0${users.artisans}`} hint="Profils approuvés par l’équipe" /> : null}
-        {bookings ? <Stat icon={<CalendarCheck className="h-6 w-6" />} label="Réservations en cours" value={bookings.active} hint={`${bookings.completed_30d} terminées sur 30 jours`} /> : null}
-        {live ? <Stat icon={<MapPin className="h-6 w-6" />} tone="night" label="Suivis actifs" value={live.sharing_sessions} hint="Artisans qui partagent leur position" /> : null}
-      </div>
+      <KpiGrid className="mb-6">
+        {users ? <Kpi href="/backoffice/users" icon={<Users className="h-5 w-5" />} label="Utilisateurs" value={users.total} hint={`${users.new_7d} nouveaux sur 7 jours`} /> : null}
+        {users ? <Kpi icon={<Hammer className="h-5 w-5" />} tone="accent" label="Artisans approuvés" value={`${users.artisans_approved}\u00A0/\u00A0${users.artisans}`} hint="Profils approuvés par l’équipe" /> : null}
+        {bookings ? <Kpi href="/backoffice/bookings" icon={<CalendarCheck className="h-5 w-5" />} label="Réservations en cours" value={bookings.active} hint={`${bookings.completed_30d} terminées sur 30 jours`} /> : null}
+        {live ? <Kpi icon={<MapPin className="h-5 w-5" />} tone="night" label="Suivis actifs" value={live.sharing_sessions} hint="Artisans qui partagent leur position" /> : null}
+      </KpiGrid>
 
       {finance ? (
         <Section title="Finances — 30 derniers jours" className="mb-6" actions={<Link href="/backoffice/finance" className="text-sm font-semibold text-primaryDark underline underline-offset-2">Détail</Link>}>
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <Stat icon={<Wallet className="h-6 w-6" />} label="Volume payé" value={moneyLabel(finance.gmv_30d)} />
-            <Stat label="Commissions" value={moneyLabel(finance.commission_30d)} tone="accent" />
-            <Stat label="Sous séquestre" value={moneyLabel(finance.escrow_held)} tone="night" />
-            <Stat label="Retraits en attente" value={finance.payouts_pending} hint={moneyLabel(finance.payouts_pending_amount)} />
-          </div>
+          <KpiGrid>
+            <Kpi icon={<Wallet className="h-5 w-5" />} label="Volume payé" value={moneyLabel(finance.gmv_30d)} />
+            <Kpi label="Commissions" value={moneyLabel(finance.commission_30d)} tone="accent" />
+            <Kpi label="Sous séquestre" value={moneyLabel(finance.escrow_held)} tone="night" />
+            <Kpi label="Retraits en attente" value={finance.payouts_pending} hint={moneyLabel(finance.payouts_pending_amount)} href="/backoffice/finance?tab=payouts" />
+          </KpiGrid>
         </Section>
       ) : null}
 

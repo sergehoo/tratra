@@ -1,11 +1,11 @@
 "use client";
 import { useEffect, useState } from "react";
-import { Plus } from "lucide-react";
-import { Alert, Badge, Button, Checkbox, ConfirmDialog, Input, Modal, PageHeader, Tabs, type Column } from "@/components/ds";
+import { KeyRound, LogOut, Plus, ScrollText, ShieldCheck, ShieldOff, UserCog, UserMinus, Users } from "lucide-react";
+import { Alert, Badge, Button, Checkbox, ConfirmDialog, Input, Modal, PageHeader, Tabs } from "@/components/ds";
 import { bo, boError, fieldErrors } from "@/lib/bo";
 import { useBo } from "@/lib/BoProvider";
-import { useBoList, useDebounced } from "@/lib/useBoList";
-import { DateRange, FilterBar, FilterSelect, ListView, ReasonModal, SearchBox, Section, dt, postTo, useNotice, useTabParam } from "../_components/ui";
+import { useBoList, useCounts, useDebounced, useManagedList } from "@/lib/useBoList";
+import { DateRange, ExportButton, FilterBar, FilterSelect, Kpi, KpiGrid, ListView, ReasonModal, SearchBox, Section, StatusChips, dd, dt, postTo, useNotice, useTabParam, type BoColumn, type RowAction } from "../_components/ui";
 
 interface Staff { id: number; name: string; email: string | null; is_active: boolean; is_superuser: boolean; roles: string[]; last_login: string | null; date_joined: string; mfa_enrolled: boolean }
 interface RoleInfo { id: string; members: number; permissions: string[] }
@@ -31,7 +31,9 @@ function RolePicker({ roles, selected, onChange }: { roles: RoleInfo[]; selected
 function StaffTab({ roles }: { roles: Roles | null }) {
   const { me } = useBo();
   const [notice, setNotice] = useNotice();
-  const list = useBoList<Staff>("/security/staff/", {});
+  const m = useManagedList<Staff, { role: string; active: string; mfa: string }>("/security/staff/", { role: "", active: "", mfa: "" });
+  const { values: f, list } = m;
+  const counts = useCounts("/security/staff/", { _all: "", enrolled: "mfa=enrolled", missing: "mfa=missing" }, list.count);
   const [edit, setEdit] = useState<Staff | null>(null);
   const [sel, setSel] = useState<string[]>([]);
   const [add, setAdd] = useState(false);
@@ -53,32 +55,49 @@ function StaffTab({ roles }: { roles: Roles | null }) {
   async function saveRoles() {
     if (!edit) return;
     setBusy(true); setError(""); setFieldErr({});
-    try { await bo.put(`/security/staff/${edit.id}/roles/`, { roles: sel }); setEdit(null); setNotice("Rôles mis à jour : l’effet est immédiat."); list.reload(); }
+    try { await bo.put(`/security/staff/${edit.id}/roles/`, { roles: sel }); setEdit(null); setNotice("Rôles mis à jour : l’effet est immédiat."); void list.reload(); }
     catch (e) { setFieldErr(fieldErrors(e)); setError(boError(e, "Les rôles n’ont pas pu être modifiés.")); } finally { setBusy(false); }
   }
   async function addStaff() {
     if (!pick) return;
     setBusy(true); setError(""); setFieldErr({});
-    try { await bo.post("/security/staff/", { user_id: pick.id, roles: sel }); setAdd(false); setNotice("Accès d’administration accordé."); list.reload(); }
+    try { await bo.post("/security/staff/", { user_id: pick.id, roles: sel }); setAdd(false); setNotice("Accès d’administration accordé."); void list.reload(); }
     catch (e) { setFieldErr(fieldErrors(e)); setError(boError(e, "L’accès n’a pas pu être accordé.")); } finally { setBusy(false); }
   }
 
-  const columns: Column<Staff>[] = [
-    { key: "name", header: "Administrateur", primary: true, cell: (r) => <span className="font-semibold text-ink">{r.name} <span className="font-normal text-ash">#{r.id}{r.id === me?.user.id ? " (vous)" : ""}</span></span> },
-    { key: "email", header: "E-mail", hideOnMobile: true, cell: (r) => r.email ?? "—" },
+  const columns: BoColumn<Staff>[] = [
+    { key: "name", header: "Administrateur", primary: true, sort: "name", cell: (r) => <span className="font-semibold text-ink">{r.name} <span className="font-normal text-ash">#{r.id}{r.id === me?.user.id ? " (vous)" : ""}</span></span> },
+    { key: "email", header: "E-mail", hideOnMobile: true, from: "xl", cell: (r) => r.email ?? "—" },
     { key: "roles", header: "Rôles", cell: (r) => <span className="flex flex-wrap gap-1.5">{r.roles.map((x) => <Badge key={x} tone={x === "super_admin" ? "accent" : "primary"}>{ROLE_FR[x] ?? x}</Badge>)}{!r.roles.length ? <Badge tone="warning">Aucun rôle</Badge> : null}{r.is_superuser ? <Badge tone="night">Superutilisateur</Badge> : null}</span> },
-    { key: "login", header: "Dernière connexion", hideOnMobile: true, cell: (r) => dt(r.last_login) },
+    { key: "login", header: "Dernière connexion", hideOnMobile: true, from: "2xl", cell: (r) => dd(r.last_login) },
     { key: "state", header: "Statut", cell: (r) => <Badge tone={r.is_active ? "success" : "danger"}>{r.is_active ? "Actif" : "Suspendu"}</Badge> },
-    { key: "mfa", header: "Double authentification", hideOnMobile: true, cell: (r) => (r.mfa_enrolled ? <Badge tone="success">Activée</Badge> : <Badge tone="warning">Non activée</Badge>) },
-    { key: "act", header: "", align: "right", cell: (r) => (r.id !== me?.user.id ? <span className="flex justify-end gap-2"><Button size="sm" variant="outline" onClick={() => { setSel(r.roles); setError(""); setFieldErr({}); setEdit(r); }}>Rôles</Button>{r.mfa_enrolled ? <Button size="sm" variant="outline" onClick={() => setResetMfa(r)}>Réinit. MFA</Button> : null}<Button size="sm" variant="danger" onClick={() => setRemove(r)}>Retirer</Button></span> : null) },
+    { key: "mfa", header: "MFA", hideOnMobile: true, cell: (r) => (r.mfa_enrolled ? <Badge tone="success">Activée</Badge> : <Badge tone="warning">Non activée</Badge>) },
+  ];
+  const rowActions = (r: Staff): RowAction[] => [
+    { label: "Journal d’audit de cet administrateur", icon: ScrollText, href: `/backoffice/security?tab=audit&actor=${r.id}` },
+    { label: "Modifier les rôles", icon: UserCog, onClick: () => { setSel(r.roles); setError(""); setFieldErr({}); setEdit(r); }, hidden: r.id === me?.user.id },
+    { label: "Révoquer toutes ses sessions", icon: LogOut, href: `/backoffice/security?tab=sessions&user=${r.id}`, hidden: r.id === me?.user.id },
+    { label: "Réinitialiser la double authentification", icon: KeyRound, tone: "danger", onClick: () => setResetMfa(r), hidden: r.id === me?.user.id || !r.mfa_enrolled },
+    { label: "Retirer l’accès d’administration", icon: UserMinus, tone: "danger", onClick: () => setRemove(r), hidden: r.id === me?.user.id },
   ];
 
   return (
     <>
-      {notice ? <Alert tone="success" className="mb-4">{notice}</Alert> : null}
+      {notice ? <p role="status" className="mb-4 rounded-xl bg-successSoft px-4 py-3 text-sm font-semibold text-successInk">{notice}</p> : null}
+      <KpiGrid className="mb-5">
+        <Kpi icon={<Users className="h-5 w-5" />} label="Comptes d’administration" value={counts._all ?? "—"} hint="Chaque accès est nominatif" />
+        <Kpi icon={<ShieldCheck className="h-5 w-5" />} tone="accent" label="Double authentification activée" value={counts.enrolled ?? "—"} hint="Exigée de chaque compte" />
+        <Kpi icon={<ShieldOff className="h-5 w-5" />} tone={counts.missing ? "danger" : "night"} label="Sans double authentification" value={counts.missing ?? "—"} hint="À activer à leur prochaine connexion" />
+      </KpiGrid>
       <Section title="Personnel d’administration" actions={<Button size="sm" leftIcon={<Plus aria-hidden className="h-4 w-4" />} onClick={() => { setSel([]); setPick(null); setQ(""); setError(""); setFieldErr({}); setAdd(true); }}>Ajouter un administrateur</Button>}>
         <p className="mb-3 text-xs text-ash">Vous ne pouvez pas modifier vos propres rôles ni retirer votre propre accès : il reste ainsi toujours un super administrateur. La double authentification est exigée de chaque compte d’administration ; un appareil perdu se réinitialise par un autre super administrateur, après vérification de l’identité. Limitez les comptes au strict nécessaire.</p>
-        <ListView list={list} columns={columns} rowKey={(r) => r.id} caption="Personnel d’administration" empty="Aucun compte d’administration." />
+        <StatusChips items={[["", "Tous"], ["enrolled", "MFA activée"], ["missing", "Sans MFA"]]} value={f.mfa} onChange={(v) => m.set({ mfa: v })} counts={counts} label="Double authentification" />
+        <FilterBar search={<SearchBox value={f.q} onChange={(v) => m.set({ q: v })} placeholder="Nom ou e-mail…" />} activeCount={m.activeCount} onReset={m.reset} onRefresh={() => void list.reload()} refreshing={list.loading}>
+          <FilterSelect label="Rôle" value={f.role} onChange={(v) => m.set({ role: v })} options={[["", "Tous"], ...Object.entries(ROLE_FR)]} />
+          <FilterSelect label="Statut" value={f.active} onChange={(v) => m.set({ active: v })} options={[["", "Tous"], ["true", "Actifs"], ["false", "Suspendus"]]} />
+        </FilterBar>
+        <ListView list={list} columns={columns} rowKey={(r) => r.id} rowLabel={(r) => r.name} caption="Personnel d’administration" empty="Aucun compte d’administration ne correspond." emptyHint={m.activeCount ? "Modifiez ou réinitialisez les filtres." : undefined}
+          rowActions={rowActions} pageSize={m.pageSize} onPageSize={(n) => m.set({ size: String(n) })} />
       </Section>
       {roles ? (
         <Section title="Rôles et droits" className="mt-6">
@@ -110,18 +129,16 @@ function StaffTab({ roles }: { roles: Roles | null }) {
         </div>
       </Modal>
       <ReasonModal open={Boolean(remove)} title={`Retirer l’accès de ${remove?.name ?? ""} ?`} description="Le compte utilisateur est conservé ; il perd son accès d’administration et toutes ses sessions sont révoquées." confirmLabel="Retirer l’accès" tone="danger" onClose={() => setRemove(null)}
-        request={postTo(`/security/staff/${remove?.id}/remove/`)} onDone={() => { setRemove(null); setNotice("Accès retiré."); list.reload(); }} />
+        request={postTo(`/security/staff/${remove?.id}/remove/`)} onDone={() => { setRemove(null); setNotice("Accès retiré."); void list.reload(); }} />
       <ReasonModal open={Boolean(resetMfa)} title={`Réinitialiser la double authentification de ${resetMfa?.name ?? ""} ?`} description="À faire après vérification de l’identité (appareil perdu). L’appareil est supprimé, toutes ses sessions sont révoquées : il devra activer un nouvel appareil à sa prochaine connexion." confirmLabel="Réinitialiser" tone="danger"
-        onClose={() => setResetMfa(null)} request={postTo(`/security/staff/${resetMfa?.id}/mfa-reset/`)} onDone={() => { setResetMfa(null); setNotice("Double authentification réinitialisée."); list.reload(); }} />
+        onClose={() => setResetMfa(null)} request={postTo(`/security/staff/${resetMfa?.id}/mfa-reset/`)} onDone={() => { setResetMfa(null); setNotice("Double authentification réinitialisée."); void list.reload(); }} />
     </>
   );
 }
 
 function SessionsTab() {
-  const [staffOnly, setStaffOnly] = useState("true");
-  const [active, setActive] = useState("true");
-  const [user, setUser] = useState("");
-  const list = useBoList<SessionRow>("/security/sessions/", { staff: staffOnly === "true" ? "true" : "", active: active === "true" ? "true" : "", user: user.replace(/\D/g, "") });
+  const m = useManagedList<SessionRow, { staff: string; active: string; user: string }>("/security/sessions/", { staff: "true", active: "true", user: "" });
+  const { values: f, list } = m;
   const [notice, setNotice] = useNotice();
   const [failure, setFailure] = useState("");
   const [confirm, setConfirm] = useState<{ type: "one"; row: SessionRow } | { type: "all"; userId: number; name: string } | null>(null);
@@ -133,28 +150,32 @@ function SessionsTab() {
     try {
       if (confirm.type === "one") await bo.post(`/security/sessions/${confirm.row.id}/revoke/`, {});
       else await bo.post(`/security/users/${confirm.userId}/revoke-sessions/`, {});
-      setConfirm(null); setNotice("Session(s) révoquée(s) : l’appareil devra se reconnecter."); list.reload();
+      setConfirm(null); setNotice("Session(s) révoquée(s) : l’appareil devra se reconnecter."); void list.reload();
     } catch (e) { setConfirm(null); setFailure(boError(e, "La révocation a échoué.")); } finally { setBusy(false); }
   }
-  const columns: Column<SessionRow>[] = [
+  const columns: BoColumn<SessionRow>[] = [
     { key: "user", header: "Compte", primary: true, cell: (r) => <span className="font-semibold text-ink">{r.user} <span className="font-normal text-ash">#{r.user_id}</span> {r.is_staff ? <Badge tone="accent">Administration</Badge> : null}</span> },
-    { key: "fp", header: "Session", hideOnMobile: true, cell: (r) => <span className="font-mono text-xs text-inkSoft">{r.fingerprint}</span> },
+    { key: "fp", header: "Session", hideOnMobile: true, from: "xl", cell: (r) => <span className="font-mono text-xs text-inkSoft">{r.fingerprint}</span> },
     { key: "created", header: "Ouverte le", cell: (r) => dt(r.created_at) },
-    { key: "exp", header: "Expire le", hideOnMobile: true, cell: (r) => dt(r.expires_at) },
+    { key: "exp", header: "Expire le", hideOnMobile: true, from: "2xl", cell: (r) => dt(r.expires_at) },
     { key: "state", header: "État", cell: (r) => <Badge tone={r.revoked ? "danger" : r.expired ? "gray" : "success"}>{r.revoked ? "Révoquée" : r.expired ? "Expirée" : "Active"}</Badge> },
-    { key: "act", header: "", align: "right", cell: (r) => (!r.revoked && !r.expired ? <span className="flex justify-end gap-2"><Button size="sm" variant="outline" onClick={() => setConfirm({ type: "one", row: r })}>Révoquer</Button><Button size="sm" variant="danger" onClick={() => setConfirm({ type: "all", userId: r.user_id, name: r.user })}>Tout révoquer</Button></span> : null) },
+  ];
+  const rowActions = (r: SessionRow): RowAction[] => [
+    { label: "Révoquer cette session", icon: LogOut, onClick: () => setConfirm({ type: "one", row: r }), hidden: r.revoked || r.expired },
+    { label: "Déconnecter ce compte partout", icon: LogOut, tone: "danger", onClick: () => setConfirm({ type: "all", userId: r.user_id, name: r.user }), hidden: r.revoked || r.expired },
   ];
   return (
     <>
-      {notice ? <Alert tone="success" className="mb-4">{notice}</Alert> : null}
+      {notice ? <p role="status" className="mb-4 rounded-xl bg-successSoft px-4 py-3 text-sm font-semibold text-successInk">{notice}</p> : null}
       {failure ? <Alert tone="danger" className="mb-4">{failure}</Alert> : null}
-      <FilterBar>
-        <FilterSelect label="Comptes" value={staffOnly} onChange={setStaffOnly} options={[["true", "Administration"], ["", "Tous les comptes"]]} />
-        <FilterSelect label="État" value={active} onChange={setActive} options={[["true", "Actives"], ["", "Toutes"]]} />
-        <div className="min-w-[10rem]"><label className="mb-1 block text-xs font-semibold text-ash" htmlFor="sess-user">N° de compte</label><Input id="sess-user" inputMode="numeric" value={user} onChange={(e) => setUser(e.target.value)} placeholder="ex. 42" /></div>
+      <StatusChips items={[["true", "Actives"], ["", "Toutes"]]} value={f.active} onChange={(v) => m.set({ active: v })} label="État de la session" />
+      <FilterBar activeCount={m.activeCount} onReset={m.reset} onRefresh={() => void list.reload()} refreshing={list.loading}>
+        <FilterSelect label="Comptes" value={f.staff} onChange={(v) => m.set({ staff: v })} options={[["true", "Administration"], ["", "Tous les comptes"]]} />
+        <div className="min-w-[10rem]"><label className="mb-1 block text-xs font-semibold text-ash" htmlFor="sess-user">N° de compte</label><Input id="sess-user" inputMode="numeric" value={f.user} onChange={(e) => m.set({ user: e.target.value.replace(/\D/g, "") })} placeholder="ex. 42" /></div>
       </FilterBar>
       <p className="mb-3 text-xs text-ash">Aucun jeton n’est affiché : seulement une empreinte courte pour distinguer les sessions.</p>
-      <ListView list={list} columns={columns} rowKey={(r) => r.id} caption="Sessions" empty="Aucune session ne correspond." />
+      <ListView list={list} columns={columns} rowKey={(r) => r.id} rowLabel={(r) => `session de ${r.user}`} caption="Sessions" empty="Aucune session ne correspond." emptyHint={m.activeCount ? "Modifiez ou réinitialisez les filtres." : undefined}
+        rowActions={rowActions} pageSize={m.pageSize} onPageSize={(n) => m.set({ size: String(n) })} />
       <ConfirmDialog open={Boolean(confirm)} onClose={() => setConfirm(null)} onConfirm={() => void run()} loading={busy} tone="danger" confirmLabel="Révoquer"
         title={confirm?.type === "all" ? `Déconnecter ${confirm.name} partout ?` : "Révoquer cette session ?"}
         description={confirm?.type === "all" ? "Toutes les sessions de ce compte sont révoquées : il devra se reconnecter sur chaque appareil." : "L’appareil concerné ne pourra plus renouveler sa connexion."} />
@@ -163,36 +184,41 @@ function SessionsTab() {
 }
 
 function AuditTab() {
-  const [q, setQ] = useState("");
+  const m = useManagedList<AuditRow, { action: string; backoffice: string; actor: string; target_type: string; target_id: string; from: string; to: string }>("/security/audit/", { action: "", backoffice: "true", actor: "", target_type: "", target_id: "", from: "", to: "" });
+  const { values: f, list } = m;
   const [actions, setActions] = useState<string[]>([]);
-  const [action, setAction] = useState("");
-  const [backoffice, setBackoffice] = useState("true");
-  const [actor, setActor] = useState("");
-  const [targetType, setTargetType] = useState("");
-  const [from, setFrom] = useState("");
-  const [to, setTo] = useState("");
   const [open, setOpen] = useState<AuditRow | null>(null);
-  const prefix = useDebounced(q.trim());
-  const list = useBoList<AuditRow>("/security/audit/", { action: action || prefix, backoffice, actor: actor.replace(/\D/g, ""), target_type: targetType, from, to }, 50);
   useEffect(() => { bo.get<{ actions: string[] }>("/security/audit/actions/").then((r) => setActions(r.actions)).catch(() => setActions([])); }, []);
-  const columns: Column<AuditRow>[] = [
+  const columns: BoColumn<AuditRow>[] = [
     { key: "at", header: "Date", primary: true, cell: (r) => <span className="font-semibold text-ink">{dt(r.at)}</span> },
     { key: "actor", header: "Auteur", cell: (r) => r.actor },
-    { key: "action", header: "Action", cell: (r) => <span className="font-mono text-xs">{r.action}</span> },
+    { key: "action", header: "Action", wrap: true, cell: (r) => <span className="font-mono text-xs">{r.action}</span> },
     { key: "target", header: "Cible", hideOnMobile: true, cell: (r) => `${r.target_type}${r.target_id ? ` #${r.target_id}` : ""}` },
-    { key: "data", header: "", align: "right", cell: (r) => (Object.keys(r.data).length ? <Button size="sm" variant="outline" onClick={() => setOpen(r)}>Détail</Button> : null) },
+  ];
+  const rowActions = (r: AuditRow): RowAction[] => [
+    { label: "Voir le détail", icon: ScrollText, onClick: () => setOpen(r), hidden: !Object.keys(r.data).length },
+    { label: "Toutes les actions de cet auteur", icon: UserCog, onClick: () => m.set({ actor: String(r.actor_id ?? "") }), hidden: !r.actor_id },
+    { label: "Tout l’historique de cette cible", icon: ScrollText, onClick: () => m.set({ target_type: r.target_type, target_id: String(r.target_id ?? "") }), hidden: !r.target_id },
   ];
   return (
     <>
-      <FilterBar>
-        <SearchBox value={q} onChange={setQ} label="Préfixe d’action" placeholder="Préfixe d’action (ex. backoffice.kyc)" />
-        <FilterSelect label="Action exacte" value={action} onChange={setAction} options={[["", "Toutes"], ...actions.map((a): [string, string] => [a, a])]} />
-        <FilterSelect label="Périmètre" value={backoffice} onChange={setBackoffice} options={[["true", "Back-Office"], ["", "Toute la plateforme"]]} />
-        <div className="min-w-[9rem]"><label className="mb-1 block text-xs font-semibold text-ash" htmlFor="aud-actor">N° d’auteur</label><Input id="aud-actor" inputMode="numeric" value={actor} onChange={(e) => setActor(e.target.value)} /></div>
-        <div className="min-w-[9rem]"><label className="mb-1 block text-xs font-semibold text-ash" htmlFor="aud-type">Type de cible</label><Input id="aud-type" value={targetType} onChange={(e) => setTargetType(e.target.value)} placeholder="ex. booking" /></div>
-        <DateRange from={from} to={to} onFrom={setFrom} onTo={setTo} />
+      <FilterBar
+        search={<SearchBox value={f.action} onChange={(v) => m.set({ action: v })} label="Préfixe d’action" placeholder="Préfixe d’action (ex. backoffice.kyc)" />}
+        activeCount={m.activeCount}
+        onReset={m.reset}
+        onRefresh={() => void list.reload()}
+        refreshing={list.loading}
+        actions={<ExportButton dataset="audit" from={f.from} to={f.to} />}
+      >
+        <FilterSelect label="Action exacte" value={actions.includes(f.action) ? f.action : ""} onChange={(v) => m.set({ action: v })} options={[["", "Choisir…"], ...actions.map((a): [string, string] => [a, a])]} />
+        <FilterSelect label="Périmètre" value={f.backoffice} onChange={(v) => m.set({ backoffice: v })} options={[["true", "Back-Office"], ["", "Toute la plateforme"]]} />
+        <div className="min-w-[9rem]"><label className="mb-1 block text-xs font-semibold text-ash" htmlFor="aud-actor">N° d’auteur</label><Input id="aud-actor" inputMode="numeric" value={f.actor} onChange={(e) => m.set({ actor: e.target.value.replace(/\D/g, "") })} /></div>
+        <div className="min-w-[9rem]"><label className="mb-1 block text-xs font-semibold text-ash" htmlFor="aud-type">Type de cible</label><Input id="aud-type" value={f.target_type} onChange={(e) => m.set({ target_type: e.target.value })} placeholder="ex. booking" /></div>
+        <div className="min-w-[8rem]"><label className="mb-1 block text-xs font-semibold text-ash" htmlFor="aud-tid">N° de cible</label><Input id="aud-tid" inputMode="numeric" value={f.target_id} onChange={(e) => m.set({ target_id: e.target.value.replace(/\D/g, "") })} /></div>
+        <DateRange from={f.from} to={f.to} onFrom={(v) => m.set({ from: v })} onTo={(v) => m.set({ to: v })} />
       </FilterBar>
-      <ListView list={list} columns={columns} rowKey={(r) => r.id} caption="Journal d’audit" empty="Aucun événement ne correspond." />
+      <ListView list={list} columns={columns} rowKey={(r) => r.id} rowLabel={(r) => `événement #${r.id}`} caption="Journal d’audit" empty="Aucun événement ne correspond." emptyHint={m.activeCount ? "Modifiez ou réinitialisez les filtres." : undefined}
+        rowActions={rowActions} pageSize={m.pageSize} onPageSize={(n) => m.set({ size: String(n) })} />
       <Modal open={Boolean(open)} onClose={() => setOpen(null)} title={open?.action ?? ""} description={open ? `${open.actor} · ${dt(open.at)}` : ""}>
         <pre className="max-h-[50vh] overflow-auto whitespace-pre-wrap rounded-panel bg-canvas p-3 text-xs text-ink">{open ? JSON.stringify(open.data, null, 2) : ""}</pre>
         <p className="mt-2 text-xs text-ash">Le journal ne contient jamais de secret : motifs, montants, identifiants et anciennes / nouvelles valeurs seulement.</p>
@@ -200,6 +226,7 @@ function AuditTab() {
     </>
   );
 }
+
 export default function SecurityPage() {
   const [tab, setTab] = useTabParam(["staff", "sessions", "audit"] as const, "staff");
   const [roles, setRoles] = useState<Roles | null>(null);

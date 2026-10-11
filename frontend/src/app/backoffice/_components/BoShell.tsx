@@ -75,7 +75,7 @@ function UserMenu({ me }: { me: BoMe }) {
         className={cx("flex min-h-[44px] items-center gap-2.5 rounded-full border border-line bg-white py-1 pl-1 pr-2.5 transition hover:border-primary/40 sm:pr-3.5", RING)}
       >
         <Avatar name={me.user.name} size={34} />
-        <span className="hidden min-w-0 text-left md:block">
+        <span className="hidden min-w-0 text-left lg:block">
           <span className="block max-w-[11rem] truncate text-sm font-semibold leading-tight text-ink">{me.user.name}</span>
           <span className="block max-w-[11rem] truncate text-[11px] font-medium leading-tight text-ash">{roles.join(" · ") || "Personnel"}</span>
         </span>
@@ -131,14 +131,15 @@ function Breadcrumbs({ nav }: { nav: ReturnType<typeof buildNav> }) {
       <ol className="flex min-w-0 items-center gap-1 text-sm">
         {crumbs.map((c, i) => {
           const last = i === crumbs.length - 1;
-          const hiddenOnMobile = i < crumbs.length - 1;
+          // Mobile : dernier maillon seulement ; tablette : deux derniers ; grand écran : tous. Seul le dernier maillon se tronque.
+          const visibility = last ? "" : i === crumbs.length - 2 ? "hidden md:flex" : "hidden xl:flex";
           return (
-            <li key={`${i}-${c.label}`} className={cx("flex min-w-0 items-center gap-1", hiddenOnMobile && "hidden md:flex")}>
-              {i > 0 ? <ChevronRight aria-hidden className="hidden h-3.5 w-3.5 shrink-0 text-fog md:block" /> : null}
+            <li key={`${i}-${c.label}`} className={cx("items-center gap-1", last ? "flex min-w-0" : "shrink-0", visibility)}>
+              {i > 0 ? <ChevronRight aria-hidden className={cx("h-3.5 w-3.5 shrink-0 text-fog", last && "hidden md:block")} /> : null}
               {c.href && !last ? (
-                <Link href={c.href} className={cx("truncate rounded font-medium text-ash hover:text-ink", RING)}>{c.label}</Link>
+                <Link href={c.href} className={cx("whitespace-nowrap rounded font-medium text-ash hover:text-ink", RING)}>{c.label}</Link>
               ) : (
-                <span aria-current={last ? "page" : undefined} className={cx("truncate", last ? "font-bold text-ink" : "font-medium text-ash")}>{c.label}</span>
+                <span aria-current={last ? "page" : undefined} className={cx(last ? "truncate font-bold text-ink" : "whitespace-nowrap font-medium text-ash")}>{c.label}</span>
               )}
             </li>
           );
@@ -272,11 +273,11 @@ export function BoShell({ me, children }: { me: BoMe; children: ReactNode }) {
                 type="button"
                 onClick={() => setSearching(true)}
                 aria-label="Recherche globale"
-                className={cx("flex h-11 shrink-0 items-center gap-2.5 rounded-full border border-line bg-canvas px-3.5 text-sm text-ash transition hover:border-primary/40 hover:bg-white md:w-72 lg:w-80", RING)}
+                className={cx("flex h-11 shrink-0 items-center gap-2.5 rounded-full border border-line bg-canvas px-3.5 text-sm text-ash transition hover:border-primary/40 hover:bg-white lg:w-72 xl:w-80", RING)}
               >
                 <Search aria-hidden className="h-4 w-4" />
-                <span className="hidden min-w-0 flex-1 truncate text-left md:block">Rechercher…</span>
-                <kbd className="hidden rounded-md border border-line bg-white px-1.5 py-0.5 text-[11px] font-semibold text-ash md:block">Ctrl K</kbd>
+                <span className="hidden min-w-0 flex-1 truncate text-left lg:block">Rechercher…</span>
+                <kbd className="hidden rounded-md border border-line bg-white px-1.5 py-0.5 text-[11px] font-semibold text-ash lg:block">Ctrl K</kbd>
               </button>
               <UserMenu me={me} />
             </div>

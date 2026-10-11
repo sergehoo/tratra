@@ -1,13 +1,13 @@
 "use client";
 import { useEffect, useState } from "react";
-import { Plus } from "lucide-react";
-import { Alert, Badge, Button, Checkbox, ConfirmDialog, Input, Modal, PageHeader, Select, TextField, TextareaField, type Column } from "@/components/ds";
+import { BarChart3, Megaphone, Pencil, Plus, Send, Trash2, XCircle } from "lucide-react";
+import { Alert, Badge, Button, Checkbox, ConfirmDialog, Input, Modal, PageHeader, Select, TextField, TextareaField } from "@/components/ds";
 import { ApiError, apiFetch, upload } from "@/lib/api";
 import { bo, boError, fieldErrors } from "@/lib/bo";
 import { useBo } from "@/lib/BoProvider";
 import { patchForm } from "@/lib/uploadPatch";
-import { useBoList, useDebounced } from "@/lib/useBoList";
-import { FilterBar, FilterSelect, KV, ListView, SearchBox, Tag, dt, useNotice } from "../_components/ui";
+import { useCounts, useManagedList } from "@/lib/useBoList";
+import { Drawer, FilterBar, FilterSelect, KV, ListView, SearchBox, StatusChips, Tag, dd, dt, useNotice, type BoColumn, type RowAction } from "../_components/ui";
 
 interface Announcement {
   id: number; title: string; body: string; image_url: string | null; kind: "service" | "promotion"; action_kind: "none" | "link" | "deeplink"; action_label: string; action_value: string;
@@ -72,7 +72,7 @@ function Form({ open, item, onClose, onSaved }: { open: boolean; item: Announcem
   }
 
   return (
-    <Modal open={open} onClose={onClose} dismissible={!busy} size="lg" title={item ? `Modifier « ${item.title} »` : "Nouvelle annonce"} description="Enregistrée en brouillon : rien n’est envoyé avant la publication ou la programmation."
+    <Drawer open={open} onClose={onClose} dismissible={!busy} width="xl" title={item ? `Modifier « ${item.title} »` : "Nouvelle annonce"} description="Enregistrée en brouillon : rien n’est envoyé avant la publication ou la programmation."
       footer={<><Button variant="outline" onClick={onClose} disabled={busy}>Annuler</Button><Button loading={busy} onClick={() => void save()}>Enregistrer le brouillon</Button></>}>
       <div className="space-y-4">
         <TextField label="Titre" required value={f.title} error={errors.title} onChange={(e) => setF({ ...f, title: e.target.value })} />
@@ -108,17 +108,16 @@ function Form({ open, item, onClose, onSaved }: { open: boolean; item: Announcem
         <Checkbox label="Envoyer aussi une notification push" checked={f.send_push} onChange={(e) => setF({ ...f, send_push: e.target.checked })} />
         {failure ? <Alert tone="danger">{failure}</Alert> : null}
       </div>
-    </Modal>
+    </Drawer>
   );
 }
 
 export default function AnnouncementsAdminPage() {
   const { can } = useBo();
   const [notice, setNotice] = useNotice();
-  const [q, setQ] = useState("");
-  const [status, setStatus] = useState("");
-  const [kind, setKind] = useState("");
-  const list = useBoList<Announcement>("/announcements/", { q: useDebounced(q), status, kind });
+  const m = useManagedList<Announcement, { status: string; kind: string }>("/announcements/", { status: "", kind: "" });
+  const { values: f, list } = m;
+  const counts = useCounts("/announcements/", { _all: "", draft: "status=draft", scheduled: "status=scheduled", published: "status=published", expired: "status=expired", cancelled: "status=cancelled" }, list.count);
   const [form, setForm] = useState<{ open: boolean; item: Announcement | null }>({ open: false, item: null });
   const [confirm, setConfirm] = useState<{ op: "publish" | "cancel" | "delete"; item: Announcement; estimate?: number } | null>(null);
   const [schedule, setSchedule] = useState<Announcement | null>(null);
@@ -146,7 +145,7 @@ export default function AnnouncementsAdminPage() {
       else await bo.post(`/announcements/${item.id}/${op}/`, {});
       setConfirm(null);
       setNotice(op === "publish" ? "Annonce publiée : la diffusion est en cours." : op === "cancel" ? "Annonce annulée." : "Brouillon supprimé.");
-      list.reload();
+      void list.reload();
     } catch (e) {
       setConfirm(null);
       setFailure(boError(e, "L’opération a échoué."));
@@ -166,7 +165,7 @@ export default function AnnouncementsAdminPage() {
       await bo.post(`/announcements/${schedule.id}/schedule/`, { publish_at: toIso(when) });
       setSchedule(null);
       setNotice("Annonce programmée.");
-      list.reload();
+      void list.reload();
     } catch (e) {
       setFailure(boError(e, "La programmation a échoué."));
     } finally {
@@ -174,45 +173,44 @@ export default function AnnouncementsAdminPage() {
     }
   }
 
-  const columns: Column<Announcement>[] = [
-    { key: "title", header: "Annonce", primary: true, cell: (r) => <span className="font-semibold text-ink">{r.title}</span> },
+  const open = async (r: Announcement) => {
+    try { setStats({ item: r, data: await bo.get<Stats>(`/announcements/${r.id}/stats/`) }); } catch (e) { setFailure(boError(e, "Statistiques indisponibles.")); }
+  };
+  const editable = (r: Announcement) => manage && (r.status === "draft" || r.status === "scheduled");
+  const columns: BoColumn<Announcement>[] = [
+    { key: "title", header: "Annonce", primary: true, wrap: true, cell: (r) => <span className="font-semibold text-ink">{r.title}</span> },
     { key: "kind", header: "Nature", cell: (r) => <Badge tone={r.kind === "promotion" ? "accent" : "primary"}>{r.kind === "promotion" ? "Promotion" : "Service"}</Badge> },
-    { key: "aud", header: "Destinataires", hideOnMobile: true, cell: (r) => `${r.audience.join(", ") || "—"}${r.cities.length ? ` · ${r.cities.join(", ")}` : ""}` },
+    { key: "aud", header: "Destinataires", wrap: true, hideOnMobile: true, from: "xl", cell: (r) => `${r.audience.join(", ") || "—"}${r.cities.length ? ` · ${r.cities.join(", ")}` : ""}` },
     { key: "status", header: "Statut", cell: (r) => <Badge tone={STATUS_TONE[r.status] ?? "gray"}>{STATUS_FR[r.status] ?? r.status}</Badge> },
-    { key: "when", header: "Publication", hideOnMobile: true, cell: (r) => dt(r.status === "published" ? r.published_at : r.publish_at) },
-    { key: "exp", header: "Expire", hideOnMobile: true, cell: (r) => dt(r.expires_at) },
+    { key: "when", header: "Publication", hideOnMobile: true, from: "lg", cell: (r) => dd(r.status === "published" ? r.published_at : r.publish_at) },
+    { key: "exp", header: "Expire", hideOnMobile: true, from: "2xl", cell: (r) => dd(r.expires_at) },
     {
-      key: "act", header: "", align: "right", cell: (r) => (
-        <span className="flex flex-wrap justify-end gap-2">
-          <Button size="sm" variant="outline" onClick={async () => { try { setStats({ item: r, data: await bo.get<Stats>(`/announcements/${r.id}/stats/`) }); } catch (e) { setFailure(boError(e, "Statistiques indisponibles.")); } }}>Statistiques</Button>
-          {manage && (r.status === "draft" || r.status === "scheduled") ? (
-            <>
-              <Button size="sm" variant="outline" onClick={() => setForm({ open: true, item: r })}>Modifier</Button>
-              <Button size="sm" variant="outline" onClick={() => { setWhen(""); setSchedule(r); }}>Programmer</Button>
-              <Button size="sm" onClick={() => void ask("publish", r)}>Publier</Button>
-            </>
-          ) : null}
-          {manage && r.status === "draft" ? <Button size="sm" variant="danger" onClick={() => void ask("delete", r)}>Supprimer</Button> : null}
-          {manage && (r.status === "scheduled" || r.status === "published") ? <Button size="sm" variant="danger" onClick={() => void ask("cancel", r)}>Annuler</Button> : null}
-        </span>
-      ),
+      key: "act", header: "Action", align: "right", cell: (r) => (editable(r) ? <Button size="sm" leftIcon={<Send aria-hidden className="h-4 w-4" />} onClick={() => void ask("publish", r)}>Publier</Button> : <Button size="sm" variant="outline" leftIcon={<BarChart3 aria-hidden className="h-4 w-4" />} onClick={() => void open(r)}>Statistiques</Button>),
     },
+  ];
+  const rowActions = (r: Announcement): RowAction[] => [
+    { label: "Statistiques", icon: BarChart3, onClick: () => void open(r) },
+    { label: "Modifier", icon: Pencil, onClick: () => setForm({ open: true, item: r }), hidden: !editable(r) },
+    { label: "Programmer la publication", icon: Megaphone, onClick: () => { setWhen(""); setSchedule(r); }, hidden: !editable(r) },
+    { label: "Publier maintenant", icon: Send, onClick: () => void ask("publish", r), hidden: !editable(r) },
+    { label: "Annuler l’annonce", icon: XCircle, tone: "danger", onClick: () => void ask("cancel", r), hidden: !manage || !(r.status === "scheduled" || r.status === "published") },
+    { label: "Supprimer le brouillon", icon: Trash2, tone: "danger", onClick: () => void ask("delete", r), hidden: !manage || r.status !== "draft" },
   ];
 
   return (
     <>
       <PageHeader title="Annonces" description="Informations de service et promotions ciblées par rôle et par ville déclarée. Aucune promotion n’est envoyée sans le consentement marketing de l’utilisateur."
         actions={manage ? <Button size="sm" leftIcon={<Plus aria-hidden className="h-4 w-4" />} onClick={() => setForm({ open: true, item: null })}>Nouvelle annonce</Button> : null} />
-      {notice ? <Alert tone="success" className="mb-4">{notice}</Alert> : null}
+      {notice ? <p role="status" className="mb-4 rounded-xl bg-successSoft px-4 py-3 text-sm font-semibold text-successInk">{notice}</p> : null}
       {failure ? <Alert tone="danger" className="mb-4">{failure}</Alert> : null}
-      <FilterBar>
-        <SearchBox value={q} onChange={setQ} placeholder="Titre…" />
-        <FilterSelect label="Statut" value={status} onChange={setStatus} options={[["", "Tous"], ...Object.entries(STATUS_FR)]} />
-        <FilterSelect label="Nature" value={kind} onChange={setKind} options={[["", "Toutes"], ["service", "Service"], ["promotion", "Promotion"]]} />
+      <StatusChips items={[["", "Toutes"], ["draft", "Brouillons"], ["scheduled", "Programmées"], ["published", "Publiées"], ["expired", "Expirées"], ["cancelled", "Annulées"]]} value={f.status} onChange={(v) => m.set({ status: v })} counts={counts} label="Statut de l’annonce" />
+      <FilterBar search={<SearchBox value={f.q} onChange={(v) => m.set({ q: v })} placeholder="Titre…" />} activeCount={m.activeCount} onReset={m.reset} onRefresh={() => void list.reload()} refreshing={list.loading}>
+        <FilterSelect label="Nature" value={f.kind} onChange={(v) => m.set({ kind: v })} options={[["", "Toutes"], ["service", "Service"], ["promotion", "Promotion"]]} />
       </FilterBar>
-      <ListView list={list} columns={columns} rowKey={(r) => r.id} caption="Annonces" empty="Aucune annonce. Créez la première avec « Nouvelle annonce »." />
+      <ListView list={list} columns={columns} rowKey={(r) => r.id} rowLabel={(r) => r.title} caption="Annonces" empty="Aucune annonce ne correspond." emptyHint={m.activeCount ? "Modifiez ou réinitialisez les filtres." : "Créez la première avec « Nouvelle annonce »."}
+        rowActions={rowActions} pageSize={m.pageSize} onPageSize={(n) => m.set({ size: String(n) })} />
 
-      <Form open={form.open} item={form.item} onClose={() => setForm({ open: false, item: null })} onSaved={() => { setForm({ open: false, item: null }); setNotice("Brouillon enregistré."); list.reload(); }} />
+      <Form open={form.open} item={form.item} onClose={() => setForm({ open: false, item: null })} onSaved={() => { setForm({ open: false, item: null }); setNotice("Brouillon enregistré."); void list.reload(); }} />
       <ConfirmDialog open={Boolean(confirm)} onClose={() => setConfirm(null)} loading={busy} onConfirm={() => void run()}
         tone={confirm?.op === "publish" ? "primary" : "danger"} confirmLabel={confirm?.op === "publish" ? "Publier maintenant" : confirm?.op === "cancel" ? "Annuler l’annonce" : "Supprimer le brouillon"}
         title={confirm?.op === "publish" ? `Publier « ${confirm.item.title} » ?` : confirm?.op === "cancel" ? `Annuler « ${confirm?.item.title} » ?` : `Supprimer « ${confirm?.item.title} » ?`}

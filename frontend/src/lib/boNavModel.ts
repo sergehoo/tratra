@@ -63,6 +63,13 @@ export const SUBS: Record<string, readonly SubDef[]> = {
     { tab: "payouts", label: "Retraits", keywords: "virement gains artisans" },
     { tab: "invoices", label: "Factures" },
   ],
+  settings: [
+    { tab: "integrations", label: "Intégrations", keywords: "firebase push sms e-mail paiements stockage" },
+    { tab: "commissions", label: "Commissions", keywords: "tarifs frais plateforme" },
+    { tab: "cancellation", label: "Annulation", keywords: "pénalité politique" },
+    { tab: "trust", label: "Tratra Trust", keywords: "seuils poids badges score" },
+    { tab: "coupons", label: "Codes promo", keywords: "promotion réduction" },
+  ],
   security: [
     { tab: "staff", label: "Personnel et rôles", keywords: "administrateurs double authentification mfa" },
     { tab: "sessions", label: "Sessions" },

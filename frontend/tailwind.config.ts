@@ -45,6 +45,7 @@ const config: Config = {
         display: ["var(--font-display)", "var(--font-body)", "system-ui", "sans-serif"],
         brand: ["Kaushan Script", "var(--font-display)", "cursive"],
       },
+      screens: { "3xl": "1792px" },
       fontSize,
       borderRadius,
       boxShadow,
@@ -78,6 +79,10 @@ const config: Config = {
           from: { opacity: "0", transform: "translate3d(-24px,0,0)" },
           to: { opacity: "1", transform: "none" },
         },
+        slideInRight: {
+          from: { opacity: "0", transform: "translate3d(32px,0,0)" },
+          to: { opacity: "1", transform: "none" },
+        },
       },
       animation: {
         shimmer: "shimmer 1.6s infinite",
@@ -87,6 +92,7 @@ const config: Config = {
         scaleIn: `scaleIn ${tokens.motion.duration.base}ms ${easeEmphasized} both`,
         sheetUp: `sheetUp ${tokens.motion.duration.slow}ms ${easeEmphasized} both`,
         slideInLeft: `slideInLeft ${tokens.motion.duration.base}ms ${easeEmphasized} both`,
+        slideInRight: `slideInRight ${tokens.motion.duration.base}ms ${easeEmphasized} both`,
       },
     },
   },

@@ -1,11 +1,11 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
-import { Banknote, FileSignature, Gavel, Hourglass, Scale, Users } from "lucide-react";
-import { Alert, Badge, Button, Card, Checkbox, Modal, PageHeader, SelectField, SkeletonStats, Stat, Tabs, TextField, type Column } from "@/components/ds";
+import { Banknote, Check, Eye, EyeOff, FileSignature, Gavel, Hourglass, Scale, Trash2, Undo2, Users } from "lucide-react";
+import { Alert, Badge, Button, Card, Checkbox, Modal, PageHeader, SelectField, SkeletonStats, Tabs, TextField } from "@/components/ds";
 import { bo, boError, fieldErrors, moneyLabel } from "@/lib/bo";
 import { useBo } from "@/lib/BoProvider";
-import { useBoList, useDebounced } from "@/lib/useBoList";
-import { Bars, FilterBar, FilterSelect, KV, ListView, ReasonModal, SearchBox, Section, Tag, dt, postTo, useNotice, useTabParam } from "../_components/ui";
+import { useCounts, useManagedList } from "@/lib/useBoList";
+import { Bars, DateRange, ExportButton, FilterBar, FilterSelect, Kpi, KpiGrid, KV, ListView, ReasonModal, SearchBox, Section, StatusChips, Tag, dd, dt, postTo, useNotice, useTabParam, type BoColumn, type BulkAction, type RowAction } from "../_components/ui";
 
 const CONTRACT_FR: Record<string, string> = { draft: "Brouillon", pending_acceptance: "À accepter", accepted: "Accepté", active: "En cours", suspended: "Suspendu", notice: "Préavis", terminated: "Résilié", completed: "Terminé", cancelled: "Annulé" };
 const CONTRACT_TONE: Record<string, "gray" | "warning" | "info" | "success" | "danger" | "primary"> = { draft: "gray", pending_acceptance: "warning", accepted: "info", active: "success", suspended: "warning", notice: "warning", terminated: "gray", completed: "primary", cancelled: "gray" };
@@ -44,16 +44,16 @@ function OverviewTab() {
   const bars = (rows: { month: string; count: number }[]) => rows.map((r) => ({ date: r.month, count: r.count }));
   return (
     <div className="space-y-6">
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Stat label="Contrats en vigueur" value={o.contracts.live} hint={`${o.contracts.created_30d} créés en 30 jours`} icon={<FileSignature className="h-6 w-6" />} />
-        <Stat label="Engagement mensuel" value={moneyLabel(o.contracts.monthly_commitment)} hint="contrats mensuels en vigueur" icon={<Banknote className="h-6 w-6" />} tone="accent" />
-        <Stat label="Échéances en retard" value={o.installments.overdue} hint={moneyLabel(o.installments.overdue_amount)} icon={<Hourglass className="h-6 w-6" />} tone="night" />
-        <Stat label="Litiges ouverts" value={o.disputes.open} hint={`${o.disputes.total} au total`} icon={<Scale className="h-6 w-6" />} />
-        <Stat label="Paiements à confirmer" value={o.installments.payments_awaiting_confirmation} hint={`${o.installments.payments_contested} contestés`} icon={<Gavel className="h-6 w-6" />} />
-        <Stat label="Besoins ouverts" value={o.postings.open} hint={`${o.postings.applications_30d} candidatures en 30 jours`} icon={<Users className="h-6 w-6" />} />
-        <Stat label="Contrats renouvelés" value={o.contracts.renewed} hint={`${o.contracts.terminations} résiliés`} icon={<FileSignature className="h-6 w-6" />} />
-        <Stat label="Durée moyenne" value={o.contracts.average_duration_days != null ? `${Math.round(o.contracts.average_duration_days / 30.4)} mois` : "—"} hint="contrats terminés" icon={<Hourglass className="h-6 w-6" />} />
-      </div>
+      <KpiGrid>
+        <Kpi label="Contrats en vigueur" value={o.contracts.live} hint={`${o.contracts.created_30d} créés en 30 jours`} icon={<FileSignature className="h-5 w-5" />} />
+        <Kpi label="Engagement mensuel" value={moneyLabel(o.contracts.monthly_commitment)} hint="contrats mensuels en vigueur" icon={<Banknote className="h-5 w-5" />} tone="accent" />
+        <Kpi label="Échéances en retard" value={o.installments.overdue} hint={moneyLabel(o.installments.overdue_amount)} icon={<Hourglass className="h-5 w-5" />} tone="night" />
+        <Kpi label="Litiges ouverts" value={o.disputes.open} hint={`${o.disputes.total} au total`} icon={<Scale className="h-5 w-5" />} />
+        <Kpi label="Paiements à confirmer" value={o.installments.payments_awaiting_confirmation} hint={`${o.installments.payments_contested} contestés`} icon={<Gavel className="h-5 w-5" />} />
+        <Kpi label="Besoins ouverts" value={o.postings.open} hint={`${o.postings.applications_30d} candidatures en 30 jours`} icon={<Users className="h-5 w-5" />} />
+        <Kpi label="Contrats renouvelés" value={o.contracts.renewed} hint={`${o.contracts.terminations} résiliés`} icon={<FileSignature className="h-5 w-5" />} />
+        <Kpi label="Durée moyenne" value={o.contracts.average_duration_days != null ? `${Math.round(o.contracts.average_duration_days / 30.4)} mois` : "—"} hint="contrats terminés" icon={<Hourglass className="h-5 w-5" />} />
+      </KpiGrid>
       <div className="grid gap-4 lg:grid-cols-2">
         <Section title="Contrats créés (12 mois)">
           {o.series.contracts_created.length ? <Bars data={bars(o.series.contracts_created)} label="Contrats" /> : <p className="text-sm text-ash">Aucun contrat créé sur la période.</p>}
@@ -137,28 +137,39 @@ function ContractPanel({ id, onClose, onChanged }: { id: number | null; onClose:
 }
 
 function ContractsTab() {
-  const [q, setQ] = useState(""); const [status, setStatus] = useState(""); const [type, setType] = useState(""); const [rel, setRel] = useState(""); const [flag, setFlag] = useState("");
+  const { can } = useBo();
+  const m = useManagedList<ContractRow, { status: string; mission_type: string; work_relationship: string; flag: string; user: string; from: string; to: string }>("/engagements/contracts/", { status: "", mission_type: "", work_relationship: "", flag: "", user: "", from: "", to: "" });
+  const { values: f, list } = m;
+  const counts = useCounts("/engagements/contracts/", { _all: "", active: "status=active", pending_acceptance: "status=pending_acceptance", suspended: "status=suspended", notice: "status=notice", terminated: "status=terminated" }, list.count);
   const [open, setOpen] = useState<number | null>(null);
-  const list = useBoList<ContractRow>("/engagements/contracts/", { q: useDebounced(q), status, mission_type: type, work_relationship: rel, flag });
-  const columns: Column<ContractRow>[] = [
-    { key: "t", header: "Contrat", primary: true, cell: (r) => <span><span className="font-semibold text-ink">#{r.id} {r.title}</span><span className="block text-xs text-ash">{r.category} · {r.principal.name}{r.organization ? ` (${r.organization})` : ""} → {r.worker.name}</span></span> },
-    { key: "s", header: "État", cell: (r) => <span className="flex flex-wrap gap-1"><Tag value={r.status} label={CONTRACT_FR[r.status]} tone={CONTRACT_TONE[r.status]} />{r.overdue_installments ? <Badge tone="danger">{r.overdue_installments} en retard</Badge> : null}{r.open_disputes ? <Badge tone="warning">litige</Badge> : null}</span> },
-    { key: "m", header: "Type", hideOnMobile: true, cell: (r) => `${MISSION_FR[r.mission_type]} · ${REL_FR[r.work_relationship]}` },
-    { key: "a", header: "Rémunération", hideOnMobile: true, cell: (r) => `${moneyLabel(r.amount)} ${PERIOD_FR[r.period]}` },
-    { key: "d", header: "Période", hideOnMobile: true, cell: (r) => `${r.start_date} → ${r.end_date ?? "…"}` },
-    { key: "act", header: "", align: "right", cell: (r) => <Button size="sm" variant="outline" onClick={() => setOpen(r.id)}>Examiner</Button> },
+  const columns: BoColumn<ContractRow>[] = [
+    { key: "t", header: "Contrat", primary: true, sort: "created_at", wrap: true, cell: (r) => <span><span className="font-semibold text-ink">#{r.id} {r.title}</span><span className="block text-xs text-ash">{r.category} · {r.principal.name}{r.organization ? ` (${r.organization})` : ""} → {r.worker.name}</span></span> },
+    { key: "s", header: "État", sort: "status", cell: (r) => <span className="flex flex-wrap gap-1"><Tag value={r.status} label={CONTRACT_FR[r.status]} tone={CONTRACT_TONE[r.status]} />{r.overdue_installments ? <Badge tone="danger">{r.overdue_installments} en retard</Badge> : null}{r.open_disputes ? <Badge tone="warning">litige</Badge> : null}</span> },
+    { key: "m", header: "Type", hideOnMobile: true, from: "xl", cell: (r) => `${MISSION_FR[r.mission_type]} · ${REL_FR[r.work_relationship]}` },
+    { key: "a", header: "Rémunération", align: "right", sort: "amount", hideOnMobile: true, from: "lg", cell: (r) => `${moneyLabel(r.amount)} ${PERIOD_FR[r.period]}` },
+    { key: "d", header: "Période", sort: "start_date", hideOnMobile: true, from: "2xl", cell: (r) => `${r.start_date} → ${r.end_date ?? "…"}` },
+  ];
+  const rowActions = (r: ContractRow): RowAction[] => [
+    { label: "Examiner le contrat", icon: Eye, onClick: () => setOpen(r.id) },
+    { label: "Ses échéances", icon: Banknote, href: `/backoffice/engagements?tab=installments&contract=${r.id}` },
+    { label: "Fiche du donneur d’ordre", icon: Users, href: `/backoffice/users/${r.principal.id}`, hidden: !can("users.view") },
+    { label: "Fiche du prestataire", icon: Users, href: `/backoffice/users/${r.worker.id}`, hidden: !can("users.view") },
   ];
   return (
     <>
-      <FilterBar>
-        <SearchBox value={q} onChange={setQ} placeholder="Titre, nom, organisation…" />
-        <FilterSelect label="État" value={status} onChange={setStatus} options={[["", "Tous"], ...Object.entries(CONTRACT_FR)]} />
-        <FilterSelect label="Type" value={type} onChange={setType} options={[["", "Tous"], ["recurring", "Récurrente"], ["long_term", "Longue durée"]]} />
-        <FilterSelect label="Relation" value={rel} onChange={setRel} options={[["", "Toutes"], ["independent", "Indépendante"], ["employment", "Emploi salarié"]]} />
-        <FilterSelect label="À surveiller" value={flag} onChange={setFlag} options={[["", "Tous"], ["overdue", "Échéances en retard"], ["disputed", "Litige ouvert"]]} />
+      <StatusChips items={[["", "Tous"], ["active", "En cours"], ["pending_acceptance", "À accepter"], ["suspended", "Suspendus"], ["notice", "Préavis"], ["terminated", "Résiliés"]]} value={f.status} onChange={(v) => m.set({ status: v })} counts={counts} label="État du contrat" />
+      <FilterBar search={<SearchBox value={f.q} onChange={(v) => m.set({ q: v })} placeholder="Titre, nom, organisation…" />} activeCount={m.activeCount} onReset={m.reset} onRefresh={() => void list.reload()} refreshing={list.loading}
+        actions={<ExportButton dataset="engagements" from={f.from} to={f.to} />}>
+        <FilterSelect label="État" value={f.status} onChange={(v) => m.set({ status: v })} options={[["", "Tous"], ...Object.entries(CONTRACT_FR)]} />
+        <FilterSelect label="Type" value={f.mission_type} onChange={(v) => m.set({ mission_type: v })} options={[["", "Tous"], ["recurring", "Récurrente"], ["long_term", "Longue durée"]]} />
+        <FilterSelect label="Relation" value={f.work_relationship} onChange={(v) => m.set({ work_relationship: v })} options={[["", "Toutes"], ["independent", "Indépendante"], ["employment", "Emploi salarié"]]} />
+        <FilterSelect label="À surveiller" value={f.flag} onChange={(v) => m.set({ flag: v })} options={[["", "Tous"], ["overdue", "Échéances en retard"], ["disputed", "Litige ouvert"]]} />
+        <DateRange from={f.from} to={f.to} onFrom={(v) => m.set({ from: v })} onTo={(v) => m.set({ to: v })} />
+        {f.user ? <Button size="sm" variant="soft" onClick={() => m.set({ user: "" })} title="Retirer le filtre par compte">Compte #{f.user} ✕</Button> : null}
       </FilterBar>
-      <ListView list={list} columns={columns} rowKey={(r) => r.id} caption="Contrats d’engagement" empty="Aucun contrat ne correspond." />
-      <ContractPanel id={open} onClose={() => setOpen(null)} onChanged={list.reload} />
+      <ListView list={list} columns={columns} rowKey={(r) => r.id} rowLabel={(r) => `contrat #${r.id}`} caption="Contrats d’engagement" empty="Aucun contrat ne correspond." emptyHint={m.activeCount ? "Modifiez ou réinitialisez les filtres." : undefined}
+        ordering={f.ordering} onOrdering={(v) => m.set({ ordering: v })} rowActions={rowActions} pageSize={m.pageSize} onPageSize={(n) => m.set({ size: String(n) })} />
+      <ContractPanel id={open} onClose={() => setOpen(null)} onChanged={() => void list.reload()} />
     </>
   );
 }
@@ -167,28 +178,37 @@ function ContractsTab() {
 
 function PostingsTab() {
   const { can } = useBo();
-  const [q, setQ] = useState(""); const [status, setStatus] = useState("");
+  const manage = can("engagements.manage");
+  const m = useManagedList<PostingRow, { status: string }>("/engagements/postings/", { status: "" });
+  const { values: f, list } = m;
+  const counts = useCounts("/engagements/postings/", { _all: "", open: "status=open", filled: "status=filled", closed: "status=closed", cancelled: "status=cancelled" }, list.count);
   const [remove, setRemove] = useState<PostingRow | null>(null);
   const [notice, setNotice] = useNotice();
-  const list = useBoList<PostingRow>("/engagements/postings/", { q: useDebounced(q), status });
-  const columns: Column<PostingRow>[] = [
-    { key: "t", header: "Besoin", primary: true, cell: (r) => <span><span className="font-semibold text-ink">#{r.id} {r.title}</span><span className="block text-xs text-ash">{r.category} · {r.city} · {r.publisher.name}{r.organization ? ` (${r.organization})` : ""}</span></span> },
+  const columns: BoColumn<PostingRow>[] = [
+    { key: "t", header: "Besoin", primary: true, wrap: true, cell: (r) => <span><span className="font-semibold text-ink">#{r.id} {r.title}</span><span className="block text-xs text-ash">{r.category} · {r.city} · {r.publisher.name}{r.organization ? ` (${r.organization})` : ""}</span></span> },
     { key: "s", header: "État", cell: (r) => <Tag value={r.status} label={POSTING_FR[r.status]} tone={r.status === "open" ? "success" : "gray"} /> },
-    { key: "m", header: "Type", hideOnMobile: true, cell: (r) => `${MISSION_FR[r.mission_type]} · ${REL_FR[r.work_relationship]}` },
-    { key: "a", header: "Rémunération", hideOnMobile: true, cell: (r) => `${moneyLabel(r.amount)} ${PERIOD_FR[r.period]}` },
-    { key: "c", header: "Candidatures", hideOnMobile: true, cell: (r) => r.applications },
-    { key: "act", header: "", align: "right", cell: (r) => can("engagements.manage") && ["open", "draft"].includes(r.status) ? <Button size="sm" variant="outline" onClick={() => setRemove(r)}>Retirer</Button> : null },
+    { key: "m", header: "Type", hideOnMobile: true, from: "xl", cell: (r) => `${MISSION_FR[r.mission_type]} · ${REL_FR[r.work_relationship]}` },
+    { key: "a", header: "Rémunération", align: "right", hideOnMobile: true, from: "lg", cell: (r) => `${moneyLabel(r.amount)} ${PERIOD_FR[r.period]}` },
+    { key: "c", header: "Candidatures", align: "right", hideOnMobile: true, cell: (r) => r.applications },
+    { key: "d", header: "Publié le", hideOnMobile: true, from: "2xl", cell: (r) => dd(r.created_at) },
   ];
+  const removable = (r: PostingRow) => manage && ["open", "draft"].includes(r.status);
+  const rowActions = (r: PostingRow): RowAction[] => [
+    { label: "Retirer le besoin", icon: Trash2, tone: "danger", onClick: () => setRemove(r), hidden: !removable(r) },
+    { label: "Fiche du publicateur", icon: Users, href: `/backoffice/users/${r.publisher.id}`, hidden: !can("users.view") },
+  ];
+  const bulk: BulkAction<PostingRow>[] | undefined = manage
+    ? [{ id: "remove", label: "Retirer", icon: Trash2, tone: "danger", title: "Retirer les besoins sélectionnés ?", confirmLabel: "Retirer", description: "Chaque besoin est annulé (jamais supprimé), ses candidatures ouvertes sont refusées et son auteur est prévenu avec ce motif.", eligible: (r) => ["open", "draft"].includes(r.status), run: (r, b) => bo.post(`/engagements/postings/${r.id}/remove/`, b) }]
+    : undefined;
   return (
     <>
-      {notice ? <Alert tone="success" className="mb-4">{notice}</Alert> : null}
-      <FilterBar>
-        <SearchBox value={q} onChange={setQ} placeholder="Titre, ville, description…" />
-        <FilterSelect label="État" value={status} onChange={setStatus} options={[["", "Tous"], ...Object.entries(POSTING_FR)]} />
-      </FilterBar>
-      <ListView list={list} columns={columns} rowKey={(r) => r.id} caption="Besoins publiés" empty="Aucun besoin ne correspond." />
+      {notice ? <p role="status" className="mb-4 rounded-xl bg-successSoft px-4 py-3 text-sm font-semibold text-successInk">{notice}</p> : null}
+      <StatusChips items={[["", "Tous"], ["open", "Ouverts"], ["filled", "Pourvus"], ["closed", "Clos"], ["cancelled", "Annulés"]]} value={f.status} onChange={(v) => m.set({ status: v })} counts={counts} label="État du besoin" />
+      <FilterBar search={<SearchBox value={f.q} onChange={(v) => m.set({ q: v })} placeholder="Titre, ville, description…" />} activeCount={m.activeCount} onReset={m.reset} onRefresh={() => void list.reload()} refreshing={list.loading} />
+      <ListView list={list} columns={columns} rowKey={(r) => r.id} rowLabel={(r) => `besoin #${r.id}`} caption="Besoins publiés" empty="Aucun besoin ne correspond." emptyHint={m.activeCount ? "Modifiez ou réinitialisez les filtres." : undefined}
+        rowActions={rowActions} bulk={bulk} pageSize={m.pageSize} onPageSize={(n) => m.set({ size: String(n) })} />
       <ReasonModal open={Boolean(remove)} tone="danger" title="Retirer ce besoin ?" description="Il est annulé (jamais supprimé), les candidatures ouvertes sont refusées et son auteur est prévenu avec ce motif." confirmLabel="Retirer le besoin" onClose={() => setRemove(null)}
-        request={postTo(`/engagements/postings/${remove?.id}/remove/`)} onDone={() => { setRemove(null); setNotice("Besoin retiré."); list.reload(); }} />
+        request={remove ? postTo(`/engagements/postings/${remove.id}/remove/`) : async () => undefined} onDone={() => { setRemove(null); setNotice("Besoin retiré."); void list.reload(); }} />
     </>
   );
 }
@@ -197,34 +217,43 @@ function PostingsTab() {
 
 function InstallmentsTab() {
   const { can } = useBo();
-  const [status, setStatus] = useState(""); const [fee, setFee] = useState(""); const [from, setFrom] = useState(""); const [to, setTo] = useState("");
+  const m = useManagedList<InstRow, { status: string; fee: string; user: string; contract: string; from: string; to: string }>("/engagements/installments/", { status: "", fee: "", user: "", contract: "", from: "", to: "" });
+  const { values: f, list } = m;
+  const counts = useCounts("/engagements/installments/", { _all: "", overdue: "status=overdue", due: "status=due", partial: "status=partial", paid: "status=paid" }, list.count);
   const [settle, setSettle] = useState<InstRow | null>(null);
   const [waive, setWaive] = useState<InstRow | null>(null);
   const [notice, setNotice] = useNotice();
-  const list = useBoList<InstRow>("/engagements/installments/", { status, fee, from, to });
-  const columns: Column<InstRow>[] = [
-    { key: "t", header: "Échéance", primary: true, cell: (r) => <span><span className="font-semibold text-ink">#{r.id} · contrat #{r.contract.id} · n° {r.number}</span><span className="block text-xs text-ash">{r.principal.name} → {r.worker.name}</span></span> },
+  const manage = can("finance.manage");
+  const columns: BoColumn<InstRow>[] = [
+    { key: "t", header: "Échéance", primary: true, wrap: true, cell: (r) => <span><span className="font-semibold text-ink">#{r.id} · contrat #{r.contract.id} · n° {r.number}</span><span className="block text-xs text-ash">{r.principal.name} → {r.worker.name}</span></span> },
     { key: "s", header: "État", cell: (r) => <Tag value={r.status} label={INST_FR[r.status]} tone={INST_TONE[r.status]} /> },
-    { key: "d", header: "À régler le", hideOnMobile: true, cell: (r) => r.due_date },
-    { key: "m", header: "Total / solde", hideOnMobile: true, cell: (r) => `${moneyLabel(r.total)} / ${moneyLabel(r.balance)}` },
-    { key: "f", header: "Commission", hideOnMobile: true, cell: (r) => Number(r.platform_fee) > 0 ? <span>{moneyLabel(r.platform_fee)} <Badge tone={r.platform_fee_status === "due" ? "warning" : "gray"}>{{ due: "à régler", settled: "réglée", waived: "abandonnée", none: "—" }[r.platform_fee_status] ?? r.platform_fee_status}</Badge></span> : "—" },
-    { key: "act", header: "", align: "right", cell: (r) => can("finance.manage") && r.platform_fee_status === "due" ? <span className="flex justify-end gap-2"><Button size="sm" onClick={() => setSettle(r)}>Commission réglée</Button><Button size="sm" variant="outline" onClick={() => setWaive(r)}>Abandonner</Button></span> : null },
+    { key: "d", header: "À régler le", hideOnMobile: true, from: "lg", cell: (r) => dd(r.due_date) },
+    { key: "m", header: "Total / solde", align: "right", hideOnMobile: true, from: "xl", cell: (r) => `${moneyLabel(r.total)} / ${moneyLabel(r.balance)}` },
+    { key: "f", header: "Commission", hideOnMobile: true, from: "xl", cell: (r) => Number(r.platform_fee) > 0 ? <span>{moneyLabel(r.platform_fee)} <Badge tone={r.platform_fee_status === "due" ? "warning" : "gray"}>{{ due: "à régler", settled: "réglée", waived: "abandonnée", none: "—" }[r.platform_fee_status] ?? r.platform_fee_status}</Badge></span> : "—" },
+    { key: "act", header: "Commission", align: "right", cell: (r) => manage && r.platform_fee_status === "due" ? <span className="flex justify-end gap-2"><Button size="sm" leftIcon={<Check aria-hidden className="h-4 w-4" />} onClick={() => setSettle(r)}>Réglée</Button><Button size="sm" variant="outline" onClick={() => setWaive(r)}>Abandonner</Button></span> : <span className="text-ash">—</span> },
+  ];
+  const rowActions = (r: InstRow): RowAction[] => [
+    { label: "Examiner le contrat", icon: Eye, href: `/backoffice/engagements?tab=contracts&q=${encodeURIComponent(r.contract.title)}` },
+    { label: "Commission réglée", icon: Check, onClick: () => setSettle(r), hidden: !manage || r.platform_fee_status !== "due" },
+    { label: "Abandonner la commission", icon: Undo2, tone: "danger", onClick: () => setWaive(r), hidden: !manage || r.platform_fee_status !== "due" },
   ];
   return (
     <>
-      {notice ? <Alert tone="success" className="mb-4">{notice}</Alert> : null}
+      {notice ? <p role="status" className="mb-4 rounded-xl bg-successSoft px-4 py-3 text-sm font-semibold text-successInk">{notice}</p> : null}
       <Alert tone="info" className="mb-4">Le Back-Office suit les échéances mais ne confirme jamais un paiement entre les parties : seule la contrepartie le fait. Il règle uniquement la commission de la plateforme, avec la référence du règlement effectué hors plateforme.</Alert>
-      <FilterBar>
-        <FilterSelect label="État" value={status} onChange={setStatus} options={[["", "Tous"], ...Object.entries(INST_FR)]} />
-        <FilterSelect label="Commission" value={fee} onChange={setFee} options={[["", "Toutes"], ["due", "À régler"], ["settled", "Réglées"], ["waived", "Abandonnées"]]} />
-        <TextField label="Échéance du" type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
-        <TextField label="au" type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+      <StatusChips items={[["", "Toutes"], ["overdue", "En retard"], ["due", "À régler"], ["partial", "Partielles"], ["paid", "Réglées"]]} value={f.status} onChange={(v) => m.set({ status: v })} counts={counts} label="État de l’échéance" />
+      <FilterBar search={undefined} activeCount={m.activeCount} onReset={m.reset} onRefresh={() => void list.reload()} refreshing={list.loading} actions={<ExportButton dataset="engagement_installments" from={f.from} to={f.to} />}>
+        <FilterSelect label="Commission" value={f.fee} onChange={(v) => m.set({ fee: v })} options={[["", "Toutes"], ["due", "À régler"], ["settled", "Réglées"], ["waived", "Abandonnées"]]} />
+        <DateRange from={f.from} to={f.to} onFrom={(v) => m.set({ from: v })} onTo={(v) => m.set({ to: v })} />
+        {f.user ? <Button size="sm" variant="soft" onClick={() => m.set({ user: "" })} title="Retirer le filtre par compte">Compte #{f.user} ✕</Button> : null}
+        {f.contract ? <Button size="sm" variant="soft" onClick={() => m.set({ contract: "" })} title="Retirer le filtre par contrat">Contrat #{f.contract} ✕</Button> : null}
       </FilterBar>
-      <ListView list={list} columns={columns} rowKey={(r) => r.id} caption="Échéances" empty="Aucune échéance ne correspond." />
+      <ListView list={list} columns={columns} rowKey={(r) => r.id} rowLabel={(r) => `échéance #${r.id}`} caption="Échéances" empty="Aucune échéance ne correspond." emptyHint={m.activeCount ? "Modifiez ou réinitialisez les filtres." : undefined}
+        rowActions={rowActions} pageSize={m.pageSize} onPageSize={(n) => m.set({ size: String(n) })} />
       <ReasonModal open={Boolean(settle)} title="Commission réglée" description="Indiquez la référence du règlement effectué hors plateforme." reasonLabel="Référence du règlement" reasonKey="reference" confirmLabel="Marquer comme réglée" onClose={() => setSettle(null)}
-        request={(b) => bo.post(`/engagements/installments/${settle?.id}/fee/`, { status: "settled", reference: b.reference })} onDone={() => { setSettle(null); setNotice("Commission marquée comme réglée."); list.reload(); }} />
+        request={(b) => bo.post(`/engagements/installments/${settle?.id}/fee/`, { status: "settled", reference: b.reference })} onDone={() => { setSettle(null); setNotice("Commission marquée comme réglée."); void list.reload(); }} />
       <ReasonModal open={Boolean(waive)} tone="danger" title="Abandonner la commission ?" description="Décision commerciale journalisée ; le montant dû entre les parties n’est pas modifié." confirmLabel="Abandonner" onClose={() => setWaive(null)}
-        request={(b) => bo.post(`/engagements/installments/${waive?.id}/fee/`, { status: "waived", reason: b.reason })} onDone={() => { setWaive(null); setNotice("Commission abandonnée."); list.reload(); }} />
+        request={(b) => bo.post(`/engagements/installments/${waive?.id}/fee/`, { status: "waived", reason: b.reason })} onDone={() => { setWaive(null); setNotice("Commission abandonnée."); void list.reload(); }} />
     </>
   );
 }
@@ -233,30 +262,37 @@ function InstallmentsTab() {
 
 function DisputesTab() {
   const { can } = useBo();
-  const [status, setStatus] = useState("open,under_review"); const [kind, setKind] = useState("");
+  const m = useManagedList<DisputeRow, { status: string; kind: string; user: string; from: string; to: string }>("/engagements/disputes/", { status: "open,under_review", kind: "", user: "", from: "", to: "" });
+  const { values: f, list } = m;
+  const counts = useCounts("/engagements/disputes/", { "open,under_review": "status=open,under_review", "resolved,rejected": "status=resolved,rejected", _all: "" }, list.count);
   const [open, setOpen] = useState<number | null>(null);
   const [resolve, setResolve] = useState<DisputeRow | null>(null);
   const [notice, setNotice] = useNotice();
   const [detail, setDetail] = useState<(DisputeRow & { reason: string; resolution: string; principal: { name: string }; worker: { name: string } }) | null>(null);
-  const list = useBoList<DisputeRow>("/engagements/disputes/", { status, kind });
   useEffect(() => { if (open === null) { setDetail(null); return; } bo.get<typeof detail>(`/engagements/disputes/${open}/`).then(setDetail).catch(() => setDetail(null)); }, [open]);
-  const columns: Column<DisputeRow>[] = [
-    { key: "t", header: "Litige", primary: true, cell: (r) => <span><span className="font-semibold text-ink">#{r.id} · {KIND_FR[r.kind]}</span><span className="block text-xs text-ash">Contrat #{r.contract.id} {r.contract.title} · ouvert par {r.opened_by.name} ({r.opened_by_role === "worker" ? "prestataire" : "donneur d’ordre"})</span></span> },
+  const columns: BoColumn<DisputeRow>[] = [
+    { key: "t", header: "Litige", primary: true, wrap: true, cell: (r) => <span><span className="font-semibold text-ink">#{r.id} · {KIND_FR[r.kind]}</span><span className="block text-xs text-ash">Contrat #{r.contract.id} {r.contract.title} · ouvert par {r.opened_by.name} ({r.opened_by_role === "worker" ? "prestataire" : "donneur d’ordre"})</span></span> },
     { key: "s", header: "État", cell: (r) => <Tag value={r.status} label={DISPUTE_FR[r.status]} /> },
-    { key: "d", header: "Ouvert le", hideOnMobile: true, cell: (r) => dt(r.created_at) },
-    { key: "act", header: "", align: "right", cell: (r) => <Button size="sm" variant="outline" onClick={() => setOpen(r.id)}>Examiner</Button> },
+    { key: "d", header: "Ouvert le", hideOnMobile: true, from: "lg", cell: (r) => dd(r.created_at) },
+  ];
+  const rowActions = (r: DisputeRow): RowAction[] => [
+    { label: can("engagements.manage") && ["open", "under_review"].includes(r.status) ? "Traiter le litige" : "Voir le litige", icon: Gavel, onClick: () => setOpen(r.id) },
+    { label: "Fiche de la personne", icon: Users, href: `/backoffice/users/${r.opened_by.id}`, hidden: !can("users.view") },
   ];
   async function review(id: number) {
-    try { await bo.post(`/engagements/disputes/${id}/review/`); setNotice("Litige pris en charge."); list.reload(); setOpen(null); } catch (e) { setNotice(boError(e, "Action impossible.")); }
+    try { await bo.post(`/engagements/disputes/${id}/review/`); setNotice("Litige pris en charge."); void list.reload(); setOpen(null); } catch (e) { setNotice(boError(e, "Action impossible.")); }
   }
   return (
     <>
-      {notice ? <Alert tone="success" className="mb-4">{notice}</Alert> : null}
-      <FilterBar>
-        <FilterSelect label="État" value={status} onChange={setStatus} options={[["open,under_review", "À traiter"], ["resolved,rejected", "Traités"], ["", "Tous"]]} />
-        <FilterSelect label="Nature" value={kind} onChange={setKind} options={[["", "Toutes"], ...Object.entries(KIND_FR)]} />
+      {notice ? <p role="status" className="mb-4 rounded-xl bg-successSoft px-4 py-3 text-sm font-semibold text-successInk">{notice}</p> : null}
+      <StatusChips items={[["open,under_review", "À traiter"], ["resolved,rejected", "Traités"], ["", "Tous"]]} value={f.status} onChange={(v) => m.set({ status: v })} counts={counts} label="État du litige" />
+      <FilterBar activeCount={m.activeCount} onReset={m.reset} onRefresh={() => void list.reload()} refreshing={list.loading}>
+        <FilterSelect label="Nature" value={f.kind} onChange={(v) => m.set({ kind: v })} options={[["", "Toutes"], ...Object.entries(KIND_FR)]} />
+        <DateRange from={f.from} to={f.to} onFrom={(v) => m.set({ from: v })} onTo={(v) => m.set({ to: v })} />
+        {f.user ? <Button size="sm" variant="soft" onClick={() => m.set({ user: "" })} title="Retirer le filtre par compte">Compte #{f.user} ✕</Button> : null}
       </FilterBar>
-      <ListView list={list} columns={columns} rowKey={(r) => r.id} caption="Litiges d’engagement" empty="Aucun litige dans cet état." />
+      <ListView list={list} columns={columns} rowKey={(r) => r.id} rowLabel={(r) => `litige #${r.id}`} caption="Litiges d’engagement" empty="Aucun litige dans cet état." emptyHint={m.activeCount ? "Modifiez ou réinitialisez les filtres." : undefined}
+        rowActions={rowActions} pageSize={m.pageSize} onPageSize={(n) => m.set({ size: String(n) })} />
       <Modal open={open !== null && !resolve} onClose={() => setOpen(null)} size="lg" title={detail ? `Litige #${detail.id} — ${KIND_FR[detail.kind]}` : "Litige"}>
         {detail ? (
           <div className="space-y-4">
@@ -275,7 +311,7 @@ function DisputesTab() {
       <ReasonModal open={Boolean(resolve)} title="Décision sur le litige" description="La décision est communiquée aux deux parties. Suspendre ou résilier applique l’action au contrat ; un paiement n’est jamais corrigé par la plateforme." confirmLabel="Enregistrer la décision" reasonLabel="Décision motivée" reasonKey="resolution"
         fields={[{ key: "accepted", label: "Issue", type: "select", options: [["true", "Litige résolu (fondé)"], ["false", "Litige rejeté (non fondé)"]] }, { key: "resolution_action", label: "Action sur le contrat", type: "select", options: [["none", "Aucune"], ["mediated", "Médiation / accord des parties"], ["suspend", "Suspendre le contrat"], ["terminate", "Résilier le contrat"]] }]}
         onClose={() => setResolve(null)} request={(b) => bo.post(`/engagements/disputes/${resolve?.id}/resolve/`, { accepted: (b.accepted ?? "true") === "true", resolution_action: b.resolution_action || "none", resolution: b.resolution })}
-        onDone={() => { setResolve(null); setOpen(null); setNotice("Décision enregistrée."); list.reload(); }} />
+        onDone={() => { setResolve(null); setOpen(null); setNotice("Décision enregistrée."); void list.reload(); }} />
     </>
   );
 }
@@ -284,28 +320,41 @@ function DisputesTab() {
 
 function EvaluationsTab() {
   const { can } = useBo();
-  const [hidden, setHidden] = useState(""); const [flag, setFlag] = useState("");
-  const [hide, setHide] = useState<EvalRow | null>(null);
-  const [restore, setRestore] = useState<EvalRow | null>(null);
+  const manage = can("engagements.manage");
+  const m = useManagedList<EvalRow, { hidden: string; flag: string; from: string; to: string }>("/engagements/evaluations/", { hidden: "", flag: "", from: "", to: "" });
+  const { values: f, list } = m;
+  const counts = useCounts("/engagements/evaluations/", { _all: "", false: "hidden=false", true: "hidden=true", reported: "flag=reported" }, list.count);
+  const [target, setTarget] = useState<{ row: EvalRow; op: "hide" | "restore" } | null>(null);
   const [notice, setNotice] = useNotice();
-  const list = useBoList<EvalRow>("/engagements/evaluations/", { hidden, flag });
-  const columns: Column<EvalRow>[] = [
-    { key: "t", header: "Évaluation", primary: true, cell: (r) => <span><span className="font-semibold text-ink">{r.rating} / 5 · {r.kind === "final" ? "finale" : "périodique"}</span><span className="block text-xs text-ash">{r.author.name} → {r.subject.name} · contrat #{r.contract.id}</span></span> },
-    { key: "c", header: "Commentaire", cell: (r) => <span className="text-inkSoft">{r.comment || "—"}</span> },
+  const columns: BoColumn<EvalRow>[] = [
+    { key: "t", header: "Évaluation", primary: true, wrap: true, cell: (r) => <span><span className="font-semibold text-ink">{r.rating} / 5 · {r.kind === "final" ? "finale" : "périodique"}</span><span className="block text-xs text-ash">{r.author.name} → {r.subject.name} · contrat #{r.contract.id}</span></span> },
+    { key: "c", header: "Commentaire", wrap: true, cell: (r) => <span className="text-inkSoft">{r.comment || "—"}</span> },
     { key: "s", header: "État", cell: (r) => <span className="flex flex-wrap gap-1">{r.is_hidden ? <Badge tone="danger">Masquée</Badge> : <Badge tone="success">Publiée</Badge>}{r.reports ? <Badge tone="warning">{r.reports} signalement(s)</Badge> : null}</span> },
-    { key: "act", header: "", align: "right", cell: (r) => can("engagements.manage") ? (r.is_hidden ? <Button size="sm" variant="outline" onClick={() => setRestore(r)}>Rétablir</Button> : <Button size="sm" variant="outline" onClick={() => setHide(r)}>Masquer</Button>) : null },
+    { key: "d", header: "Le", hideOnMobile: true, from: "lg", cell: (r) => dd(r.created_at) },
   ];
+  const rowActions = (r: EvalRow): RowAction[] => [
+    { label: "Masquer l’évaluation", icon: EyeOff, tone: "danger", onClick: () => setTarget({ row: r, op: "hide" }), hidden: !manage || r.is_hidden },
+    { label: "Rétablir l’évaluation", icon: Undo2, onClick: () => setTarget({ row: r, op: "restore" }), hidden: !manage || !r.is_hidden },
+  ];
+  const bulk: BulkAction<EvalRow>[] | undefined = manage
+    ? [
+        { id: "hide", label: "Masquer", icon: EyeOff, tone: "danger", title: "Masquer les évaluations sélectionnées ?", confirmLabel: "Masquer", description: "Retirées du profil et du calcul de la moyenne ; le texte n’est jamais modifié ni supprimé.", eligible: (r) => !r.is_hidden, run: (r, b) => bo.post(`/engagements/evaluations/${r.id}/hide/`, b) },
+        { id: "restore", label: "Rétablir", icon: Undo2, title: "Rétablir les évaluations sélectionnées ?", confirmLabel: "Rétablir", eligible: (r) => r.is_hidden, run: (r, b) => bo.post(`/engagements/evaluations/${r.id}/restore/`, b) },
+      ]
+    : undefined;
   return (
     <>
-      {notice ? <Alert tone="success" className="mb-4">{notice}</Alert> : null}
-      <FilterBar>
-        <FilterSelect label="Visibilité" value={hidden} onChange={setHidden} options={[["", "Toutes"], ["false", "Publiées"], ["true", "Masquées"]]} />
-        <FilterSelect label="Signalements" value={flag} onChange={setFlag} options={[["", "Tous"], ["reported", "Signalées"]]} />
+      {notice ? <p role="status" className="mb-4 rounded-xl bg-successSoft px-4 py-3 text-sm font-semibold text-successInk">{notice}</p> : null}
+      <StatusChips items={[["", "Toutes"], ["false", "Publiées"], ["true", "Masquées"]]} value={f.hidden} onChange={(v) => m.set({ hidden: v })} counts={counts} label="Visibilité" />
+      <FilterBar activeCount={m.activeCount} onReset={m.reset} onRefresh={() => void list.reload()} refreshing={list.loading}>
+        <FilterSelect label="Signalements" value={f.flag} onChange={(v) => m.set({ flag: v })} options={[["", "Tous"], ["reported", "Signalées"]]} />
+        <DateRange from={f.from} to={f.to} onFrom={(v) => m.set({ from: v })} onTo={(v) => m.set({ to: v })} />
       </FilterBar>
-      <ListView list={list} columns={columns} rowKey={(r) => r.id} caption="Évaluations d’engagement" empty="Aucune évaluation ne correspond." />
-      <ReasonModal open={Boolean(hide)} tone="danger" title="Masquer cette évaluation ?" description="Retirée du profil et du calcul de la moyenne ; le texte n’est jamais modifié ni supprimé. Les signalements ouverts sont clos." confirmLabel="Masquer" onClose={() => setHide(null)}
-        request={postTo(`/engagements/evaluations/${hide?.id}/hide/`)} onDone={() => { setHide(null); setNotice("Évaluation masquée."); list.reload(); }} />
-      <ReasonModal open={Boolean(restore)} title="Rétablir cette évaluation ?" confirmLabel="Rétablir" onClose={() => setRestore(null)} request={postTo(`/engagements/evaluations/${restore?.id}/restore/`)} onDone={() => { setRestore(null); setNotice("Évaluation rétablie."); list.reload(); }} />
+      <ListView list={list} columns={columns} rowKey={(r) => r.id} rowLabel={(r) => `évaluation #${r.id}`} caption="Évaluations d’engagement" empty="Aucune évaluation ne correspond." emptyHint={m.activeCount ? "Modifiez ou réinitialisez les filtres." : undefined}
+        rowActions={rowActions} bulk={bulk} pageSize={m.pageSize} onPageSize={(n) => m.set({ size: String(n) })} />
+      <ReasonModal open={target?.op === "hide"} tone="danger" title="Masquer cette évaluation ?" description="Retirée du profil et du calcul de la moyenne ; le texte n’est jamais modifié ni supprimé. Les signalements ouverts sont clos." confirmLabel="Masquer" onClose={() => setTarget(null)}
+        request={target ? postTo(`/engagements/evaluations/${target.row.id}/hide/`) : async () => undefined} onDone={() => { setTarget(null); setNotice("Évaluation masquée."); void list.reload(); }} />
+      <ReasonModal open={target?.op === "restore"} title="Rétablir cette évaluation ?" confirmLabel="Rétablir" onClose={() => setTarget(null)} request={target ? postTo(`/engagements/evaluations/${target.row.id}/restore/`) : async () => undefined} onDone={() => { setTarget(null); setNotice("Évaluation rétablie."); void list.reload(); }} />
     </>
   );
 }

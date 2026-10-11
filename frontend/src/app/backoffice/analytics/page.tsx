@@ -1,11 +1,12 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
-import { Download } from "lucide-react";
-import { Alert, Button, PageHeader, SkeletonStats, Stat } from "@/components/ds";
+import { Ban, CheckCircle2, CalendarCheck, Download, Hammer } from "lucide-react";
+import { Alert, Button, PageHeader, SkeletonStats } from "@/components/ds";
 import { apiFetch } from "@/lib/api";
 import { bo, boError, moneyLabel, pct } from "@/lib/bo";
 import { useBo } from "@/lib/BoProvider";
-import { Bars, DateRange, FilterBar, Section, STATUS_FR } from "../_components/ui";
+import { useUrlFilters } from "@/lib/useUrlFilters";
+import { Bars, DateRange, FilterBar, Kpi, KpiGrid, Section, STATUS_FR } from "../_components/ui";
 
 interface Overview {
   range: { from: string; to: string };
@@ -24,6 +25,16 @@ const EXPORTS: { id: string; label: string; needs: string; hint: string }[] = [
   { id: "payments", label: "Paiements", needs: "finance.view", hint: "Sans référence du prestataire" },
   { id: "reviews", label: "Avis", needs: "reviews.moderate", hint: "Notes seulement, sans commentaire" },
   { id: "audit", label: "Journal d’audit", needs: "security.manage", hint: "Qui a fait quoi, quand" },
+  { id: "engagements", label: "Contrats d’engagement", needs: "engagements.view", hint: "Sans nom, contact ni adresse" },
+  { id: "engagement_installments", label: "Échéances d’engagement", needs: "engagements.view", hint: "Montants confirmés par les parties, commissions" },
+];
+
+const iso = (d: Date) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+const PRESETS: [string, string, () => [string, string]][] = [
+  ["7", "7 jours", () => [iso(new Date(Date.now() - 6 * 86400000)), iso(new Date())]],
+  ["30", "30 jours", () => [iso(new Date(Date.now() - 29 * 86400000)), iso(new Date())]],
+  ["90", "90 jours", () => [iso(new Date(Date.now() - 89 * 86400000)), iso(new Date())]],
+  ["month", "Ce mois", () => [iso(new Date(new Date().getFullYear(), new Date().getMonth(), 1)), iso(new Date())]],
 ];
 
 function BarList({ rows, total }: { rows: { name: string; bookings: number }[]; total: number }) {
@@ -42,8 +53,10 @@ function BarList({ rows, total }: { rows: { name: string; bookings: number }[]; 
 
 export default function AnalyticsPage() {
   const { can } = useBo();
-  const [from, setFrom] = useState("");
-  const [to, setTo] = useState("");
+  const range = useUrlFilters({ from: "", to: "" });
+  const { from, to } = range.values;
+  const setFrom = (v: string) => range.set({ from: v });
+  const setTo = (v: string) => range.set({ to: v });
   const [d, setD] = useState<Overview | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
@@ -83,24 +96,31 @@ export default function AnalyticsPage() {
   return (
     <>
       <PageHeader title="Statistiques et exports" description="Indicateurs agrégés sur la période choisie (30 derniers jours par défaut). Aucune donnée personnelle ; les montants exigent le droit finance." />
-      <FilterBar><DateRange from={from} to={to} onFrom={setFrom} onTo={setTo} /></FilterBar>
+      <FilterBar activeCount={range.active} onReset={range.reset} onRefresh={() => void load()}>
+        <div className="flex flex-wrap items-end gap-2" role="group" aria-label="Périodes rapides">
+          {PRESETS.map(([id, label, get]) => (
+            <Button key={id} size="sm" variant="soft" onClick={() => { const [f, t] = get(); range.set({ from: f, to: t }); }}>{label}</Button>
+          ))}
+        </div>
+        <DateRange from={from} to={to} onFrom={setFrom} onTo={setTo} />
+      </FilterBar>
       {error ? <Alert tone="danger" className="mb-4" action={<Button size="sm" variant="outline" onClick={() => void load()}>Réessayer</Button>}>{error}</Alert> : null}
       {notice ? <Alert tone="success" className="mb-4">{notice}</Alert> : null}
       {!d && !error ? <SkeletonStats count={4} className="mb-6 sm:grid-cols-2 lg:grid-cols-4" /> : null}
       {d && b ? (
         <>
-          <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <Stat label="Réservations" value={b.total} hint={`du ${d.range.from} au ${d.range.to}`} />
-            <Stat label="Taux de réalisation" value={pct(b.completion_rate)} hint={`${b.by_status.completed ?? 0} terminées`} tone="accent" />
-            <Stat label="Taux d’annulation" value={pct(b.cancellation_rate)} hint={`${b.by_status.cancelled ?? 0} annulées`} tone="night" />
-            <Stat label="Artisans actifs" value={d.active_artisans} hint={`Taux de litige : ${pct(b.dispute_rate)}`} />
-          </div>
+          <KpiGrid className="mb-6">
+            <Kpi icon={<CalendarCheck className="h-5 w-5" />} label="Réservations" value={b.total} hint={`du ${d.range.from} au ${d.range.to}`} />
+            <Kpi icon={<CheckCircle2 className="h-5 w-5" />} tone="accent" label="Taux de réalisation" value={pct(b.completion_rate)} hint={`${b.by_status.completed ?? 0} terminées`} />
+            <Kpi icon={<Ban className="h-5 w-5" />} tone="night" label="Taux d’annulation" value={pct(b.cancellation_rate)} hint={`${b.by_status.cancelled ?? 0} annulées`} />
+            <Kpi icon={<Hammer className="h-5 w-5" />} label="Artisans actifs" value={d.active_artisans} hint={`Taux de litige : ${pct(b.dispute_rate)}`} />
+          </KpiGrid>
           {d.finance ? (
             <Section title="Finances" className="mb-6">
-              <div className="grid gap-4 sm:grid-cols-4">
-                <Stat label="Volume payé" value={moneyLabel(d.finance.gmv)} /><Stat label="Commissions" value={moneyLabel(d.finance.commission)} tone="accent" />
-                <Stat label="Panier moyen" value={moneyLabel(d.finance.average_basket)} tone="night" /><Stat label="Réservations payées" value={pct(d.finance.paid_share)} />
-              </div>
+              <KpiGrid>
+                <Kpi label="Volume payé" value={moneyLabel(d.finance.gmv)} /><Kpi label="Commissions" value={moneyLabel(d.finance.commission)} tone="accent" />
+                <Kpi label="Panier moyen" value={moneyLabel(d.finance.average_basket)} tone="night" /><Kpi label="Réservations payées" value={pct(d.finance.paid_share)} />
+              </KpiGrid>
             </Section>
           ) : null}
           <div className="mb-6 grid gap-6 lg:grid-cols-2">

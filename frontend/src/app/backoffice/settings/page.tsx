@@ -1,9 +1,9 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
 import { Plus } from "lucide-react";
-import { Alert, Badge, Button, Checkbox, DataTable, EmptyState, Input, Modal, PageHeader, SkeletonPage, TextField, type Column } from "@/components/ds";
+import { Alert, Badge, Button, Checkbox, DataTable, EmptyState, Input, Modal, PageHeader, SkeletonPage, Tabs, TextField, type Column } from "@/components/ds";
 import { bo, boError, fieldErrors } from "@/lib/bo";
-import { Section, dt, useNotice } from "../_components/ui";
+import { Section, dt, useNotice, useTabParam } from "../_components/ui";
 
 interface Rule { id: number; category: number | null; category_name: string | null; fee_percent: string; fee_min_xof: number; active: boolean }
 interface Policy { id: number; name: string; free_until_minutes: number; fee_percent: string; active: boolean }
@@ -33,7 +33,10 @@ function FormModal({ open, title, description, children, onClose, onSubmit, subm
   );
 }
 
+const TABS = ["integrations", "commissions", "cancellation", "trust", "coupons"] as const;
+
 export default function SettingsPage() {
+  const [tab, setTab] = useTabParam(TABS, "integrations");
   const [s, setS] = useState<Settings | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useNotice();
@@ -138,9 +141,12 @@ export default function SettingsPage() {
   return (
     <>
       <PageHeader title="Réglages" description="Règles métier et état des intégrations. Chaque modification est validée, puis journalisée avec l’ancienne et la nouvelle valeur." />
-      {notice ? <Alert tone="success" className="mb-4">{notice}</Alert> : null}
+      {notice ? <p role="status" className="mb-4 rounded-xl bg-successSoft px-4 py-3 text-sm font-semibold text-successInk">{notice}</p> : null}
+      <Tabs ariaLabel="Sections des réglages" value={tab} onChange={setTab} className="mb-5"
+        items={[{ id: "integrations", label: "Intégrations" }, { id: "commissions", label: "Commissions", count: s.pricing_rules.length }, { id: "cancellation", label: "Annulation" }, { id: "trust", label: "Tratra Trust" }, { id: "coupons", label: "Codes promo", count: s.coupons.length }]} />
 
-      <Section title="Intégrations" className="mb-6">
+      {tab === "integrations" ? (
+        <Section title="Intégrations" className="mb-6">
         <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 text-sm">
           <li className="flex items-center justify-between rounded-panel border border-lineSoft p-3"><span>Notifications push (Firebase)</span><Badge tone={i.push_fcm.configured ? "success" : "warning"}>{i.push_fcm.configured ? "Configuré" : "Non configuré"}</Badge></li>
           <li className="flex items-center justify-between rounded-panel border border-lineSoft p-3"><span>SMS{i.sms.provider ? ` (${i.sms.provider})` : ""}</span><Badge tone={i.sms.ready ? "success" : "warning"}>{i.sms.ready ? "Prêt" : "Non prêt"}</Badge></li>
@@ -151,16 +157,22 @@ export default function SettingsPage() {
         </ul>
         <p className="mt-3 text-xs text-ash">Lecture seule : seuls l’état (configuré ou non) est affiché, jamais une clé ou un identifiant. Les clés se règlent dans l’environnement du serveur.</p>
       </Section>
+      ) : null}
 
-      <Section title="Commissions de la plateforme" className="mb-6" actions={<Button size="sm" leftIcon={<Plus aria-hidden className="h-4 w-4" />} onClick={() => openRule(null)}>Nouvelle règle</Button>}>
+      {tab === "commissions" ? (
+        <Section title="Commissions de la plateforme" className="mb-6" actions={<Button size="sm" leftIcon={<Plus aria-hidden className="h-4 w-4" />} onClick={() => openRule(null)}>Nouvelle règle</Button>}>
         <DataTable caption="Règles de commission" columns={ruleCols} rows={s.pricing_rules} rowKey={(r) => r.id} empty={<EmptyState title="Aucune règle de commission" compact />} />
       </Section>
-      <Section title="Politique d’annulation" className="mb-6" actions={<Button size="sm" leftIcon={<Plus aria-hidden className="h-4 w-4" />} onClick={() => openPol(null)}>Nouvelle politique</Button>}>
+      ) : null}
+      {tab === "cancellation" ? (
+        <Section title="Politique d’annulation" className="mb-6" actions={<Button size="sm" leftIcon={<Plus aria-hidden className="h-4 w-4" />} onClick={() => openPol(null)}>Nouvelle politique</Button>}>
         <p className="mb-3 text-xs text-ash">Une seule politique est appliquée : en activer une désactive les autres.</p>
         <DataTable caption="Politiques d’annulation" columns={polCols} rows={s.cancellation_policies} rowKey={(r) => r.id} empty={<EmptyState title="Aucune politique : l’annulation est toujours gratuite" compact />} />
       </Section>
+      ) : null}
 
-      <Section title="Tratra Trust — seuils et poids" className="mb-6" actions={<Button size="sm" loading={trustBusy} onClick={() => void saveTrust()}>Enregistrer les seuils</Button>}>
+      {tab === "trust" ? (
+        <Section title="Tratra Trust — seuils et poids" className="mb-6" actions={<Button size="sm" loading={trustBusy} onClick={() => void saveTrust()}>Enregistrer les seuils</Button>}>
         <Alert tone="info" className="mb-4">Les nouveaux seuils s’appliquent à la prochaine réévaluation (périodique ou déclenchée par un événement). Rien n’est attribué ni retiré à l’instant de l’enregistrement.</Alert>
         {trustFail ? <Alert tone="danger" className="mb-4">{trustFail}</Alert> : null}
         <div className="space-y-6">
@@ -172,11 +184,14 @@ export default function SettingsPage() {
           ))}
         </div>
       </Section>
+      ) : null}
 
-      <Section title="Codes promotionnels" actions={<Button size="sm" leftIcon={<Plus aria-hidden className="h-4 w-4" />} onClick={() => { setCf({ code: "", kind: "percent", value: "", valid_from: "", valid_to: "" }); setCouErr({}); setCouFail(""); setCou(true); }}>Nouveau code</Button>}>
+      {tab === "coupons" ? (
+        <Section title="Codes promotionnels" actions={<Button size="sm" leftIcon={<Plus aria-hidden className="h-4 w-4" />} onClick={() => { setCf({ code: "", kind: "percent", value: "", valid_from: "", valid_to: "" }); setCouErr({}); setCouFail(""); setCou(true); }}>Nouveau code</Button>}>
         <p className="mb-3 text-xs text-ash">Une fois créé, seule l’activation d’un code est modifiable (jamais sa valeur).</p>
         <DataTable caption="Codes promotionnels" columns={couCols} rows={s.coupons} rowKey={(r) => r.id} empty={<EmptyState title="Aucun code promotionnel" compact />} />
       </Section>
+      ) : null}
 
       <FormModal open={Boolean(rule)} title={rule?.item ? "Modifier la règle de commission" : "Nouvelle règle de commission"} onClose={() => setRule(null)} onSubmit={saveRule}>
         <TextField label="Commission (%)" hint="Entre 0 et 50." inputMode="decimal" value={rf.fee_percent} error={ruleErr.fee_percent} onChange={(e) => setRf({ ...rf, fee_percent: e.target.value })} />

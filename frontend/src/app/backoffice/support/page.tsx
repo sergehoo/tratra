@@ -1,11 +1,12 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import { AlertTriangle, Clock, Gavel, RefreshCw, Flag } from "lucide-react";
 import { Alert, Badge, Button, PageHeader, SkeletonList, TextareaField } from "@/components/ds";
 import { bo, boError, fieldErrors } from "@/lib/bo";
 import { useBo } from "@/lib/BoProvider";
 import { useBoList, useDebounced } from "@/lib/useBoList";
-import { KV, SearchBox, Section, STATUS_FR, Tag, dt, useNotice } from "../_components/ui";
+import { Kpi, KpiGrid, KV, SearchBox, Section, STATUS_FR, StatusChips, Tag, dt, useNotice } from "../_components/ui";
 
 interface QueueItem { kind: "dispute" | "report"; id: number; title: string; excerpt: string; status: string; who: string; created_at: string; age_hours: number; overdue: boolean; href: string }
 interface Queue { count: number; overdue: number; results: QueueItem[]; sla_hours: { dispute: number; report: number } }
@@ -54,6 +55,8 @@ export default function SupportPage() {
   const [note, setNote] = useState("");
   const [noteErrors, setNoteErrors] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
+  const [kindFilter, setKindFilter] = useState("");
+  const [queueQuery, setQueueQuery] = useState("");
 
   const loadQueue = useCallback(async () => {
     setQueueError("");
@@ -72,6 +75,17 @@ export default function SupportPage() {
     try { setOv(await bo.get<Overview>(`/support/users/${userId}/`)); } catch (e) { setOv(null); setOvError(boError(e, "Ce compte n’a pas pu être chargé.")); }
   }, [userId]);
   useEffect(() => { setOv(null); void loadOverview(); }, [loadOverview]);
+  useEffect(() => {
+    if (userId === null) return;
+    const url = new URL(window.location.href);
+    url.searchParams.set("user", String(userId));
+    window.history.replaceState(null, "", url);
+  }, [userId]);
+
+  const items = (queue?.results ?? []).filter((i) =>
+    (kindFilter === "" || (kindFilter === "overdue" ? i.overdue : i.kind === kindFilter)) &&
+    (!queueQuery.trim() || `${i.title} ${i.excerpt} ${i.who}`.toLowerCase().includes(queueQuery.trim().toLowerCase())));
+  const countOf = (f: (i: QueueItem) => boolean) => (queue ? queue.results.filter(f).length : null);
 
   async function addNote() {
     setBusy(true);
@@ -92,12 +106,23 @@ export default function SupportPage() {
   return (
     <>
       <PageHeader title="Support" description="Ce qui attend une réponse humaine et le dossier d’un compte pour répondre. Les décisions (litiges, avis, suspension) se prennent dans leurs modules, avec leurs propres droits." />
-      {notice ? <Alert tone="success" className="mb-4">{notice}</Alert> : null}
+      {notice ? <p role="status" className="mb-4 rounded-xl bg-successSoft px-4 py-3 text-sm font-semibold text-successInk">{notice}</p> : null}
+      {queue ? (
+        <KpiGrid className="mb-5">
+          <Kpi icon={<Clock className="h-5 w-5" />} label="En attente de réponse" value={queue.count} hint="litiges et signalements ouverts" />
+          <Kpi icon={<AlertTriangle className="h-5 w-5" />} tone={queue.overdue ? "danger" : "accent"} label="Hors délai" value={queue.overdue} hint={`délais : litiges ${queue.sla_hours.dispute} h, signalements ${queue.sla_hours.report} h`} />
+          <Kpi icon={<Gavel className="h-5 w-5" />} tone="night" label="Litiges" value={countOf((i) => i.kind === "dispute") ?? "—"} hint="à médier" />
+          <Kpi icon={<Flag className="h-5 w-5" />} label="Signalements" value={countOf((i) => i.kind === "report") ?? "—"} hint="avis et messages à modérer" />
+        </KpiGrid>
+      ) : null}
       <div className="grid gap-6 lg:grid-cols-5">
-        <Section title="À traiter" className="lg:col-span-3" actions={queue ? <span className="text-xs text-ash">{queue.count} en attente · {queue.overdue} hors délai (litiges {queue.sla_hours.dispute} h, signalements {queue.sla_hours.report} h)</span> : undefined}>
-          {queueError ? <Alert tone="danger" action={<Button size="sm" variant="outline" onClick={() => void loadQueue()}>Réessayer</Button>}>{queueError}</Alert> : !queue ? <SkeletonList count={3} /> : queue.results.length === 0 ? <p className="text-sm text-inkSoft">Rien n’attend de réponse. 🎉</p> : (
+        <Section title="À traiter" className="lg:col-span-3" actions={<Button size="sm" variant="outline" leftIcon={<RefreshCw aria-hidden className="h-4 w-4" />} onClick={() => void loadQueue()}>Actualiser</Button>}>
+          <StatusChips items={[["", "Tout"], ["dispute", "Litiges"], ["report", "Signalements"], ["overdue", "Hors délai"]]} value={kindFilter} onChange={setKindFilter}
+            counts={{ _all: countOf(() => true), dispute: countOf((i) => i.kind === "dispute"), report: countOf((i) => i.kind === "report"), overdue: countOf((i) => i.overdue) }} label="Type" />
+          <div className="mb-3"><SearchBox value={queueQuery} onChange={setQueueQuery} label="Filtrer la file" placeholder="Filtrer par texte ou par personne…" /></div>
+          {queueError ? <Alert tone="danger" action={<Button size="sm" variant="outline" onClick={() => void loadQueue()}>Réessayer</Button>}>{queueError}</Alert> : !queue ? <SkeletonList count={3} /> : queue.results.length === 0 ? <p className="text-sm text-inkSoft">Rien n’attend de réponse.</p> : items.length === 0 ? <p className="text-sm text-inkSoft">Aucun élément ne correspond à ce filtre.</p> : (
             <ul className="divide-y divide-lineSoft">
-              {queue.results.map((i) => (
+              {items.map((i) => (
                 <li key={`${i.kind}-${i.id}`}>
                   <Link href={i.href} className="block rounded-panel px-2 py-3 transition hover:bg-canvas focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
                     <span className="flex flex-wrap items-center justify-between gap-2"><strong className="text-sm text-ink">{i.title}</strong>
