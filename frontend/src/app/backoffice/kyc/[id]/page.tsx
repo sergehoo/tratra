@@ -7,6 +7,7 @@ import { bo, boError, errorCode } from "@/lib/bo";
 import { useBo } from "@/lib/BoProvider";
 import Link from "next/link";
 import { DocumentViewer, type Doc } from "../../_components/DocumentViewer";
+import { AnalysisModal } from "../AnalysisModal";
 import { useCrumb } from "../../_components/crumbs";
 import { Fiche, Pane, Restricted } from "../../_components/fiche";
 import { KV, ReasonModal, Section, dt, postTo } from "../../_components/ui";
@@ -38,6 +39,7 @@ export default function KycDetailPage() {
   const [notice, setNotice] = useState("");
   const [failure, setFailure] = useState("");
   const [view, setView] = useState<Doc | null>(null);
+  const [analyse, setAnalyse] = useState<Doc | null>(null);
   const [reject, setReject] = useState<Doc | null>(null);
   const [approveDoc, setApproveDoc] = useState<Doc | null>(null);
   const [busy, setBusy] = useState(false);
@@ -97,6 +99,7 @@ export default function KycDetailPage() {
               <div className="flex flex-wrap items-center gap-2">
                 <Badge tone={TONE[doc.status]}>{DOC_FR[doc.status]}</Badge>
                 {doc.file_path && manage ? <Button size="sm" variant="outline" onClick={() => setView(doc)}>Voir l’original</Button> : null}
+                {doc.file_path && manage ? <Button size="sm" variant="outline" onClick={() => setAnalyse(doc)}>Analyse assistée</Button> : null}
                 {manage && doc.status === "pending" ? (
                   <>
                     <Button size="sm" onClick={() => setApproveDoc(doc)}>Approuver</Button>
@@ -177,6 +180,7 @@ export default function KycDetailPage() {
       />
 
       <DocumentViewer doc={view} onClose={() => setView(null)} />
+      <AnalysisModal docId={analyse?.id ?? null} title={analyse ? analyse.type_label : ""} onClose={() => setAnalyse(null)} />
       <ConfirmDialog
         open={Boolean(approveDoc)}
         onClose={() => setApproveDoc(null)}

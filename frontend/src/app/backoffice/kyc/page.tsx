@@ -1,9 +1,10 @@
 "use client";
 import { Eye, UserRound } from "lucide-react";
-import { Badge, PageHeader, type BadgeTone } from "@/components/ds";
+import { Badge, PageHeader, Tabs, type BadgeTone } from "@/components/ds";
 import { useBo } from "@/lib/BoProvider";
 import { useCounts, useManagedList } from "@/lib/useBoList";
-import { FilterBar, ListView, SearchBox, StatusChips, dd, type BoColumn, type RowAction } from "../_components/ui";
+import { FilterBar, ListView, SearchBox, StatusChips, dd, useTabParam, type BoColumn, type RowAction } from "../_components/ui";
+import { RisksTab } from "./RisksTab";
 
 interface Row {
   profile_id: number;
@@ -20,7 +21,7 @@ interface Row {
 
 const TONE: Record<string, BadgeTone> = { pending: "warning", ready: "info", approved: "success", rejected: "danger", incomplete: "gray" };
 
-export default function KycPage() {
+function DossiersTab() {
   const { can } = useBo();
   const m = useManagedList<Row, { state: string }>("/kyc/", { state: "" });
   const { values: f, list } = m;
@@ -40,7 +41,6 @@ export default function KycPage() {
 
   return (
     <>
-      <PageHeader title="Vérification KYC" description="File des dossiers artisans, du plus ancien au plus récent. Une pièce d’identité approuvée est requise avant toute approbation du dossier ; l’approbation reste une décision humaine." />
       <StatusChips items={[["", "Tous"], ["pending", "À examiner"], ["ready", "Prêts"], ["approved", "Approuvés"], ["rejected", "Refusés"], ["incomplete", "Incomplets"]]} value={f.state} onChange={(v) => m.set({ state: v })} counts={counts} label="État du dossier" />
       <FilterBar search={<SearchBox value={f.q} onChange={(v) => m.set({ q: v })} placeholder="Nom, identifiant, commune…" />} activeCount={m.activeCount} onReset={m.reset} onRefresh={() => void list.reload()} refreshing={list.loading} />
       <ListView
@@ -56,6 +56,17 @@ export default function KycPage() {
         pageSize={m.pageSize}
         onPageSize={(n) => m.set({ size: String(n) })}
       />
+    </>
+  );
+}
+
+export default function KycPage() {
+  const [tab, setTab] = useTabParam(["files", "risks"] as const, "files");
+  return (
+    <>
+      <PageHeader title="Vérification KYC" description="File des dossiers artisans, du plus ancien au plus récent. Une pièce d’identité approuvée est requise avant toute approbation du dossier ; l’approbation reste une décision humaine." />
+      <Tabs ariaLabel="Sections" value={tab} onChange={setTab} className="mb-4" items={[{ id: "files", label: "Dossiers" }, { id: "risks", label: "Risques et fraudes" }]} />
+      {tab === "files" ? <DossiersTab /> : <RisksTab />}
     </>
   );
 }
