@@ -21,11 +21,13 @@ Aucun push, aucun déploiement. Tout est en commits locaux sur `feat/compte-uniq
 - **Étape 4 — Transport : fait** (backend, Back-Office, web, Flutter). Voir `docs/adresses-transport.md`. Désactivé par défaut ; tout est configurable ; sans OSRM (`ROUTING_OSRM_URL`) la distance est « indisponible » et le forfait de secours s'applique.
 - **Étape 5 — Évaluations : fait** (backend, Back-Office, web, Flutter). Évaluation mutuelle par mission, notes masquées jusqu'à réciprocité ou 7 jours (`EVALUATION_REVEAL_DAYS`), scores sans moyenne sous 3 notes, contestation, surveillance proposée + décisions humaines avec recours, évaluation mensuelle des contrats (défaut 30 jours, invitations à chaque échéance et à la clôture). Limite : l'évaluation client → prestataire passe encore par l'écran « À rédiger » existant (photos) ; l'évaluation du demandeur par le prestataire est dans « Évaluations réciproques ».
 
-## Reste à faire du brief (lots 3, 4, 6, 8)
-Ordre prévu : 1 compte unique/profil → 2 adresses → 7 transport → 5 évaluations mutuelles → 3-4 IA fraude/KYC/Trust → 6 recommandations → 8 Back-Office → tests.
-- Lot 1 : la distinction client/artisan existe déjà côté compte unique ; reste à chercher les libellés « Devenir artisan » / « compte professionnel » dans `frontend/src` et `flutter_tratra/lib` (la recherche n'a pas abouti), à retirer l'affichage du username, et à ajouter dans le Back-Office les filtres « propose des services », nombres de services et de missions, et badges Trust.
-- Lots 2 à 8 : tout est à faire.
-- Principes à respecter : migrations additives, droits vérifiés côté Django, consentement explicite pour la localisation, aucun badge ni sanction décidés par l'IA seule, aucun tarif codé en dur, tarif transport recalculé côté serveur, aucune dépendance obligatoire à une IA externe.
+- **Étape 6 — IA : fait pour le contrôle KYC/fraude et les recommandations ; Trust partiel** (backend, Back-Office, web, Flutter pour les recommandations). Routeur DeepSeek (principal) → Anthropic (repli) facultatif ; les documents KYC ne partent jamais sans `AI_KYC_EXTERNAL_ENABLED=true` + `AI_KYC_LEGAL_BASIS` ; OCR local Tesseract (paquets ajoutés au Dockerfile) ; analyse explicable (expiration, nom, date de naissance, complétude, fichier/numéro identique) ; dossiers de risque proposés (doublons par identifiants forts, KYC expirés, identité incomplète, activité anormale, réservations artificielles) et décisions humaines ; recommandations déterministes explicables. Voir `docs/ia-controle.md`. **Non testé en réel** : appels DeepSeek et Anthropic (aucune clé en recette ; testés par simulation), OCR sur de vrais documents ivoiriens (formats de CNI à valider), image Docker reconstruite avec Tesseract.
+
+## Reste à faire du brief
+- Lot 4 (Trust) : l'IA ne propose pas encore de badges ni n'analyse la pertinence d'un justificatif de compétence par catégorie ; le moteur de badges existant est inchangé (aucun badge attribué par l'IA).
+- Lot 8 (Back-Office) : tout y est réparti dans les modules existants (Utilisateurs, KYC > Risques, Avis > Surveillance, Réglages > Transport) ; pas de page « Doublons » dédiée ni de statistiques de réputation agrégées.
+- Flutter : sélecteur d'adresses enregistrées dans la réservation ; Back-Office mobile inexistant (hors périmètre).
+- Validation sur appareil Android non refaite pour cette série (aucun APK reconstruit).
 
 ## Côté utilisateur (hors code)
 - Serveur : `.env` des hôtes, `docker compose build tratrafrontend && up -d`, diagnostic Traefik/ACME de `minioapi.tratra.net`.
