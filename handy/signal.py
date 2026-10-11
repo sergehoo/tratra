@@ -1,6 +1,7 @@
 import logging
 
 from django.db import models
+from django.db import transaction
 from django.db.models.signals import post_delete, post_save, pre_save
 from django.dispatch import receiver
 
@@ -55,10 +56,9 @@ def create_company_profile(sender, instance, created, **kwargs):
         )
 
 
-@receiver(post_delete, sender=ServiceImage)
-def delete_service_image_file(sender, instance, **kwargs):
-    if instance.image:
-        instance.image.delete(False)
+# NB : le fichier d'une ServiceImage supprimée est nettoyé par django-cleanup (après validation, erreurs journalisées sans jamais lever).
+# Un ancien récepteur post_delete supprimait le fichier de façon synchrone : si le stockage d'objets (MinIO) était indisponible, il levait
+# l'exception et la suppression en base échouait (500 dans l'administration).
 
 
 def refresh_handyman_rating(handyman_id):

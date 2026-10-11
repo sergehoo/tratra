@@ -377,6 +377,10 @@ if MINIO_ENABLED:
     AWS_QUERYSTRING_EXPIRE = MEDIA_SIGNED_URL_TTL_SECONDS
     AWS_DEFAULT_ACL = None
     AWS_S3_FILE_OVERWRITE = False
+    # Délais bornés : un MinIO injoignable fait échouer l'opération en quelques secondes au lieu de bloquer la requête (et le worker).
+    from botocore.config import Config as _BotoConfig
+
+    AWS_S3_CLIENT_CONFIG = _BotoConfig(connect_timeout=5, read_timeout=20, retries={'max_attempts': 2, 'mode': 'standard'})
     AWS_S3_OBJECT_PARAMETERS = {
         'CacheControl': 'private, max-age=300',
     }
