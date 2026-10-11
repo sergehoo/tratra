@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "verify": "npm run ds:check && npm run typecheck && npm run build",
     "ds:build": "node design-system/build.mjs",
-    "ds:check": "node design-system/build.mjs --check"
+    "ds:check": "node design-system/build.mjs --check",
+    "test:bo": "node --test src/lib/boNavModel.test.ts"
   },
   "dependencies": {
     "framer-motion": "^11.18.2",

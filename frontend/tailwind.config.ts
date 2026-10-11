@@ -74,6 +74,10 @@ const config: Config = {
           from: { opacity: "0", transform: "translate3d(0,32px,0)" },
           to: { opacity: "1", transform: "none" },
         },
+        slideInLeft: {
+          from: { opacity: "0", transform: "translate3d(-24px,0,0)" },
+          to: { opacity: "1", transform: "none" },
+        },
       },
       animation: {
         shimmer: "shimmer 1.6s infinite",
@@ -82,6 +86,7 @@ const config: Config = {
         rise: `rise ${tokens.motion.duration.slow}ms ${easeEmphasized} both`,
         scaleIn: `scaleIn ${tokens.motion.duration.base}ms ${easeEmphasized} both`,
         sheetUp: `sheetUp ${tokens.motion.duration.slow}ms ${easeEmphasized} both`,
+        slideInLeft: `slideInLeft ${tokens.motion.duration.base}ms ${easeEmphasized} both`,
       },
     },
   },

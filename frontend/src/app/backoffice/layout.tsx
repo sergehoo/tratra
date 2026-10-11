@@ -1,30 +1,16 @@
 "use client";
-import { useMemo, type ReactNode } from "react";
-import Link from "next/link";
+import { Suspense, type ReactNode } from "react";
 import { usePathname } from "next/navigation";
-import {
-  Award, BarChart3, Bell, Briefcase, Building2, CalendarCheck, FileSignature, IdCard, LayoutDashboard, LifeBuoy, Lock, MapPin, Megaphone, RefreshCw, Settings,
-  ShieldCheck, Star, Users, Wallet, type LucideIcon,
-} from "lucide-react";
 import { RoleGuard } from "@/components/RoleGuard";
-import { Alert, AppShell, Button, ButtonLink, EmptyState, SkeletonPage, type NavItem } from "@/components/ds";
+import { Alert, Button, ButtonLink, EmptyState, SkeletonPage } from "@/components/ds";
 import { BoProvider, useBo } from "@/lib/BoProvider";
+import { BoShell } from "./_components/BoShell";
 import { MfaGate } from "./_components/MfaGate";
 
-const ICONS: Record<string, LucideIcon> = {
-  "layout-dashboard": LayoutDashboard, users: Users, "shield-check": ShieldCheck, award: Award, "id-card": IdCard, briefcase: Briefcase,
-  "calendar-check": CalendarCheck, "map-pin": MapPin, star: Star, "building-2": Building2, wallet: Wallet, megaphone: Megaphone, bell: Bell,
-  "file-signature": FileSignature, "refresh-cw": RefreshCw, "life-buoy": LifeBuoy, "bar-chart-3": BarChart3, settings: Settings, lock: Lock,
-};
-
-/** Menu = modules que le rôle peut ouvrir (confort : chaque endpoint refuse de toute façon ce que le rôle n'autorise pas). */
+/** Menu = modules que le rôle peut ouvrir, regroupés en 7 rubriques (confort : chaque endpoint refuse de toute façon ce que le rôle n'autorise pas). */
 function Shell({ children }: { children: ReactNode }) {
   const { me, loading, forbidden, error, reload } = useBo();
   const pathname = usePathname();
-  const nav = useMemo<NavItem[]>(
-    () => (me?.modules ?? []).map((m, i) => ({ href: m.path, label: m.label, icon: ICONS[m.icon], primary: i < 4 })),
-    [me],
-  );
 
   if (loading) return <SkeletonPage />;
   if (forbidden) {
@@ -54,11 +40,7 @@ function Shell({ children }: { children: ReactNode }) {
   const segment = pathname.split("/")[2];
   const blocked = Boolean(segment) && !me.modules.some((m) => m.path === `/backoffice/${segment}`);
   return (
-    <AppShell title="Back-Office" nav={nav}>
-      <p className="mb-5 text-xs text-ash">
-        Connecté en tant que <strong className="text-inkSoft">{me.user.name}</strong> · rôle{me.roles.length > 1 ? "s" : ""} : {me.roles.join(", ")}.{" "}
-        <Link href="/dashboard" className="font-semibold text-primaryDark underline underline-offset-2">Mon espace</Link>
-      </p>
+    <BoShell me={me}>
       {blocked ? (
         <EmptyState
           title="Accès non autorisé"
@@ -68,7 +50,7 @@ function Shell({ children }: { children: ReactNode }) {
       ) : (
         children
       )}
-    </AppShell>
+    </BoShell>
   );
 }
 
@@ -77,7 +59,10 @@ export default function BackOfficeLayout({ children }: { children: ReactNode }) 
   return (
     <RoleGuard>
       <BoProvider>
-        <Shell>{children}</Shell>
+        {/* Les pages lisent `?tab=` et leurs filtres dans l'URL (useSearchParams) : la frontière Suspense est exigée par Next. */}
+        <Suspense fallback={<SkeletonPage />}>
+          <Shell>{children}</Shell>
+        </Suspense>
       </BoProvider>
     </RoleGuard>
   );

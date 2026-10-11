@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useId, useState, type ReactNode } from "react";
+import { useEffect, useId, useState, type ReactNode } from "react";
 import { Search } from "lucide-react";
 import { Alert, Badge, Button, Card, DataTable, EmptyState, Input, Modal, Select, Textarea, TextField, type BadgeTone, type Column } from "@/components/ds";
 import { bo, boError, fieldErrors, MIN_REASON } from "@/lib/bo";
@@ -327,22 +327,7 @@ export function ReasonModal({
 /** Appel POST protégé : renvoie une fonction `request(body)` pour <ReasonModal>. */
 export const postTo = (path: string) => (body: Record<string, string>) => bo.post(path, body);
 
-/** Onglet courant, initialisé depuis `?tab=` après le montage (évite tout écart d'hydratation) et gardé dans l'URL. */
-export function useTabParam<T extends string>(allowed: readonly T[], fallback: T): [T, (t: T) => void] {
-  const [tab, setTabState] = useState<T>(fallback);
-  useEffect(() => {
-    const t = new URLSearchParams(window.location.search).get("tab") as T | null;
-    if (t && allowed.includes(t)) setTabState(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-  const setTab = useCallback((t: T) => {
-    setTabState(t);
-    const url = new URL(window.location.href);
-    url.searchParams.set("tab", t);
-    window.history.replaceState(null, "", url);
-  }, []);
-  return [tab, setTab];
-}
+export { useTabParam } from "@/lib/useUrlFilters";
 
 /** Message de confirmation éphémère en haut de page (jamais affiché avant la confirmation du serveur). */
 export function useNotice(): [string, (m: string) => void] {
