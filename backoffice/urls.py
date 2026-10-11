@@ -2,7 +2,7 @@ from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
 from announcements.api import AnnouncementAdminViewSet
-from backoffice import api_core, api_engagements, api_mfa, api_money, api_ops, api_people, api_system, api_transport, api_reputation
+from backoffice import api_core, api_engagements, api_mfa, api_money, api_ops, api_people, api_system, api_transport, api_reputation, api_intelligence
 
 router = DefaultRouter()
 router.register("announcements", AnnouncementAdminViewSet, basename="bo-announcements")
@@ -27,6 +27,13 @@ urlpatterns = [
     path("kyc/<int:pk>/suspend/", api_people.KycProfileSuspend.as_view(), name="bo-kyc-suspend"),
     path("kyc/documents/<int:pk>/file/", api_people.KycDocumentFile.as_view(), name="bo-kyc-file"),
     path("kyc/documents/<int:pk>/review/", api_people.KycDocumentReview.as_view(), name="bo-kyc-review"),
+    path("kyc/documents/<int:pk>/analyze/", api_intelligence.DocumentAnalyze.as_view(), name="bo-kyc-analyze"),
+    path("kyc/documents/<int:pk>/analysis/", api_intelligence.DocumentAnalysisLast.as_view(), name="bo-kyc-analysis"),
+    path("risk/summary/", api_intelligence.RiskSummary.as_view(), name="bo-risk-summary"),
+    path("risk/cases/", api_intelligence.RiskCaseList.as_view(), name="bo-risk-cases"),
+    path("risk/cases/<int:pk>/", api_intelligence.RiskCaseDetail.as_view(), name="bo-risk-case"),
+    path("risk/cases/<int:pk>/decision/", api_intelligence.RiskCaseDecide.as_view(), name="bo-risk-decision"),
+    path("ai/status/", api_intelligence.AIStatus.as_view(), name="bo-ai-status"),
     # Tratra Trust
     path("trust/", api_people.TrustList.as_view(), name="bo-trust"),
     path("trust/config/", api_people.TrustConfigView.as_view(), name="bo-trust-config"),

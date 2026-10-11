@@ -97,6 +97,7 @@ INSTALLED_APPS = [
     'engagements',
     'transport',
     'reputation',
+    'intelligence',
     'backoffice',
     # Libs
     'allauth',
@@ -437,6 +438,20 @@ GEO_USER_AGENT = config('GEO_USER_AGENT', default='Tratra/1.0 (contact: support@
 EVALUATION_REVEAL_DAYS = config('EVALUATION_REVEAL_DAYS', default=7, cast=int)
 EVALUATION_WINDOW_DAYS = config('EVALUATION_WINDOW_DAYS', default=30, cast=int)
 
+# Contrôle intelligent : fournisseurs d'IA (ordre = priorité ; repli automatique) — AUCUNE dépendance obligatoire : sans clé, les règles
+# déterministes fonctionnent seules. Les documents KYC ne sont JAMAIS envoyés à un fournisseur externe tant que AI_KYC_EXTERNAL_ENABLED n'est
+# pas activé ET qu'une base légale (AI_KYC_LEGAL_BASIS) n'est pas renseignée.
+AI_PROVIDERS = config('AI_PROVIDERS', default='deepseek,anthropic')
+AI_DEEPSEEK_API_KEY = config('AI_DEEPSEEK_API_KEY', default='')       # secret : jamais journalisé ni renvoyé
+AI_DEEPSEEK_URL = config('AI_DEEPSEEK_URL', default='https://api.deepseek.com')
+AI_DEEPSEEK_MODEL = config('AI_DEEPSEEK_MODEL', default='deepseek-chat')
+AI_ANTHROPIC_API_KEY = config('AI_ANTHROPIC_API_KEY', default='')     # secret : jamais journalisé ni renvoyé
+AI_ANTHROPIC_MODEL = config('AI_ANTHROPIC_MODEL', default='claude-sonnet-5-5')
+AI_TIMEOUT = config('AI_TIMEOUT', default=30, cast=int)
+AI_KYC_EXTERNAL_ENABLED = config('AI_KYC_EXTERNAL_ENABLED', default=False, cast=bool)
+AI_KYC_LEGAL_BASIS = config('AI_KYC_LEGAL_BASIS', default='')         # ex. « consentement explicite du titulaire, DPA signé avec le fournisseur »
+KYC_FINGERPRINT_PEPPER = config('KYC_FINGERPRINT_PEPPER', default='')  # secret : sel de l'empreinte des numéros de documents (défaut : SECRET_KEY)
+
 # Push mobile (FCM HTTP v1) : voir handy/push.py. Sans identifiants, aucun push n'est envoyé (jamais d'erreur).
 FCM_CREDENTIALS_FILE = config('FCM_CREDENTIALS_FILE', default='')
 FCM_CREDENTIALS_JSON = config('FCM_CREDENTIALS_JSON', default='')
@@ -480,6 +495,11 @@ CELERY_BEAT_SCHEDULE = {
     'reputation-tick': {
         'task': 'reputation.tasks.tick',
         'schedule': 3600.0,
+    },
+    # Contrôle intelligent : doublons, KYC expirés, activités anormales (propositions de dossiers de risque ; aucune sanction automatique).
+    'intelligence-risk-scan': {
+        'task': 'intelligence.tasks.scan',
+        'schedule': 21600.0,
     },
     'announcements-tick': {
         'task': 'announcements.tasks.tick',

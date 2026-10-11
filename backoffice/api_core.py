@@ -112,6 +112,9 @@ class DashboardView(BOView):
             alert("contest_open", "Contestations d’évaluations à traiter", EvaluationContest.objects.filter(status="open").count(), "/backoffice/reviews?tab=watch")
         if "kyc.review" in perms:
             alert("kyc_pending", "Pièces KYC à examiner", HandymanDocument.objects.filter(status="pending").count(), "/backoffice/kyc")
+            from intelligence.models import RiskCase
+
+            alert("risk_open", "Dossiers de risque à examiner", RiskCase.objects.filter(status="open").count(), "/backoffice/kyc?tab=risks", "danger")
         if "bookings.manage" in perms or "support.manage" in perms:
             alert("disputes_open", "Litiges ouverts", Dispute.objects.filter(status__in=("open", "under_review")).count(), "/backoffice/bookings?tab=disputes", "danger")
         if "reviews.moderate" in perms:

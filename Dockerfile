@@ -7,7 +7,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 # OS libs: PostGIS clients (GDAL/GEOS/PROJ), Postgres, curl
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gdal-bin libgdal-dev libgeos-dev libproj-dev binutils \
-    libpq-dev build-essential curl ca-certificates && \
+    libpq-dev build-essential curl ca-certificates \
+    tesseract-ocr tesseract-ocr-fra tesseract-ocr-eng && \
     rm -rf /var/lib/apt/lists/*
 
 # Pour Django GIS (GDAL include paths)
