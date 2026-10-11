@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { BadgeCheck, CircleCheck, Circle, FileCheck2, Smartphone } from "lucide-react";
 import { apiErrorMessage, patch } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { AddressesCard } from "@/components/address/AddressesCard";
 import { useDashboard } from "@/lib/dashboard";
 import { useData } from "@/lib/useData";
 import { patchForm } from "@/lib/uploadPatch";
@@ -191,6 +192,34 @@ function EmailForm() {
   );
 }
 
+/** Raccourcis du compte unique : tout ce que l'utilisateur demande ou propose avec le même compte, plus sécurité et confidentialité. */
+function Shortcuts({ provider }: { provider: boolean }) {
+  const items: [string, string, string][] = [
+    provider ? ["Mes services", "/dashboard/provider", "Publier et gérer mes prestations"] : ["Proposer un service", "/dashboard/provide", "Créer mon profil professionnel avec ce compte"],
+    ["Mes réservations", "/dashboard/bookings", "Ce que j’ai demandé"],
+    ...(provider ? ([["Mes missions", "/dashboard/provider", "Ce que j’exécute pour d’autres"], ["Mes badges", "/dashboard/reputation", "Badges Trust et réputation"]] as [string, string, string][]) : []),
+    ["Mes engagements", "/dashboard/engagements", "Contrats récurrents et longue durée"],
+    ["Mes évaluations", "/dashboard/reviews", "Avis donnés et reçus"],
+    ["Préférences de notifications", "/dashboard/notifications/preferences", "Canaux et consentement aux communications"],
+    ["Sécurité du compte", "/forgot-password", "Changer mon mot de passe par code SMS"],
+  ];
+  return (
+    <Card>
+      <CardHeader title="Mon espace" description="Un seul compte pour demander et proposer des services." />
+      <ul className="mt-4 grid gap-2 sm:grid-cols-2">
+        {items.map(([label, href, hint]) => (
+          <li key={label}>
+            <a href={href} className="block min-h-[56px] rounded-panel border border-lineSoft px-4 py-2.5 transition hover:bg-canvas focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
+              <span className="block text-sm font-semibold text-ink">{label}</span>
+              <span className="block text-xs text-ash">{hint}</span>
+            </a>
+          </li>
+        ))}
+      </ul>
+    </Card>
+  );
+}
+
 export default function ProfilePage() {
   const { user } = useAuth();
   const { data, loading, error, reload } = useDashboard();
@@ -231,6 +260,8 @@ export default function ProfilePage() {
               </div>
               <EmailForm />
             </Card>
+            <AddressesCard />
+            <Shortcuts provider={Boolean(provider)} />
             {provider ? (
               <ProForm profileId={provider.profile_id} />
             ) : (
