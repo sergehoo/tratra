@@ -122,31 +122,29 @@ pour la transition, voir le bloc « Sécurité de l'administration » de `.env.e
 
 ### Si `migrate` échoue avec « column "image_url" of relation "handy_service" already exists » (serveur ancien)
 
-La migration `handy 0017` existait sous un autre nom dans l'historique (`0017_service_image_url_heroslide`, octobre 2025) : une base de production déployée à cette époque
-a déjà la colonne `image_url` et la table `handy_heroslide`, mais Django ne connaît pas le nouveau nom (`0017_service_image_url_alter_service_banner_heroslide`) et rejoue l'ajout.
-La seule différence est un `AlterField` : `service.banner` devient nullable. Réparation (une transaction, avec garde-fous) — **API arrêtée** (`docker compose stop tratraweb worker beat`) :
+Cause : l'historique des migrations de la base ne porte pas les mêmes **noms** que le dépôt. Les migrations `handy 0016/0017` ont été générées ailleurs puis renommées
+(un serveur réel avait `0016_booking_total_price` et `0017_heroslide`, qu'aucun commit du dépôt ne contient). Le schéma est déjà là — colonne `image_url`, table `handy_heroslide` —
+mais Django ne reconnaît pas le nom `0017_service_image_url_alter_service_banner_heroslide` et rejoue l'ajout. Les lignes inconnues de `django_migrations` sont ignorées : ne **jamais** les supprimer.
+Chaque migration échoue en bloc (DDL transactionnel) : une tentative qui échoue ne modifie rien. **API arrêtée** pendant la réparation (`docker compose stop tratraweb worker beat`).
 
 ```bash
-DBU="$(sed -n 's/^DB_USER=//p' .env)"; DBN="$(sed -n 's/^DB_NAME=//p' .env)"
-docker compose exec -T tratradb psql -U "$DBU" -d "$DBN" -v ON_ERROR_STOP=1 <<'SQL'
-DO $$
-BEGIN
-  IF NOT EXISTS (SELECT 1 FROM django_migrations WHERE app='handy' AND name='0017_service_image_url_heroslide') THEN
-    RAISE EXCEPTION 'ancien 0017 non enregistré : ne rien modifier';
-  END IF;
-  IF EXISTS (SELECT 1 FROM django_migrations WHERE app='handy' AND name='0017_service_image_url_alter_service_banner_heroslide') THEN
-    RAISE EXCEPTION 'nouveau 0017 déjà enregistré';
-  END IF;
-  IF to_regclass('public.handy_heroslide') IS NULL THEN
-    RAISE EXCEPTION 'table handy_heroslide absente : ne rien modifier';
-  END IF;
-  ALTER TABLE handy_service ALTER COLUMN banner DROP NOT NULL;          -- ce que fait le AlterField du nouveau 0017
-  INSERT INTO django_migrations (app, name, applied) VALUES ('handy', '0017_service_image_url_alter_service_banner_heroslide', now());
-END $$;
-SQL
-docker compose run --rm --no-deps tratraweb python manage.py migrate --plan | tail -30     # aperçu des migrations restantes
-docker compose run --rm --no-deps tratraweb python manage.py migrate                        # application, sortie visible
+# 1. Diagnostic en LECTURE SEULE : objets déjà présents + écarts modèle ↔ base (aucune écriture)
+docker compose run --rm --no-deps -T tratraweb python manage.py shell < scripts/migration_drift.py
 ```
+Lecture du résultat, migration par migration :
+
+- **Tous** les objets de la migration sont listés comme déjà présents **et** aucun écart n'est signalé pour ses modèles → le schéma est déjà celui de la migration : on l'enregistre sans la rejouer.
+- Seulement **une partie** des objets existe, ou un écart est signalé (colonne absente / en trop / nullabilité) → **ne rien enregistrer** ; réparer le schéma à la main (SQL ciblé) puis recontrôler.
+
+```bash
+# 2. Enregistrer UNE migration dont le schéma est confirmé complet (ici handy 0017) — aperçu puis application :
+docker compose run --rm --no-deps tratraweb python manage.py migrate handy 0017_service_image_url_alter_service_banner_heroslide --fake --plan
+docker compose run --rm --no-deps tratraweb python manage.py migrate handy 0017_service_image_url_alter_service_banner_heroslide --fake
+# 3. Rejouer le diagnostic, puis la suite ; répéter 1–2 pour chaque nouvelle collision :
+docker compose run --rm --no-deps -T tratraweb python manage.py shell < scripts/migration_drift.py
+docker compose run --rm --no-deps tratraweb python manage.py migrate
+```
+Ne lancer `docker compose up -d` qu'une fois `migrate` terminé sans erreur.
 
 ## 9. Ce qui demande une intervention humaine 👤
 
