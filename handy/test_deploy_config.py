@@ -249,3 +249,100 @@ def test_s3_tls_verification_accepts_true_or_a_ca_bundle_path(raw, expected):
     else:
         assert r.returncode == 0, r.stderr[-400:]
         assert f"VERIFY={expected}" in r.stdout
+
+
+def test_production_healthcheck_presents_public_host_and_https_scheme():
+    """Sans cela la sonde reçoit 400 (hôte refusé) puis 301 (redirection HTTPS) : l'API reste « unhealthy » et `docker compose up -d` n'a pas pu démarrer
+    le worker, beat et le frontend qui en dépendent."""
+    api = _compose("docker-compose.yml")["services"]["tratraweb"]["healthcheck"]
+    text = " ".join(api["test"])
+    assert "Host:" in text and "X-Forwarded-Proto: https" in text and "/readyz" in text and "tratraweb_HOST" in text
+    assert api.get("start_period")
+
+
+_CHECK_ENV = ROOT / "scripts" / "check_env.py"
+
+
+def _check_env_module():
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("check_env", _CHECK_ENV)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+_GOOD_ENV = """DJANGO_ENV=prod
+DEBUG=False
+SECRET_KEY=Zk3-longue-cle-aleatoire-Zk3-longue-cle-aleatoire-Zk3-longue-cle-aleatoire-0
+tratraweb_HOST=api.tratra.test
+FRONTEND_HOST=app.tratra.test
+MINIO_API_HOST=minio.tratra.test
+MINIO_CONSOLE_HOST=minio-console.tratra.test
+ALLOWED_HOSTS=api.tratra.test,tratraweb
+CORS_ALLOWED_ORIGINS=https://app.tratra.test
+CSRF_TRUSTED_ORIGINS=https://app.tratra.test,https://api.tratra.test
+MINIO_ENABLED=True
+MINIO_ROOT_USER=root
+MINIO_ROOT_PASSWORD=pw-root
+AWS_ACCESS_KEY_ID=key
+AWS_SECRET_ACCESS_KEY=secret
+AWS_STORAGE_BUCKET_NAME=tratra-media
+KYC_STORAGE_BUCKET_NAME=tratra-kyc-private
+AWS_S3_ENDPOINT_URL=https://minio.tratra.test
+PUBLIC_WEB_URL=https://app.tratra.test
+NEXT_PUBLIC_API_BASE=https://api.tratra.test/handy
+SMS_BACKEND=twilio
+TWILIO_ACCOUNT_SID=ACxxxxxxxx
+TWILIO_AUTH_TOKEN=twtoken-9f3a
+TWILIO_MESSAGING_SERVICE_SID=MGxxxx
+DB_NAME=tratra
+DB_USER=tratra
+DB_PASSWORD=dbpw
+DB_HOST=tratradb
+REDIS_URL=redis://redis:6379/0
+"""
+
+
+def test_check_env_accepts_a_coherent_production_env_and_never_prints_a_value(tmp_path, capsys):
+    module = _check_env_module()
+    env = tmp_path / ".env"
+    env.write_text(_GOOD_ENV, encoding="utf-8")
+    assert module.main([str(env)]) == 0
+    out = capsys.readouterr().out
+    assert "0 erreur(s)" in out and "Zk3-longue-cle" not in out and "pw-root" not in out
+
+
+def test_check_env_lists_every_gap_of_an_old_server_env_at_once_without_leaking_values(tmp_path, capsys):
+    """Le cas réel d'un serveur dont le .env date d'un ancien modèle : clé de développement, endpoint MinIO interne en http, URL du site locale,
+    bucket KYC absent, SMS non configuré — tout doit être signalé EN UNE FOIS (check --deploy ne montre qu'une erreur à la fois)."""
+    module = _check_env_module()
+    old = _GOOD_ENV.replace("Zk3-longue-cle-aleatoire-Zk3-longue-cle-aleatoire-Zk3-longue-cle-aleatoire-0", "django-insecure-abc123SECRETVALUE")
+    old = old.replace("AWS_S3_ENDPOINT_URL=https://minio.tratra.test", "AWS_S3_ENDPOINT_URL=http://minio:9000")
+    old = old.replace("PUBLIC_WEB_URL=https://app.tratra.test", "PUBLIC_WEB_URL=http://localhost:3000")
+    old = old.replace("KYC_STORAGE_BUCKET_NAME=tratra-kyc-private\n", "").replace("SMS_BACKEND=twilio\n", "SMS_BACKEND=\n")
+    env = tmp_path / ".env"
+    env.write_text(old, encoding="utf-8")
+    errors, _ = module.check(module.parse(env))
+    names = {var for var, _ in errors}
+    assert {"SECRET_KEY", "AWS_S3_ENDPOINT_URL", "PUBLIC_WEB_URL", "KYC_STORAGE_BUCKET_NAME", "SMS_BACKEND"} <= names
+    assert module.main([str(env)]) == 1
+    printed = capsys.readouterr().out
+    for secret in ("abc123SECRETVALUE", "pw-root", "dbpw", "ACxxxxxxxx", "twtoken-9f3a"):
+        assert secret not in printed
+    assert module.main([str(tmp_path / "absent.env")]) == 2
+
+
+def test_check_env_rules_match_the_production_settings(tmp_path):
+    """Les règles du script sont celles de prod.py : un .env sans erreur pour le script doit être accepté par les réglages de production."""
+    module = _check_env_module()
+    env = module.parse(_write(tmp_path, _GOOD_ENV))
+    assert module.check(env)[0] == []
+    r = _load_prod_settings(code="import django; django.setup(); print('ok')", **{k: v for k, v in env.items() if k not in ("PATH", "HOME")})
+    assert r.returncode == 0, r.stderr[-300:]
+
+
+def _write(tmp_path, text):
+    p = tmp_path / "prod.env"
+    p.write_text(text, encoding="utf-8")
+    return p

@@ -105,8 +105,9 @@ Puis la recette manuelle sur téléphones : `docs/recette-pilote.md` (SMS réel,
 cd /home/ubuntu/tratra && git pull
 # 1. Compléter .env (modèle : .env.example — le gabarit complet commenté : .env.staging.example). Plus aucun « variable is not set » ci-dessous :
 docker compose config -q
+python3 scripts/check_env.py            # liste d'un coup TOUS les écarts du .env avec la production (jamais de valeur affichée) ; `check --deploy` n'en montre qu'un à la fois
 #    Variables que les versions récentes exigent : KYC_STORAGE_BUCKET_NAME (≠ AWS_STORAGE_BUCKET_NAME), FRONTEND_HOST, NEXT_PUBLIC_API_BASE (https://<hôte API>/handy),
-#    PUBLIC_WEB_URL (https), SMS_BACKEND + identifiants (l'OTP n'est jamais contourné), AWS_S3_ENDPOINT_URL en https, ALLOWED_HOSTS, CORS_ALLOWED_ORIGINS, CSRF_TRUSTED_ORIGINS.
+#    PUBLIC_WEB_URL (https), SMS_BACKEND + identifiants (l'OTP n'est jamais contourné), AWS_S3_ENDPOINT_URL = adresse PUBLIQUE de MinIO en https (`https://<MINIO_API_HOST>`, pas `http://minio:9000`), SECRET_KEY aléatoire (pas `django-insecure-…`), ALLOWED_HOSTS (avec l'hôte de l'API), CORS_ALLOWED_ORIGINS, CSRF_TRUSTED_ORIGINS.
 # 2. Sauvegarder la base :
 docker compose exec -T tratradb pg_dump -U "$(sed -n 's/^DB_USER=//p' .env)" -d "$(sed -n 's/^DB_NAME=//p' .env)" -Fc > ~/tratra-avant-maj-$(date +%F).dump
 # 3. Construire SANS redémarrer (MinIO est construit depuis les sources : docker/minio — l'image officielle n'est plus téléchargeable) :

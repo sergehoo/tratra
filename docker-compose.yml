@@ -122,10 +122,16 @@ services:
       minio-init:
         condition: service_completed_successfully
     healthcheck:
-      test: [ "CMD-SHELL", "wget -qO- http://127.0.0.1:8000/readyz || exit 1" ]
-      interval: 10s
+      # La production impose HTTPS (SECURE_SSL_REDIRECT) et un hôte autorisé : une sonde nue sur 127.0.0.1 reçoit 400/301 et ne passe JAMAIS
+      # (le conteneur resterait « unhealthy » et le worker, beat et le frontend ne démarreraient pas). On présente donc l'hôte public de l'API
+      # (tratraweb_HOST, présent dans .env et dans ALLOWED_HOSTS) et l'en-tête de protocole que pose Traefik.
+      test:
+        - CMD-SHELL
+        - 'wget -qO- --header="Host: $${tratraweb_HOST}" --header="X-Forwarded-Proto: https" http://127.0.0.1:8000/readyz > /dev/null || exit 1'
+      interval: 15s
       timeout: 5s
       retries: 20
+      start_period: 120s       # migrations et collectstatic au démarrage
     # Labels Traefik: route HTTPS -> service tratraweb:8000
     labels:
       - traefik.enable=true
