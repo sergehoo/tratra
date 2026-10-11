@@ -27,6 +27,21 @@ Chaque attribution est journalisée (`security.legacy_role_assigned`). Poste de 
   `python manage.py staff_mfa --reset <id> --reason "…"`. Le compte réactive un appareil à sa connexion suivante. État : `python manage.py staff_mfa`.
 - Changer `MFA_ENCRYPTION_KEY` (ou `SECRET_KEY` si pas de clé dédiée) rend les secrets illisibles : chaque administrateur doit être réinitialisé puis ré-enrôler son appareil.
 
+## 2 bis. Coordonnées des comptes : qui voit quoi, et ce qui est tracé
+
+| Vue | Super Admin | Autres rôles |
+|---|---|---|
+| Listes (comptes, réservation, membres d'une organisation, parties d'un contrat, personnel) | coordonnées **complètes** | **masquées** (`+22507••••4567`, `a•••@domaine`) |
+| Fiche d'un compte (`users.view`) | complètes | complètes (support, vérifications) |
+| Pièces d'identité KYC (`kyc.review`) | accès à l'original, lu par un accès protégé | idem avec le droit KYC |
+
+Chaque consultation est **journalisée** (jamais le contenu des coordonnées) :
+- `backoffice.contacts.unmasked_view` — un Super Admin affiche des coordonnées complètes dans une liste (une trace par administrateur, module et fenêtre de 5 minutes) ;
+- `backoffice.user.contact_viewed` — ouverture d'une fiche compte (une trace par administrateur et par compte toutes les 10 minutes) ;
+- `backoffice.kyc.document_viewed` — ouverture d'une pièce KYC originale (à chaque ouverture).
+Le journal complet se consulte dans Sécurité → Journal d'audit (filtre « Action » : `backoffice.contacts`, `backoffice.user.contact`, `backoffice.kyc.document`), ou sur l'onglet « Notes internes et audit » de la fiche du compte.
+Jamais exposés, quel que soit le rôle : mots de passe, jetons, clés privées, jetons d'appareil, références de prestataire de paiement, contenu des messages.
+
 ## 3. Ordre de mise en service
 
 1. Migrations (`backoffice` 0003 : nouvelle table `backoffice_staffmfa`, non destructive).
