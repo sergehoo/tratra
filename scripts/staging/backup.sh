@@ -36,7 +36,7 @@ fi
 
 say "3/4 Instantané des images (rollback-${TS})"
 : > "${DIR}/images.txt"
-for img in tratra-backend tratra-frontend; do
+for img in tratra-backend tratra-frontend tratra-minio; do
   tag="$(envval IMAGE_TAG)"; tag="${tag:-staging}"
   if docker image inspect "${img}:${tag}" >/dev/null 2>&1; then
     docker tag "${img}:${tag}" "${img}:rollback-${TS}"

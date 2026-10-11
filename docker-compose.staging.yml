@@ -7,6 +7,8 @@
 #   Secrets         : aucun dans ce fichier. Valeurs dans .env (copie de .env.staging.example, jamais versionnée) ;
 #                     compte de service Firebase dans ./secrets/ (jamais versionné, jamais dans l'image).
 #
+#   Traefik         : résolveur ACME = TRAEFIK_CERTRESOLVER (défaut « lets », comme la production). Dokploy : « letsencrypt » + PROXY_NETWORK=dokploy-network.
+#
 # Commandes : voir docs/deploiement-staging.md   (DC="docker compose -f docker-compose.staging.yml")
 
 name: tratra-staging
@@ -63,8 +65,12 @@ services:
     restart: unless-stopped
 
   # --- MinIO : stockage objet STAGING (média + KYC privé), distinct de la production --------------------------------
+  # MinIO n'est plus publié sur Docker Hub / quay.io (« pull access denied ») : l'image est CONSTRUITE depuis les sources officielles aux
+  # mêmes versions épinglées (docker/minio/Dockerfile) ; le client `mc` est dans la même image.
   minio-stg:
-    image: minio/minio:RELEASE.2025-02-18T16-25-55Z
+    image: tratra-minio:${IMAGE_TAG:-staging}
+    build:
+      context: ./docker/minio
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
@@ -78,18 +84,19 @@ services:
       - traefik.docker.network=${PROXY_NETWORK:-proxy}
       - traefik.http.routers.tratra-stg-minio-api.rule=Host(`${MINIO_API_HOST}`)
       - traefik.http.routers.tratra-stg-minio-api.entrypoints=websecure
-      - traefik.http.routers.tratra-stg-minio-api.tls.certresolver=lets
+      - traefik.http.routers.tratra-stg-minio-api.tls.certresolver=${TRAEFIK_CERTRESOLVER:-lets}
       - traefik.http.routers.tratra-stg-minio-api.service=tratra-stg-minio-api
       - traefik.http.services.tratra-stg-minio-api.loadbalancer.server.port=9000
       - traefik.http.routers.tratra-stg-minio-console.rule=Host(`${MINIO_CONSOLE_HOST}`)
       - traefik.http.routers.tratra-stg-minio-console.entrypoints=websecure
-      - traefik.http.routers.tratra-stg-minio-console.tls.certresolver=lets
+      - traefik.http.routers.tratra-stg-minio-console.tls.certresolver=${TRAEFIK_CERTRESOLVER:-lets}
       - traefik.http.routers.tratra-stg-minio-console.service=tratra-stg-minio-console
       - traefik.http.services.tratra-stg-minio-console.loadbalancer.server.port=9001
 
   # Crée les buckets média et KYC privé (aucune politique anonyme : URL signées uniquement).
   minio-init:
-    image: minio/mc:RELEASE.2025-02-21T16-00-46Z
+    image: tratra-minio:${IMAGE_TAG:-staging}
+    pull_policy: never          # construite par minio-stg (même tag)
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
@@ -147,7 +154,7 @@ services:
       - traefik.docker.network=${PROXY_NETWORK:-proxy}
       - traefik.http.routers.tratra-stg-api.rule=Host(`${tratraweb_HOST}`)
       - traefik.http.routers.tratra-stg-api.entrypoints=websecure
-      - traefik.http.routers.tratra-stg-api.tls.certresolver=lets
+      - traefik.http.routers.tratra-stg-api.tls.certresolver=${TRAEFIK_CERTRESOLVER:-lets}
       - traefik.http.routers.tratra-stg-api.middlewares=tratra-stg-sec@docker,tratra-stg-compress@docker,tratra-stg-rl@docker,tratra-stg-noindex@docker
       - traefik.http.routers.tratra-stg-api.service=tratra-stg-api-svc
       - traefik.http.services.tratra-stg-api-svc.loadbalancer.server.port=8000
@@ -190,7 +197,7 @@ services:
       - traefik.docker.network=${PROXY_NETWORK:-proxy}
       - traefik.http.routers.tratra-stg-front.rule=Host(`${FRONTEND_HOST}`)
       - traefik.http.routers.tratra-stg-front.entrypoints=websecure
-      - traefik.http.routers.tratra-stg-front.tls.certresolver=lets
+      - traefik.http.routers.tratra-stg-front.tls.certresolver=${TRAEFIK_CERTRESOLVER:-lets}
       - traefik.http.routers.tratra-stg-front.middlewares=tratra-stg-noindex@docker
       - traefik.http.routers.tratra-stg-front.service=tratra-stg-front-svc
       - traefik.http.services.tratra-stg-front-svc.loadbalancer.server.port=3000
@@ -237,7 +244,7 @@ services:
       - traefik.docker.network=${PROXY_NETWORK:-proxy}
       - traefik.http.routers.tratra-stg-adminer.rule=Host(`${ADMINER_HOST}`)
       - traefik.http.routers.tratra-stg-adminer.entrypoints=websecure
-      - traefik.http.routers.tratra-stg-adminer.tls.certresolver=lets
+      - traefik.http.routers.tratra-stg-adminer.tls.certresolver=${TRAEFIK_CERTRESOLVER:-lets}
       - traefik.http.routers.tratra-stg-adminer.middlewares=tratra-stg-adminer-auth@docker,tratra-stg-noindex@docker
       - traefik.http.routers.tratra-stg-adminer.service=tratra-stg-adminer-svc
       - traefik.http.services.tratra-stg-adminer-svc.loadbalancer.server.port=8080

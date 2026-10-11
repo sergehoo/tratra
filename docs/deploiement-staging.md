@@ -29,6 +29,19 @@ décrit pas un hôte de staging.
 4. **CI** : le contrôle « Production settings check » échouait déjà (SMS) ; variables ajoutées (`PUBLIC_WEB_URL`, `SMS_BACKEND`, `AT_*`).
 5. `asgi.py` n'attache la pile WebSocket qu'en `try/except` silencieux : un import cassé laisserait l'HTTP fonctionner sans WebSocket.
    `verify.sh` contrôle `ASGI=http,websocket` et le refus 403 sans billet.
+6. **L'image API ne se construisait plus** : `python:3.12-bullseye` (Debian 11) n'est plus maintenue ; son miroir de sécurité répond 404 aux `apt-get install`
+   (constaté le 10 oct. 2026). Corrigé : `python:3.12-bookworm` (+ test `test_images_are_built_on_a_supported_debian_release`).
+   **Le compose de production utilise le même Dockerfile** : toute reconstruction d'image y échouait aussi.
+7. **MinIO n'est plus téléchargeable** : `minio/minio` et `minio/mc` (Docker Hub) et `quay.io/minio/*` répondent « pull access denied » (distribution communautaire
+   passée aux sources seules). Un serveur neuf ou la CI ne pouvaient plus démarrer la pile. Corrigé pour le staging : `docker/minio/Dockerfile` construit les MÊMES versions
+   épinglées depuis les sources (`go install`, intégrité vérifiée par `sum.golang.org`) ; serveur et client `mc` dans une image `tratra-minio`. ⚠️ Le compose de
+   **production** référence toujours `minio/minio:RELEASE.2025-02-18…` : il ne tourne que parce que l'image est en cache sur le serveur ; à migrer avant toute
+   reconstruction ou nouveau serveur (décision : image construite comme ici, ou autre stockage S3).
+8. **`makemigrations --check` échouait dans l'image** : l'application inutilisée `django-push-notifications` (migrations en `AutoField`, projet en `BigAutoField`) faisait
+   détecter un changement à écrire « dans le paquet installé ». Retirée (le push passe par `handy/push.py`, FCM v1).
+9. **Faux échecs de `verify.sh`** : `cmd | grep -q` sous `pipefail` (SIGPIPE) et vérifications lancées avant la fin du démarrage du worker/frontend. Corrigé (sorties capturées,
+   `wait_stack` dans `deploy.sh` et `rollback.sh`).
+10. **Traefik < 3.6 incompatible avec Docker ≥ 29** (API minimale 1.40) : le fournisseur Docker échoue (« Error response from daemon »). Utiliser Traefik ≥ 3.6 si le serveur a Docker 29.
 
 ## 1. Pré-requis serveur (une fois)
 
@@ -113,6 +126,8 @@ onglet *Environment* : coller le contenu de `.env.staging.example` complété (D
 
 ## 7. Vérification
 
+Avant le serveur : répéter toute la procédure en local (`scripts/staging/rehearsal.sh up|admins|recette|drill|down`, voir `docs/pilote.md`).
+
 ```bash
 scripts/staging/verify.sh                                   # conteneurs, TLS, 19 routes, WebSocket, ASGI, migrations, Celery/Beat (CHAQUE tâche planifiée, lue dans les settings), Redis, MinIO, FCM
 python3 scripts/staging/ws_check.py --api https://api-staging.example.com/handy          # WebSocket : 403 sans billet
@@ -147,7 +162,7 @@ $DC exec tratraweb-stg python manage.py migrate handy 0016        # dernier éta
 
 ## 9. Migrations
 
-34 migrations par rapport à `origin/main` : `handy` 0017→0039 (23), `backoffice` 0001–0003, `business` 0001–0002, `trust` 0001–0002, `announcements` 0001,
+35 migrations par rapport à `origin/main` : `handy` 0017→0040 (24), `backoffice` 0001–0003, `business` 0001–0002, `trust` 0001–0002, `announcements` 0001,
 `continuity` 0001, `engagements` 0001, `live` 0001. Seules deux opérations destructives existent, toutes deux HISTORIQUES et déjà déployées
 (`handy` 0014 `RemoveField deposit_balance`, 0015 `RenameField related_id`) ; aucune des 34 nouvelles n'en contient. Données : plans d'abonnement
 (0026), nettoyage des fonctionnalités de plan (0028), rattachement des entreprises (`business` 0002), catégorie des notifications (0036).
@@ -192,16 +207,20 @@ docker compose -p tratra-staging -f docker-compose.staging.yml down            #
 docker compose -p tratra-staging -f docker-compose.staging.yml down -v         # supprime AUSSI les données du staging (jamais ailleurs)
 ```
 
-## Ce qui a été vérifié (poste de développement, sans Docker : le démon n'est pas lancé)
+## Ce qui a été vérifié
 
-- `docker compose config` : le compose staging se rend sans erreur avec `.env.staging.example` (profil `tools` exclu par défaut).
-- Réglages de production chargés avec les valeurs du gabarit : `check --deploy` sans erreur, `ASGI = http, websocket`, `/healthz` 200 avec l'hôte API + `X-Forwarded-Proto`.
-- 21 routes sondées sous réglages de production (statuts attendus dans `verify.sh`) ; WebSocket réel : 403 sans billet, 101 + `state` + `pong` avec billet.
-- Migrations : voir § 9. Tests : `handy/test_deploy_config.py` (file Celery, collisions Traefik, variables documentées, secrets hors Git/image, `PUBLIC_WEB_URL`).
-- Celery : `celery_check` + `handy/test_celery_wiring.py` (chaque tâche planifiée existe, cadence valide, file écoutée par le worker des deux compose). Scripts `scripts/staging/*.sh` : `bash -n` OK.
-- Appareil Android réel (Galaxy S10+, Android 12, copie de recette `com.tratra.recette`, pile jetable supprimée ensuite) : contrat d'engagement, **PDF lu dans l'application**,
-  copie temporaire du PDF présente pendant la lecture puis **supprimée** à la fermeture ET, si l'application est tuée pendant la lecture, au démarrage suivant ;
-  session conservée après arrêt brutal, activité reprise ; sans serveur au démarrage, la dernière activité connue reste accessible, signalée « hors ligne, non vérifié » ;
-  retour du serveur : resynchronisation automatique de l'activité, « Réessayer » recharge le tableau de bord.
-- **Non exécuté** : `docker build`, démarrage de la pile, certificats Let's Encrypt, Firebase réel (aucun projet Firebase de Tratra), SMS réel, appels réels aux prestataires de paiement
-  (aucun identifiant), passage Wi-Fi → données mobiles, build iOS natif.
+**Répétition complète sur un poste (Docker Desktop, 10–11 oct. 2026)** — `scripts/staging/rehearsal.sh` : images API (Debian bookworm), frontend et MinIO (source) construites ;
+pile démarrée avec les VRAIS scripts (`deploy.sh` → `verify.sh`) derrière Traefik v3.6 en HTTPS (AC locale jetable, TLS **vérifié**, aucun `-k`) :
+- `verify.sh` : **0 anomalie** (conteneurs sains, TLS, 21 routes, WebSocket refusé sans billet, ASGI http+websocket, PostGIS, 148 migrations, Redis, 7 tâches du beat + registre du worker).
+- `rehearsal.sh admins` : personnel sans rôle → préflight **bloquant** → attribution des rôles → la MFA est **exigée** par l'API (403 `mfa_enrollment_required`) → activation →
+  `security_preflight --strict --require-mfa` **vert**.
+- `rehearsal.sh recette` : la recette HTTP du pilote, **47/47** (réservation → mission → messages → espèces avec reçu stocké dans MinIO → avis, puis contrat longue durée avec PDF).
+- `rehearsal.sh drill` : sauvegarde → modification marquée → `rollback.sh` (base + images + relance + `verify.sh`) → marqueur disparu, pile saine.
+- Redéploiements successifs (sauvegarde d'une base qui tourne, `up -d` idempotent) sans anomalie.
+
+Autres contrôles : `docker compose config` ; réglages de production avec les valeurs du gabarit ; `handy/test_deploy_config.py` (file Celery, collisions Traefik, variables **toutes** documentées,
+secrets hors Git/image, `PUBLIC_WEB_URL`, image de base supportée, MinIO non téléchargeable, TLS S3) ; `celery_check` ; cliquet de migrations ; Android réel (copie de recette) pour PDF,
+purge, reprise et hors-ligne.
+
+**Non exécuté** : Let's Encrypt réel (nom de domaine public), Firebase réel (aucun projet Firebase de Tratra), SMS réel, appels réels aux prestataires de paiement, passage Wi-Fi → données
+mobiles, build iOS natif, Dokploy lui-même (le compose y est compatible : `TRAEFIK_CERTRESOLVER`, `PROXY_NETWORK`).

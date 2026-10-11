@@ -11,7 +11,9 @@ ERR=0; WARNS=0
 pass() { ok "$*"; }
 fail() { printf '%s[ERR ]%s %s\n' "$R" "$N" "$*" >&2; ERR=$((ERR + 1)); }
 note() { warn "$*"; WARNS=$((WARNS + 1)); }
-code() { curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$@" || echo 000; }
+# STAGING_CURL_OPTS=-k : UNIQUEMENT pour la répétition locale (certificat auto-signé de Traefik) ; jamais sur un vrai staging.
+CURLX=(${STAGING_CURL_OPTS:-})
+code() { curl -s "${CURLX[@]}" -o /dev/null -w '%{http_code}' --max-time 20 "$@" || echo 000; }
 
 say "1. Conteneurs"
 for svc in tratradb redis minio-stg tratraweb-stg worker beat tratrafrontend-stg; do
@@ -21,10 +23,10 @@ done
 
 say "2. HTTP / TLS (${API_HOST}, ${FRONT_HOST})"
 [ "$(code "${API}/healthz")" = "200" ] && pass "GET /healthz 200 (certificat TLS valide)" || fail "GET /healthz"
-ready="$(curl -s --max-time 20 "${API}/readyz" || true)"
+ready="$(curl -s "${CURLX[@]}" --max-time 20 "${API}/readyz" || true)"
 echo "$ready" | grep -q '"ready"' && pass "GET /readyz : base + Redis joignables" || fail "GET /readyz : ${ready:-pas de réponse}"
 [ "$(code "${FRONT}/")" = "200" ] && pass "frontend ${FRONT}/ 200" || fail "frontend ${FRONT}/"
-loc="$(curl -sI --max-time 20 "http://${API_HOST}/healthz" | tr -d '\r' | sed -n 's/^[Ll]ocation: //p')"
+loc="$(curl -sI "${CURLX[@]}" --max-time 20 "http://${API_HOST}/healthz" | tr -d '\r' | sed -n 's/^[Ll]ocation: //p')"
 case "$loc" in https://*) pass "HTTP → HTTPS ($loc)" ;; *) note "pas de redirection HTTP→HTTPS visible (dépend de l'entrypoint web de Traefik)" ;; esac
 
 say "3. Routes API (sans authentification : le code attendu prouve que la route existe ET qu'elle est protégée)"
@@ -55,7 +57,7 @@ route GET  /admin/login/ 200
 
 say "4. WebSocket (refus sans billet = pile ASGI attachée et routée par Traefik)"
 if command -v python3 >/dev/null; then
-  python3 "$STAGING_SCRIPTS/ws_check.py" --api "${API}/handy" && pass "ws_check : /ws/live/ et /ws/chat/ répondent 403 sans billet" || fail "ws_check (voir ci-dessus)"
+  python3 "$STAGING_SCRIPTS/ws_check.py" --api "${API}/handy" ${STAGING_WS_OPTS:-} && pass "ws_check : /ws/live/ et /ws/chat/ répondent 403 sans billet" || fail "ws_check (voir ci-dessus)"
 else
   w="$(code --http1.1 -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' "${API}/ws/live/1/")"
   [ "$w" = "403" ] && pass "WS /ws/live/1/ sans billet -> 403" || fail "WS /ws/live/1/ -> $w (attendu 403)"
@@ -119,13 +121,16 @@ done
 say "6. Migrations et Celery"
 dc exec -T tratraweb-stg python manage.py migrate --check >/dev/null 2>&1 && pass "migrate --check : aucune migration en attente" || fail "migrations en attente"
 dc exec -T tratraweb-stg python manage.py makemigrations --check --dry-run >/dev/null 2>&1 && pass "makemigrations --check : modèles et migrations alignés" || fail "makemigrations --check"
-dc exec -T worker celery -A tratra inspect ping --timeout 8 2>/dev/null | grep -q pong && pass "worker Celery : pong" || fail "worker Celery : pas de réponse"
-dc exec -T worker celery -A tratra inspect active_queues --timeout 8 2>/dev/null | grep -q "'name': 'default'\|\"name\": \"default\"\|name: default" && pass "worker : écoute la file default" || fail "worker : file default non écoutée"
+# Sorties capturées PUIS testées (jamais `cmd | grep -q` sous « pipefail » : grep sort au premier succès, cmd reçoit SIGPIPE et le tube « échoue »).
+ping="$(dc exec -T worker celery -A tratra inspect ping --timeout 8 2>/dev/null || true)"
+[[ "$ping" == *pong* ]] && pass "worker Celery : pong" || fail "worker Celery : pas de réponse"
+queues="$(dc exec -T worker celery -A tratra inspect active_queues --timeout 8 2>/dev/null || true)"
+[[ "$queues" == *"'name': 'default'"* || "$queues" == *'"name": "default"'* || "$queues" == *"name: default"* || "$queues" == *"* default"* ]] && pass "worker : écoute la file default" || fail "worker : file default non écoutée"
 dc exec -T tratraweb-stg python manage.py celery_check --db >/dev/null 2>&1 && pass "celery_check : noms, cadences, files écoutées et base du beat cohérents" || fail "celery_check --db (relancer sans >/dev/null pour le détail)"
 registered="$(dc exec -T worker celery -A tratra inspect registered --timeout 8 2>/dev/null || true)"
-printf '%s' "$registered" | grep -q "handy.tasks.send_push" && pass "worker : tâche handy.tasks.send_push enregistrée" || fail "worker : send_push absente"
+[[ "$registered" == *handy.tasks.send_push* ]] && pass "worker : tâche handy.tasks.send_push enregistrée" || fail "worker : send_push absente"
 for t in $beat_tasks; do
-  printf '%s' "$registered" | grep -q "$t" && pass "worker : ${t} enregistrée" || fail "worker : ${t} absente du registre"
+  [[ "$registered" == *"$t"* ]] && pass "worker : ${t} enregistrée" || fail "worker : ${t} absente du registre"
 done
 
 say "Résultat : ${ERR} anomalie(s), ${WARNS} avertissement(s)"

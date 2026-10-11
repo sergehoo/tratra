@@ -220,3 +220,30 @@ def test_images_are_built_on_a_supported_debian_release():
         for line in (ROOT / name).read_text(encoding="utf-8").splitlines():
             if line.strip().upper().startswith("FROM "):
                 assert not re.search(r"bullseye|buster|stretch|jessie", line, re.I), f"{name} : image de base en fin de vie — {line.strip()}"
+
+
+def test_staging_does_not_depend_on_minio_images_that_can_no_longer_be_pulled():
+    """MinIO n'est plus publié sur Docker Hub ni quay.io (« pull access denied ») : le staging construit MinIO depuis les sources aux versions
+    épinglées. Une référence à `minio/minio` ou `minio/mc` casserait tout serveur neuf (le compose de production, lui, ne démarre que sur un
+    serveur qui a encore l'image en cache — voir docs/pilote.md)."""
+    staging = (ROOT / "docker-compose.staging.yml").read_text(encoding="utf-8")
+    assert not re.search(r"image:\s*(quay\.io/)?minio/(minio|mc)\b", staging)
+    dockerfile = (ROOT / "docker/minio/Dockerfile").read_text(encoding="utf-8")
+    assert re.search(r"ARG MINIO_TAG=RELEASE\.\d{4}-\d\d-\d\dT[\d-]+Z", dockerfile) and re.search(r"ARG MC_TAG=RELEASE\.", dockerfile)
+    assert "go install" in dockerfile and "sum.golang.org" in dockerfile      # intégrité des sources vérifiée par la base de sommes de contrôle de Go
+
+
+_S3_CODE = ("import django; django.setup(); from django.conf import settings; print('VERIFY=%r' % (settings.AWS_S3_VERIFY,))")
+_S3_ENV = dict(MINIO_ENABLED="True", AWS_ACCESS_KEY_ID="k", AWS_SECRET_ACCESS_KEY="s", AWS_STORAGE_BUCKET_NAME="b", KYC_STORAGE_BUCKET_NAME="k", AWS_S3_ENDPOINT_URL="https://s3.example.test",
+               PUBLIC_WEB_URL="https://app.example.test")
+
+
+@pytest.mark.parametrize("raw,expected", [("True", "True"), ("", "False"), ("/run/ca.pem", "'/run/ca.pem'")])
+def test_s3_tls_verification_accepts_true_or_a_ca_bundle_path(raw, expected):
+    """`AWS_S3_VERIFY` peut désigner un lot d'AC (PKI interne) : django-storages le transmet à boto3. `False`/vide est refusé en production."""
+    r = _load_prod_settings(code=_S3_CODE, AWS_S3_VERIFY=raw, **_S3_ENV)
+    if expected == "False":
+        assert r.returncode != 0 and "AWS_S3_VERIFY must remain enabled" in r.stderr
+    else:
+        assert r.returncode == 0, r.stderr[-400:]
+        assert f"VERIFY={expected}" in r.stdout

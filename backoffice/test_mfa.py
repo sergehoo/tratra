@@ -7,6 +7,7 @@ import pytest
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
 from django.test import Client, override_settings
+from django.utils import timezone
 from django_otp.oath import TOTP
 from rest_framework.test import APIClient
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -243,6 +244,15 @@ def test_security_preflight_lists_blockers_and_strict_mode_fails_until_they_are_
     legacy.groups.add(Group.objects.get(name=rbac.role_group_name("ops")))
     staff("pf_super2", role="super_admin")
     assert "Aucun bloquant" in _run("security_preflight", strict=True)
+    # Contrôle final avant le pilote : sans `--require-mfa` l'absence de MFA n'est qu'une information (elle sera demandée à la connexion) ;
+    # avec, chaque compte actif DOIT l'avoir activée.
+    assert "Sans double authentification" in _run("security_preflight", strict=True)
+    with pytest.raises(CommandError):
+        _run("security_preflight", strict=True, require_mfa=True)
+    for account in User.objects.filter(is_staff=True):
+        mfa.begin_enrollment(account)
+        StaffMFA.objects.filter(user=account).update(confirmed_at=timezone.now())
+    assert "Aucun bloquant" in _run("security_preflight", strict=True, require_mfa=True)
 
 
 def test_deploy_check_warns_when_mfa_is_off_or_the_legacy_bypass_is_open(settings):

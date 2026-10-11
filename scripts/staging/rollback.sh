@@ -24,7 +24,7 @@ else
 fi
 
 # 2) Images précédentes
-for img in tratra-backend tratra-frontend; do
+for img in tratra-backend tratra-frontend tratra-minio; do
   if docker image inspect "${img}:rollback-${TS}" >/dev/null 2>&1; then
     docker tag "${img}:rollback-${TS}" "${img}:${TAG}"
     ok "${img}:${TAG} <- ${img}:rollback-${TS}"
@@ -43,6 +43,7 @@ for _ in $(seq 1 120); do
   sleep 5
 done
 [ "$(health tratraweb-stg)" = "healthy" ] || die "l'API n'est pas saine après rollback : voir « docker compose -p ${PROJECT} -f ${COMPOSE_FILE} logs tratraweb-stg »"
+wait_stack
 
 "$STAGING_SCRIPTS/verify.sh"
 ok "rollback terminé"

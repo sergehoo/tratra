@@ -22,11 +22,15 @@ fail() {
   exit 1
 }
 
-say "2/5 Construction des images (backend + frontend)"
-dc build --pull tratraweb-stg tratrafrontend-stg || fail "construction"
+say "2/5 Construction des images (backend, frontend, MinIO)"
+if [ "${STAGING_SKIP_BUILD:-0}" = "1" ]; then
+  say "STAGING_SKIP_BUILD=1 : images déjà construites (CI, Dokploy ou répétition locale) — étape ignorée"
+else
+  dc build --pull tratraweb-stg tratrafrontend-stg minio-stg || fail "construction"
+fi
 
 say "3/5 Démarrage (migrations appliquées par l'entrypoint de l'API)"
-dc up -d --remove-orphans || fail "démarrage"
+if [ "${STAGING_SKIP_BUILD:-0}" = "1" ]; then dc up -d --no-build --remove-orphans || fail "démarrage"; else dc up -d --remove-orphans || fail "démarrage"; fi
 
 say "4/5 Attente de la santé de l'API (jusqu'à 10 min : migrations, collectstatic)"
 for _ in $(seq 1 120); do
@@ -34,6 +38,8 @@ for _ in $(seq 1 120); do
   sleep 5
 done
 [ "$(health tratraweb-stg)" = "healthy" ] || fail "API non saine après 10 min"
+say "    … puis worker Celery, frontend et beat"
+( wait_stack ) || fail "worker, frontend ou beat non sains"
 
 say "5/5 Vérifications"
 "$HERE/verify.sh" || fail "vérifications"

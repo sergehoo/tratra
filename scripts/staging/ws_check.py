@@ -43,12 +43,22 @@ class Conn:
             pass
 
 
+INSECURE = False      # --insecure : répétition locale (certificat auto-signé) UNIQUEMENT
+
+
+def _context():
+    ctx = ssl.create_default_context()
+    if INSECURE:
+        ctx.check_hostname, ctx.verify_mode = False, ssl.CERT_NONE
+    return ctx
+
+
 def _open(url, timeout=10):
     u = urlparse(url)
     tls = u.scheme in ("wss", "https")
     host, port = u.hostname, u.port or (443 if tls else 80)
     raw = socket.create_connection((host, port), timeout=timeout)
-    sock = ssl.create_default_context().wrap_socket(raw, server_hostname=host) if tls else raw
+    sock = _context().wrap_socket(raw, server_hostname=host) if tls else raw
     return sock, u
 
 
@@ -123,7 +133,10 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--api", required=True, help="base de l'API, ex. https://api-staging.example.com/handy")
     ap.add_argument("--booking", type=int, help="identifiant d'une réservation dont le jeton (TRATRA_TOKEN) est participant")
+    ap.add_argument("--insecure", action="store_true", help="n'authentifie pas le certificat TLS (répétition locale UNIQUEMENT)")
     args = ap.parse_args()
+    global INSECURE
+    INSECURE = args.insecure
 
     base = args.api.rstrip("/")
     root = urlparse(base)
@@ -150,7 +163,7 @@ def main():
         req = urllib.request.Request(f"{base}/bookings/{args.booking}/live/ticket/", data=b"{}", method="POST",
                                      headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"})
         try:
-            with urllib.request.urlopen(req, timeout=15) as r:
+            with urllib.request.urlopen(req, timeout=15, context=_context() if req.full_url.startswith('https') else None) as r:
                 ticket = json.load(r)
         except urllib.error.HTTPError as e:
             print(f"[ERR] billet refusé : HTTP {e.code}")

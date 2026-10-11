@@ -54,3 +54,14 @@ def test_the_reviewed_list_only_names_operations_that_still_exist():
 @pytest.mark.django_db
 def test_models_and_migrations_are_aligned():
     call_command("makemigrations", "--check", "--dry-run", verbosity=0)
+
+
+def test_no_unused_third_party_app_with_models_is_installed():
+    """`django-push-notifications` était installée sans être utilisée (le push passe par `handy/push.py`, FCM v1) : ses migrations, écrites pour un
+    autre type de clé primaire, faisaient détecter à `makemigrations --check` un changement à écrire DANS le paquet installé — faux positif qui
+    faisait échouer `scripts/staging/verify.sh` dans l'image Docker. Une application installée doit être utilisée ou retirée."""
+    from django.apps import apps
+    from django.conf import settings
+
+    assert "push_notifications" not in settings.INSTALLED_APPS
+    assert not [app.label for app in apps.get_app_configs() if app.label == "push_notifications"]

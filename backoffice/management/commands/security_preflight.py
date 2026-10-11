@@ -2,6 +2,7 @@
 
     python manage.py security_preflight            # rapport
     python manage.py security_preflight --strict   # code de sortie 1 s'il reste un bloquant
+    python manage.py security_preflight --strict --require-mfa   # + chaque compte actif DOIT avoir activé sa double authentification (contrôle final avant le pilote)
 
 Bloquants : comptes du personnel actifs SANS rôle (ils perdraient tout accès « personnel » de l'ancienne API),
 moins de 2 super administrateurs actifs (verrouillage définitif possible si l'un perd son appareil).
@@ -20,6 +21,7 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument("--strict", action="store_true", help="Code de sortie 1 s'il reste un bloquant.")
+        parser.add_argument("--require-mfa", action="store_true", help="Un compte sans double authentification activée devient un bloquant (contrôle final).")
 
     def handle(self, *args, **opts):
         User = get_user_model()
@@ -42,6 +44,8 @@ class Command(BaseCommand):
             blockers.append(f"{supers} super administrateur actif : en prévoir au moins 2 (récupération en cas d'appareil MFA perdu).")
         if no_mfa:
             self.stdout.write(f"Sans double authentification activée ({len(no_mfa)}) : " + ", ".join(f"#{u.pk}" for u in no_mfa) + " — à activer à la prochaine connexion.")
+            if opts["require_mfa"]:
+                blockers.append(f"{len(no_mfa)} compte(s) sans double authentification activée : " + ", ".join(f"#{u.pk}" for u in no_mfa) + " → chacun se connecte au Back-Office et l'active.")
         if blockers:
             self.stdout.write(self.style.ERROR("Bloquants :"))
             for b in blockers:

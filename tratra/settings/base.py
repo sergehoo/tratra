@@ -112,7 +112,6 @@ INSTALLED_APPS = [
     'simple_history',
     'actstream',
     'channels',
-    'push_notifications',
     'djstripe',
     'django_filters',
     'rest_framework',
@@ -360,7 +359,10 @@ if MINIO_ENABLED:
     # URL settings
     AWS_S3_ADDRESSING_STYLE = 'path'
     AWS_S3_SIGNATURE_VERSION = 's3v4'
-    AWS_S3_VERIFY = env_bool('AWS_S3_VERIFY', True)
+    # Vérification TLS du stockage objet : vrai (défaut), faux (refusé en production) ou CHEMIN d'un lot d'autorités de certification
+    # (PKI interne, répétition locale) — django-storages le transmet tel quel à boto3 (un `verify=True` explicite ignorerait AWS_CA_BUNDLE).
+    _s3_verify = str(config('AWS_S3_VERIFY', default='True')).strip()
+    AWS_S3_VERIFY = (_s3_verify.lower() in ('1', 'true', 'yes', 'on')) if _s3_verify.lower() in ('1', 'true', 'yes', 'on', '0', 'false', 'no', 'off', '') else _s3_verify
 
     # Keep all user uploads private by default.  A custom S3 domain bypasses
     # django-storages' presigning path, so it is deliberately unset here.
