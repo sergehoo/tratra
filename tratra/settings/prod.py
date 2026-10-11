@@ -1,5 +1,6 @@
 # settings/prod.py
 import os
+import re
 
 from decouple import config
 from django.core.exceptions import ImproperlyConfigured
@@ -46,20 +47,39 @@ _require_production_setting('PUBLIC_WEB_URL')
 if not PUBLIC_WEB_URL.lower().startswith('https://'):
     raise ImproperlyConfigured('PUBLIC_WEB_URL must use HTTPS in production.')
 
-# SMS (OTP) : en production, uniquement un fournisseur RÉEL avec ses identifiants — jamais le
-# journal « console » ni la boîte « locmem » (voir handy/sms.py).
-SMS_BACKEND = config('SMS_BACKEND', default='').strip().lower()
+# SMS (OTP) : en production, uniquement des fournisseurs RÉELS avec leurs identifiants — jamais le
+# journal « console » ni la boîte « locmem » (voir handy/sms.py). `SMS_BACKEND` accepte une liste ordonnée
+# (« twilio,orange ») : le suivant prend la relève quand le précédent échoue ; TOUS doivent être configurés.
+SMS_PROVIDERS = []
+for _item in re.split(r'[,;\s]+', config('SMS_BACKEND', default='').strip().lower()):
+    if _item and _item not in SMS_PROVIDERS:
+        SMS_PROVIDERS.append(_item)
+SMS_BACKEND = ','.join(SMS_PROVIDERS)
 _SMS_REQUIRED = {
     'twilio': ('TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN'),
+    'orange': (),
     'africastalking': ('AT_USERNAME', 'AT_API_KEY'),
 }
-if SMS_BACKEND not in _SMS_REQUIRED:
-    raise ImproperlyConfigured('SMS_BACKEND must be "twilio" or "africastalking" in production.')
-for _name in _SMS_REQUIRED[SMS_BACKEND]:
-    _require_production_setting(_name)
-if SMS_BACKEND == 'twilio' and not any(config(n, default='').strip() for n in (
+if not SMS_PROVIDERS or any(_provider not in _SMS_REQUIRED for _provider in SMS_PROVIDERS):
+    raise ImproperlyConfigured('SMS_BACKEND must be "twilio", "orange" or "africastalking" in production '
+                               '(or an ordered list such as "twilio,orange" for automatic failover).')
+for _provider in SMS_PROVIDERS:
+    for _name in _SMS_REQUIRED[_provider]:
+        _require_production_setting(_name)
+if 'twilio' in SMS_PROVIDERS and not any(config(n, default='').strip() for n in (
         'TWILIO_MESSAGING_SERVICE_SID', 'TWILIO_FROM', 'TWILIO_PHONE_NUMBER')):
     raise ImproperlyConfigured('TWILIO_MESSAGING_SERVICE_SID or TWILIO_FROM is required in production.')
+if 'orange' in SMS_PROVIDERS and not (
+        config('ORANGE_SMS_AUTHORIZATION_HEADER', default='').strip()
+        or all(config(n, default='').strip() for n in ('ORANGE_SMS_CLIENT_ID', 'ORANGE_SMS_CLIENT_SECRET'))):
+    raise ImproperlyConfigured('ORANGE_SMS_CLIENT_ID and ORANGE_SMS_CLIENT_SECRET '
+                               '(or ORANGE_SMS_AUTHORIZATION_HEADER) are required in production.')
+if 'orange' in SMS_PROVIDERS:
+    # Même règle que handy.sms.orange_sender : vide = 2250000 ; un numéro illisible rendrait TOUTE la chaîne inutilisable (Twilio compris).
+    _orange_sender = re.sub(r'\D', '', re.sub(r'^(?:tel(?::|%3A))?\s*(?:\+|%2B)?', '',
+                                              config('ORANGE_SMS_SENDER', default='').strip() or '2250000', flags=re.I))
+    if not re.fullmatch(r'\d{5,15}', _orange_sender):
+        raise ImproperlyConfigured('ORANGE_SMS_SENDER must be the Orange country sender number (digits, e.g. 2250000).')
 
 # Double authentification des comptes d'administration : OBLIGATOIRE en production (Back-Office, /admin/, droits « personnel » de
 # l'ancienne API). La désactiver exige BACKOFFICE_MFA_REQUIRED=0 explicite ; `check --deploy` le signale alors par un avertissement.

@@ -38,7 +38,7 @@ gabarit** (test `test_every_setting_read_from_the_environment_is_documented…`)
 | **Domaines** | `tratraweb_HOST`, `FRONTEND_HOST`, `MINIO_*_HOST`, `ALLOWED_HOSTS`, `CORS_ALLOWED_ORIGINS`, `CSRF_TRUSTED_ORIGINS`, `PUBLIC_WEB_URL`, `NEXT_PUBLIC_API_BASE`, `NEXT_PUBLIC_SITE_URL` | 👤 DNS | l'hôte de l'API contient « staging »/« stg » (garde-fou anti-production) ; tout en HTTPS ; `PUBLIC_WEB_URL` = frontend (QR) |
 | **Sécurité** | `SECRET_KEY`, `DB_PASSWORD`, `MFA_ENCRYPTION_KEY`, `BACKOFFICE_MFA_REQUIRED=1`, `LEGACY_STAFF_BYPASS=0`, secrets de webhook | généré | jamais de valeur de production ; MFA et fermeture du passe-droit = défauts de production |
 | **Stockage** | `MINIO_ROOT_*`, `AWS_*`, `AWS_STORAGE_BUCKET_NAME`, `KYC_STORAGE_BUCKET_NAME`, `AWS_S3_ENDPOINT_URL`, `KYC_*` | généré | buckets dédiés au staging ; KYC privé (URL signées) ; aucune politique anonyme |
-| **SMS (OTP)** | `SMS_BACKEND`, `TWILIO_*` ou `AT_*` | 👤 compte Twilio ou Africa's Talking | **l'OTP n'est jamais contourné** ; un compte d'essai n'envoie qu'aux numéros vérifiés |
+| **SMS (OTP)** | `SMS_BACKEND` (ex. `twilio,orange` : relève automatique), `TWILIO_*`, `ORANGE_SMS_*` ou `AT_*` | 👤 compte Twilio et/ou Orange (contrat SMS actif) ou Africa's Talking | **l'OTP n'est jamais contourné** ; tous les fournisseurs listés doivent être configurés ; un compte d'essai n'envoie qu'aux numéros vérifiés |
 | **Push** | `FCM_CREDENTIALS_FILE` (`./secrets/fcm-service-account.json`), `FCM_PROJECT_ID` | 👤 projet Firebase **de Tratra** | fichier hors Git et hors image (`chmod 0400`, uid 10001) ; vide = pas de push, pas d'erreur |
 | **Paiements** | `PAYMENT_*_WEBHOOK_SECRET`, `OM_*`, `MTN_MOMO_*`, `STRIPE_*`, `PAYMENT_RETURN_URL` … | 👤 comptes marchands | **vides** tant qu'un prestataire n'est pas qualifié (`docs/paiements.md`) : la méthode répond « indisponible » ; espèces toujours disponibles |
 | **E-mail / suivi** | `EMAIL_*`, `SENTRY_DSN`, `ROUTING_OSRM_URL` | 👤 | facultatifs |
@@ -160,7 +160,7 @@ docker compose run --rm --no-deps --user root --entrypoint sh tratraweb -c 'chow
 0. ~~Image MinIO de production~~ : corrigée — le compose de production construit `docker/minio` comme le staging (le serveur réel avait échoué sur « pull access denied for minio/mc »).
 1. **Domaine et DNS** du staging (4 enregistrements) et accès SSH/Dokploy au serveur.
 2. **Projet Firebase de Tratra** : compte de service (`secrets/fcm-service-account.json`) et les 4 options de l'application Android (aucun identifiant n'est disponible dans le dépôt).
-3. **Fournisseur SMS** (Twilio ou Africa's Talking) : le staging refuse de démarrer sans lui ; l'OTP n'est jamais contourné.
+3. **Fournisseur SMS** (Twilio, Orange ou Africa's Talking ; `SMS_BACKEND=twilio,orange` pour la relève automatique) : le staging refuse de démarrer sans lui ; l'OTP n'est jamais contourné.
 4. **Comptes marchands** Orange Money / MTN MoMo / Stripe : seulement pour qualifier les paiements ; non nécessaires au pilote en espèces.
 5. **Administrateurs réels** : attribuer les rôles, activer la MFA, conserver les codes de secours ; `security_preflight --strict`.
 6. **KYC** des artisans de recette : approbation humaine dans le Back-Office.

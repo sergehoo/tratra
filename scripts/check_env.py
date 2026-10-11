@@ -109,16 +109,28 @@ def check(env: dict):
     elif not (base.startswith("https://") and base.rstrip("/").endswith("/handy")):
         err("NEXT_PUBLIC_API_BASE", "doit être de la forme https://<hôte API>/handy")
 
-    sms = get("SMS_BACKEND").lower()
-    needs = {"twilio": ("TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN"), "africastalking": ("AT_USERNAME", "AT_API_KEY")}
-    if sms not in needs:
-        err("SMS_BACKEND", "doit valoir « twilio » ou « africastalking » (l'OTP n'est jamais contourné)")
+    providers = []
+    for item in re.split(r"[,;\s]+", get("SMS_BACKEND").lower()):
+        if item and item not in providers:
+            providers.append(item)
+    needs = {"twilio": ("TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN"), "orange": (), "africastalking": ("AT_USERNAME", "AT_API_KEY")}
+    if not providers or any(p not in needs for p in providers):
+        err("SMS_BACKEND", "doit valoir « twilio », « orange » ou « africastalking », ou une liste ordonnée (twilio,orange) pour la relève automatique (l'OTP n'est jamais contourné)")
     else:
-        for var in needs[sms]:
-            if not get(var):
-                err(var, f"absente (exigée par SMS_BACKEND={sms})")
-        if sms == "twilio" and not any(get(v) for v in ("TWILIO_MESSAGING_SERVICE_SID", "TWILIO_FROM", "TWILIO_PHONE_NUMBER")):
+        for provider in providers:
+            for var in needs[provider]:
+                if not get(var):
+                    err(var, f"absente (exigée par SMS_BACKEND={provider})")
+        if "twilio" in providers and not any(get(v) for v in ("TWILIO_MESSAGING_SERVICE_SID", "TWILIO_FROM", "TWILIO_PHONE_NUMBER")):
             err("TWILIO_MESSAGING_SERVICE_SID", "ou TWILIO_FROM : l'une des deux est exigée avec Twilio")
+        if "orange" in providers and not (get("ORANGE_SMS_AUTHORIZATION_HEADER") or (get("ORANGE_SMS_CLIENT_ID") and get("ORANGE_SMS_CLIENT_SECRET"))):
+            err("ORANGE_SMS_CLIENT_ID", "et ORANGE_SMS_CLIENT_SECRET (ou ORANGE_SMS_AUTHORIZATION_HEADER) sont exigés avec Orange")
+        if "orange" in providers:
+            sender = re.sub(r"\D", "", re.sub(r"^(?:tel(?::|%3A))?\s*(?:\+|%2B)?", "", get("ORANGE_SMS_SENDER") or "2250000", flags=re.I))
+            if not re.fullmatch(r"\d{5,15}", sender):
+                err("ORANGE_SMS_SENDER", "doit être le numéro d'expéditeur Orange du pays, en chiffres (ex. 2250000) — sinon Orange ET le fournisseur de relève sont inutilisables")
+        if len(providers) == 1:
+            warn("SMS_BACKEND", f"un seul fournisseur ({providers[0]}) : s'il tombe, plus aucun code OTP — ex. SMS_BACKEND=twilio,orange pour une relève automatique")
 
     for var in ("DB_NAME", "DB_USER", "DB_PASSWORD", "DB_HOST"):
         if not get(var):

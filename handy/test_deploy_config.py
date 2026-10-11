@@ -397,3 +397,134 @@ def test_entrypoint_accepts_writable_or_missing_volumes_and_runs_the_check_befor
     src = (ROOT / "entrypoint.sh").read_text()
     sequence = src.split("# ---------- Run sequence ----------")[1]
     assert sequence.index("check_volumes_writable /app/staticfiles /app/media") < sequence.index("\ncollect_static")
+
+
+# ---- SMS : liste ordonnée de fournisseurs (relève Twilio → Orange) ---------------------------------------------------------
+
+_SMS_CODE = "import django; django.setup(); from django.conf import settings; print('SMS=' + settings.SMS_BACKEND)"
+_TWILIO = {"TWILIO_ACCOUNT_SID": "ACxxx", "TWILIO_AUTH_TOKEN": "tw", "TWILIO_FROM": "+1500"}
+
+
+_SMS_VARS = ("TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_FROM", "TWILIO_PHONE_NUMBER", "TWILIO_MESSAGING_SERVICE_SID",
+             "AT_USERNAME", "AT_API_KEY", "ORANGE_SMS_CLIENT_ID", "ORANGE_SMS_CLIENT_SECRET", "ORANGE_SMS_AUTHORIZATION_HEADER")
+
+
+def _sms_prod(**extra):
+    """Les réglages de production lisent aussi le `.env` du développeur (python-decouple) : on VIDE explicitement chaque variable SMS
+    (une variable présente mais vide l'emporte sur le fichier) pour que le test ne dépende jamais d'identifiants réels."""
+    return _load_prod_settings(code=_SMS_CODE, PUBLIC_WEB_URL="https://app.example.test", **{**dict.fromkeys(_SMS_VARS, ""), **extra})
+
+
+def test_production_accepts_an_ordered_provider_list_and_normalises_it():
+    r = _sms_prod(SMS_BACKEND=" Twilio , orange,twilio ", ORANGE_SMS_CLIENT_ID="cid", ORANGE_SMS_CLIENT_SECRET="sec", **_TWILIO)
+    assert r.returncode == 0, r.stderr[-400:]
+    assert r.stdout.strip().splitlines()[-1] == "SMS=twilio,orange"  # exact : aucun doublon, ordre conservé
+
+
+def test_production_accepts_orange_alone_with_either_form_of_credentials():
+    r = _sms_prod(SMS_BACKEND="orange", ORANGE_SMS_CLIENT_ID="cid", ORANGE_SMS_CLIENT_SECRET="sec")
+    assert r.returncode == 0 and "SMS=orange" in r.stdout, r.stderr[-400:]
+    r = _sms_prod(SMS_BACKEND="orange", ORANGE_SMS_AUTHORIZATION_HEADER="Basic abc")
+    assert r.returncode == 0, r.stderr[-400:]
+
+
+@pytest.mark.parametrize("extra,message", [
+    ({"SMS_BACKEND": "orange"}, "ORANGE_SMS_CLIENT_ID and ORANGE_SMS_CLIENT_SECRET"),
+    ({"SMS_BACKEND": "orange", "ORANGE_SMS_CLIENT_ID": "cid"}, "ORANGE_SMS_CLIENT_ID and ORANGE_SMS_CLIENT_SECRET"),
+    ({"SMS_BACKEND": "twilio,orange", **_TWILIO}, "ORANGE_SMS_CLIENT_ID and ORANGE_SMS_CLIENT_SECRET"),   # relève incomplète : jamais acceptée
+    ({"SMS_BACKEND": "twilio,orange", "ORANGE_SMS_CLIENT_ID": "c", "ORANGE_SMS_CLIENT_SECRET": "s"}, "TWILIO_ACCOUNT_SID"),
+    ({"SMS_BACKEND": "twilio,console", **_TWILIO}, 'SMS_BACKEND must be'),
+    ({"SMS_BACKEND": "twilio,inconnu", **_TWILIO}, 'SMS_BACKEND must be'),
+    ({"SMS_BACKEND": ",,"}, 'SMS_BACKEND must be'),
+])
+def test_production_refuses_an_incomplete_or_unknown_provider_chain(extra, message):
+    r = _sms_prod(**extra)
+    assert r.returncode != 0 and message in r.stderr
+
+
+def _check_env_run(tmp_path, capsys, env_text):
+    module = _check_env_module()
+    path = tmp_path / ".env"
+    path.write_text(env_text, encoding="utf-8")
+    code = module.main([str(path)])
+    return code, capsys.readouterr().out
+
+
+_ORANGE_VARS = "ORANGE_SMS_CLIENT_ID=orange-cid-77\nORANGE_SMS_CLIENT_SECRET=orange-secret-88\n"
+
+
+def test_check_env_accepts_a_twilio_then_orange_chain_without_the_single_provider_warning(tmp_path, capsys):
+    code, out = _check_env_run(tmp_path, capsys, _GOOD_ENV.replace("SMS_BACKEND=twilio\n", "SMS_BACKEND=twilio,orange\n") + _ORANGE_VARS)
+    assert code == 0 and "0 erreur(s)" in out
+    assert "un seul fournisseur" not in out and "orange-secret-88" not in out and "twtoken-9f3a" not in out
+
+
+def test_check_env_suggests_a_failover_when_only_one_provider_is_configured(tmp_path, capsys):
+    code, out = _check_env_run(tmp_path, capsys, _GOOD_ENV)
+    assert code == 0 and "un seul fournisseur (twilio)" in out and "twilio,orange" in out
+
+
+def test_check_env_flags_missing_orange_credentials_and_unknown_providers(tmp_path, capsys):
+    code, out = _check_env_run(tmp_path, capsys, _GOOD_ENV.replace("SMS_BACKEND=twilio\n", "SMS_BACKEND=twilio,orange\n"))
+    assert code != 0 and "ORANGE_SMS_CLIENT_ID" in out and "ORANGE_SMS_CLIENT_SECRET" in out
+    code, out = _check_env_run(tmp_path, capsys, _GOOD_ENV.replace("SMS_BACKEND=twilio\n", "SMS_BACKEND=twilio,inconnu\n"))
+    assert code != 0 and "liste ordonnée" in out
+    code, out = _check_env_run(tmp_path, capsys, _GOOD_ENV.replace("SMS_BACKEND=twilio\n", "SMS_BACKEND=orange\n") + "ORANGE_SMS_AUTHORIZATION_HEADER=Basic abc\n")
+    assert code == 0  # l'en-tête fourni par le portail suffit
+
+
+def test_sms_module_and_production_settings_parse_the_provider_list_the_same_way(monkeypatch):
+    from handy import sms
+
+    class _S:  # réglages minimaux : `backend_names` lit `settings.SMS_BACKEND`
+        DEBUG = False
+
+    for raw in (" Twilio , orange,twilio ", "orange;twilio", "twilio  orange", "africastalking"):
+        monkeypatch.setattr(sms, "settings", type("S", (), {"DEBUG": False, "SMS_BACKEND": raw})())
+        r = _sms_prod(SMS_BACKEND=raw, ORANGE_SMS_CLIENT_ID="c", ORANGE_SMS_CLIENT_SECRET="s", AT_USERNAME="u", AT_API_KEY="k", **_TWILIO)
+        assert r.returncode == 0, r.stderr[-300:]
+        assert r.stdout.strip().splitlines()[-1] == f"SMS={','.join(sms.backend_names())}"
+
+
+def test_production_refuses_a_twilio_orange_chain_without_a_twilio_sender():
+    r = _sms_prod(SMS_BACKEND="twilio,orange", TWILIO_ACCOUNT_SID="a", TWILIO_AUTH_TOKEN="b",
+                  ORANGE_SMS_CLIENT_ID="c", ORANGE_SMS_CLIENT_SECRET="s")
+    assert r.returncode != 0 and "TWILIO_MESSAGING_SERVICE_SID or TWILIO_FROM" in r.stderr
+
+
+@pytest.mark.parametrize("sender,ok", [("", True), ("2250000", True), ("+225 0000", True), ("tel:+2250000", True),
+                                       ("tel%3A%2B2250000", True), ("abc", False), ("12", False), ("tel:+", False)])
+def test_production_checks_the_orange_sender_like_the_sms_module_does(sender, ok):
+    """Un numéro d'expéditeur illisible ferait échouer la construction d'Orange à CHAQUE envoi et rendrait Twilio inutilisable aussi :
+    il doit être refusé au démarrage, avec exactement la règle de handy.sms.orange_sender."""
+    from handy import sms
+
+    assert bool(__import__("re").fullmatch(r"\d{5,15}", sms.orange_sender(sender))) is ok
+    r = _sms_prod(SMS_BACKEND="twilio,orange", ORANGE_SMS_CLIENT_ID="c", ORANGE_SMS_CLIENT_SECRET="s", ORANGE_SMS_SENDER=sender, **_TWILIO)
+    assert (r.returncode == 0) is ok, r.stderr[-300:]
+    if not ok:
+        assert "ORANGE_SMS_SENDER" in r.stderr
+
+
+@pytest.mark.parametrize("sender,ok", [("", True), ("+225 0000", True), ("tel%3A%2B2250000", True), ("abc", False), ("12", False)])
+def test_check_env_checks_the_orange_sender_like_production(tmp_path, capsys, sender, ok):
+    env = _GOOD_ENV.replace("SMS_BACKEND=twilio\n", "SMS_BACKEND=twilio,orange\n") + _ORANGE_VARS + f"ORANGE_SMS_SENDER={sender}\n"
+    code, out = _check_env_run(tmp_path, capsys, env)
+    assert (code == 0) is ok, out
+    assert ("ORANGE_SMS_SENDER" in out) is (not ok)
+
+
+@pytest.mark.parametrize("extra,needle", [
+    ("ORANGE_SMS_CLIENT_ID=seul-identifiant\n", "ORANGE_SMS_CLIENT_SECRET"),
+    ("ORANGE_SMS_CLIENT_SECRET=seul-secret\n", "ORANGE_SMS_CLIENT_ID"),
+])
+def test_check_env_refuses_half_of_the_orange_credentials_without_printing_them(tmp_path, capsys, extra, needle):
+    code, out = _check_env_run(tmp_path, capsys, _GOOD_ENV.replace("SMS_BACKEND=twilio\n", "SMS_BACKEND=twilio,orange\n") + extra)
+    assert code != 0 and needle in out and "seul-" not in out
+
+
+def test_check_env_refuses_a_local_provider_and_counts_duplicates_once(tmp_path, capsys):
+    code, out = _check_env_run(tmp_path, capsys, _GOOD_ENV.replace("SMS_BACKEND=twilio\n", "SMS_BACKEND=console\n"))
+    assert code != 0 and "liste ordonnée" in out
+    code, out = _check_env_run(tmp_path, capsys, _GOOD_ENV.replace("SMS_BACKEND=twilio\n", "SMS_BACKEND=twilio,twilio\n"))
+    assert code == 0 and "un seul fournisseur (twilio)" in out  # « twilio,twilio » n'est PAS une relève
