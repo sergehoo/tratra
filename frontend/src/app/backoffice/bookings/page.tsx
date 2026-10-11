@@ -101,7 +101,7 @@ function BookingsTab() {
   const { can } = useBo();
   const m = useManagedList<Booking, { status: string; disputed: string; payment_status: string; user: string; from: string; to: string }>("/bookings/", { status: "", disputed: "", payment_status: "", user: "", from: "", to: "" });
   const { values: f, list } = m;
-  const counts = useCounts("/bookings/", { _all: "", ...Object.fromEntries(BOOKING_STATES.map((s) => [s, `status=${s}`])) }, list.count);
+  const counts = useCounts("/bookings/", { _all: "", ...Object.fromEntries(BOOKING_STATES.map((s) => [s, `status=${s}`])) }, list.version);
   const [cancel, setCancel] = useState<Booking | null>(null);
   const [notice, setNotice] = useNotice();
   const canManage = can("bookings.manage");
@@ -177,7 +177,7 @@ function DisputesTab({ openDispute }: { openDispute: (id: number) => void }) {
   const { can } = useBo();
   const m = useManagedList<Dispute, DisputeFilters>("/disputes/", { status: "todo", user: "", from: "", to: "" });
   const { values: f, list } = m;
-  const counts = useCounts("/disputes/", { todo: "status=todo", open: "status=open", under_review: "status=under_review", resolved: "status=resolved", rejected: "status=rejected", _all: "" }, list.count);
+  const counts = useCounts("/disputes/", { todo: "status=todo", open: "status=open", under_review: "status=under_review", resolved: "status=resolved", rejected: "status=rejected", _all: "" }, list.version);
   const columns: BoColumn<Dispute>[] = [
     { key: "id", header: "Litige", primary: true, sort: "created_at", cell: (r) => <span className="font-semibold text-ink">#{r.id} · réservation #{r.booking_id}</span> },
     { key: "status", header: "Statut", sort: "status", cell: (r) => <Tag value={r.status} label={STATUS_FR[r.status]} /> },

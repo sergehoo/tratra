@@ -140,7 +140,7 @@ function ContractsTab() {
   const { can } = useBo();
   const m = useManagedList<ContractRow, { status: string; mission_type: string; work_relationship: string; flag: string; user: string; from: string; to: string }>("/engagements/contracts/", { status: "", mission_type: "", work_relationship: "", flag: "", user: "", from: "", to: "" });
   const { values: f, list } = m;
-  const counts = useCounts("/engagements/contracts/", { _all: "", active: "status=active", pending_acceptance: "status=pending_acceptance", suspended: "status=suspended", notice: "status=notice", terminated: "status=terminated" }, list.count);
+  const counts = useCounts("/engagements/contracts/", { _all: "", active: "status=active", pending_acceptance: "status=pending_acceptance", suspended: "status=suspended", notice: "status=notice", terminated: "status=terminated" }, list.version);
   const [open, setOpen] = useState<number | null>(null);
   const columns: BoColumn<ContractRow>[] = [
     { key: "t", header: "Contrat", primary: true, sort: "created_at", wrap: true, cell: (r) => <span><span className="font-semibold text-ink">#{r.id} {r.title}</span><span className="block text-xs text-ash">{r.category} · {r.principal.name}{r.organization ? ` (${r.organization})` : ""} → {r.worker.name}</span></span> },
@@ -181,7 +181,7 @@ function PostingsTab() {
   const manage = can("engagements.manage");
   const m = useManagedList<PostingRow, { status: string }>("/engagements/postings/", { status: "" });
   const { values: f, list } = m;
-  const counts = useCounts("/engagements/postings/", { _all: "", open: "status=open", filled: "status=filled", closed: "status=closed", cancelled: "status=cancelled" }, list.count);
+  const counts = useCounts("/engagements/postings/", { _all: "", open: "status=open", filled: "status=filled", closed: "status=closed", cancelled: "status=cancelled" }, list.version);
   const [remove, setRemove] = useState<PostingRow | null>(null);
   const [notice, setNotice] = useNotice();
   const columns: BoColumn<PostingRow>[] = [
@@ -219,7 +219,7 @@ function InstallmentsTab() {
   const { can } = useBo();
   const m = useManagedList<InstRow, { status: string; fee: string; user: string; contract: string; from: string; to: string }>("/engagements/installments/", { status: "", fee: "", user: "", contract: "", from: "", to: "" });
   const { values: f, list } = m;
-  const counts = useCounts("/engagements/installments/", { _all: "", overdue: "status=overdue", due: "status=due", partial: "status=partial", paid: "status=paid" }, list.count);
+  const counts = useCounts("/engagements/installments/", { _all: "", overdue: "status=overdue", due: "status=due", partial: "status=partial", paid: "status=paid" }, list.version);
   const [settle, setSettle] = useState<InstRow | null>(null);
   const [waive, setWaive] = useState<InstRow | null>(null);
   const [notice, setNotice] = useNotice();
@@ -264,7 +264,7 @@ function DisputesTab() {
   const { can } = useBo();
   const m = useManagedList<DisputeRow, { status: string; kind: string; user: string; from: string; to: string }>("/engagements/disputes/", { status: "open,under_review", kind: "", user: "", from: "", to: "" });
   const { values: f, list } = m;
-  const counts = useCounts("/engagements/disputes/", { "open,under_review": "status=open,under_review", "resolved,rejected": "status=resolved,rejected", _all: "" }, list.count);
+  const counts = useCounts("/engagements/disputes/", { "open,under_review": "status=open,under_review", "resolved,rejected": "status=resolved,rejected", _all: "" }, list.version);
   const [open, setOpen] = useState<number | null>(null);
   const [resolve, setResolve] = useState<DisputeRow | null>(null);
   const [notice, setNotice] = useNotice();
@@ -323,7 +323,7 @@ function EvaluationsTab() {
   const manage = can("engagements.manage");
   const m = useManagedList<EvalRow, { hidden: string; flag: string; from: string; to: string }>("/engagements/evaluations/", { hidden: "", flag: "", from: "", to: "" });
   const { values: f, list } = m;
-  const counts = useCounts("/engagements/evaluations/", { _all: "", false: "hidden=false", true: "hidden=true", reported: "flag=reported" }, list.count);
+  const counts = useCounts("/engagements/evaluations/", { _all: "", false: "hidden=false", true: "hidden=true", reported: "flag=reported" }, list.version);
   const [target, setTarget] = useState<{ row: EvalRow; op: "hide" | "restore" } | null>(null);
   const [notice, setNotice] = useNotice();
   const columns: BoColumn<EvalRow>[] = [

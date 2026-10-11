@@ -24,7 +24,7 @@ export default function KycPage() {
   const { can } = useBo();
   const m = useManagedList<Row, { state: string }>("/kyc/", { state: "" });
   const { values: f, list } = m;
-  const counts = useCounts("/kyc/", { _all: "", pending: "state=pending", ready: "state=ready", approved: "state=approved", rejected: "state=rejected", incomplete: "state=incomplete" }, list.count);
+  const counts = useCounts("/kyc/", { _all: "", pending: "state=pending", ready: "state=ready", approved: "state=approved", rejected: "state=rejected", incomplete: "state=incomplete" }, list.version);
 
   const columns: BoColumn<Row>[] = [
     { key: "name", header: "Artisan", primary: true, cell: (r) => <span className="font-semibold text-ink">{r.name} <span className="font-normal text-ash">#{r.profile_id}</span></span> },

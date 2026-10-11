@@ -60,7 +60,7 @@ function ReviewsTab({ onOpen, onChanged, version }: { onOpen: (id: number) => vo
   const manage = can("reviews.moderate");
   const m = useManagedList<Review, { hidden: string; reported: string; rating: string; from: string; to: string }>("/reviews/", { hidden: "", reported: "", rating: "", from: "", to: "" });
   const { values: f, list } = m;
-  const counts = useCounts("/reviews/", { _all: "", false: "hidden=false", true: "hidden=true" }, `${list.count}-${version}`);
+  const counts = useCounts("/reviews/", { _all: "", false: "hidden=false", true: "hidden=true" }, `${list.version}-${version}`);
   const [target, setTarget] = useState<{ row: Review; op: "hide" | "restore" } | null>(null);
   const [notice, setNotice] = useNotice();
 
@@ -128,7 +128,7 @@ function ReportsTab({ onOpen, version }: { onOpen: (id: number) => void; version
   const manage = can("reviews.moderate");
   const m = useManagedList<ReportRow, { resolved: string; from: string; to: string }>("/reviews/reports/", { resolved: "false", from: "", to: "" });
   const { values: f, list } = m;
-  const counts = useCounts("/reviews/reports/", { false: "resolved=false", true: "resolved=true" }, `${list.count}-${version}`);
+  const counts = useCounts("/reviews/reports/", { false: "resolved=false", true: "resolved=true" }, `${list.version}-${version}`);
   const [resolve, setResolve] = useState<ReportRow | null>(null);
   const [notice, setNotice] = useNotice();
 

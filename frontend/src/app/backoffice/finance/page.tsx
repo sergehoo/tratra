@@ -57,7 +57,7 @@ function PaymentPanel({ id, onClose, onChanged }: { id: number | null; onClose: 
 function PaymentsTab({ onOpen, version }: { onOpen: (id: number) => void; version: number }) {
   const m = useManagedList<Payment, { status: string; method: string; user: string; from: string; to: string }>("/finance/payments/", { status: "", method: "", user: "", from: "", to: "" });
   const { values: f, list } = m;
-  const counts = useCounts("/finance/payments/", { _all: "", pending: "status=pending", held: "status=held", released: "status=released", refunded: "status=refunded", failed: "status=failed" }, `${list.count}-${version}`);
+  const counts = useCounts("/finance/payments/", { _all: "", pending: "status=pending", held: "status=held", released: "status=released", refunded: "status=refunded", failed: "status=failed" }, `${list.version}-${version}`);
   const columns: BoColumn<Payment>[] = [
     { key: "id", header: "Paiement", primary: true, sort: "created_at", cell: (r) => <span className="font-semibold text-ink">#{r.id} · réservation #{r.booking_id}</span> },
     { key: "status", header: "Statut", sort: "status", cell: (r) => <Tag value={r.status} label={STATUS_FR[r.status]} /> },
@@ -109,7 +109,7 @@ function PayoutsTab({ onChanged, version }: { onChanged: () => void; version: nu
   const manage = can("finance.manage");
   const m = useManagedList<Payout, { status: string; from: string; to: string }>("/finance/payouts/", { status: "pending", from: "", to: "" });
   const { values: f, list } = m;
-  const counts = useCounts("/finance/payouts/", { pending: "status=pending", sent: "status=sent", failed: "status=failed", _all: "" }, `${list.count}-${version}`);
+  const counts = useCounts("/finance/payouts/", { pending: "status=pending", sent: "status=sent", failed: "status=failed", _all: "" }, `${list.version}-${version}`);
   const [approve, setApprove] = useState<Payout | null>(null);
   const [reject, setReject] = useState<Payout | null>(null);
   const [notice, setNotice] = useNotice();

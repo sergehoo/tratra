@@ -117,7 +117,7 @@ export default function AnnouncementsAdminPage() {
   const [notice, setNotice] = useNotice();
   const m = useManagedList<Announcement, { status: string; kind: string }>("/announcements/", { status: "", kind: "" });
   const { values: f, list } = m;
-  const counts = useCounts("/announcements/", { _all: "", draft: "status=draft", scheduled: "status=scheduled", published: "status=published", expired: "status=expired", cancelled: "status=cancelled" }, list.count);
+  const counts = useCounts("/announcements/", { _all: "", draft: "status=draft", scheduled: "status=scheduled", published: "status=published", expired: "status=expired", cancelled: "status=cancelled" }, list.version);
   const [form, setForm] = useState<{ open: boolean; item: Announcement | null }>({ open: false, item: null });
   const [confirm, setConfirm] = useState<{ op: "publish" | "cancel" | "delete"; item: Announcement; estimate?: number } | null>(null);
   const [schedule, setSchedule] = useState<Announcement | null>(null);

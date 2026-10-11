@@ -19,7 +19,7 @@ function OrganizationsTab({ version }: { version: number }) {
   const manage = can("business.manage");
   const m = useManagedList<Org, { active: string }>("/business/organizations/", { active: "" });
   const { values: f, list } = m;
-  const counts = useCounts("/business/organizations/", { _all: "", true: "active=true", false: "active=false" }, `${list.count}-${version}`);
+  const counts = useCounts("/business/organizations/", { _all: "", true: "active=true", false: "active=false" }, `${list.version}-${version}`);
   const [target, setTarget] = useState<{ row: Org; op: "suspend" | "reactivate" } | null>(null);
   const [notice, setNotice] = useNotice();
   const columns: BoColumn<Org>[] = [
@@ -63,7 +63,7 @@ const REQUEST_STATES: [string, string][] = [["pending_approval", "En attente de 
 function RequestsTab() {
   const m = useManagedList<Req, { status: string; priority: string; overdue: string; from: string; to: string }>("/business/requests/", { status: "", priority: "", overdue: "", from: "", to: "" });
   const { values: f, list } = m;
-  const counts = useCounts("/business/requests/", { _all: "", overdue: "overdue=true", pending_approval: "status=pending_approval", in_progress: "status=in_progress" }, list.count);
+  const counts = useCounts("/business/requests/", { _all: "", overdue: "overdue=true", pending_approval: "status=pending_approval", in_progress: "status=in_progress" }, list.version);
   const columns: BoColumn<Req>[] = [
     { key: "num", header: "Demande", primary: true, wrap: true, cell: (r) => <span className="font-semibold text-ink">{r.number} — {r.title}</span> },
     { key: "org", header: "Organisation", hideOnMobile: true, from: "xl", cell: (r) => `${r.organization} · ${r.site}` },

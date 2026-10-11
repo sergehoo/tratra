@@ -23,6 +23,7 @@ export function useBoList<T>(path: string, params: Record<string, string | numbe
   const [count, setCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [version, setVersion] = useState(0);
   const seq = useRef(0);
   const key = JSON.stringify(params);
   const lastKey = useRef(key);
@@ -64,7 +65,13 @@ export function useBoList<T>(path: string, params: Record<string, string | numbe
     void load(page);
   }, [key, page, load]);
 
-  return { rows, count, page, setPage, loading, error, reload: () => load(page), pageSize: pageSize ?? 25 };
+  // `version` change à chaque rechargement demandé (action, bouton « Actualiser ») : les compteurs de statut s'y rafraîchissent,
+  // pas à chaque changement de filtre (une requête de moins par pastille et par frappe).
+  const reload = () => {
+    setVersion((v) => v + 1);
+    return load(page);
+  };
+  return { rows, count, page, setPage, loading, error, reload, version, pageSize: pageSize ?? 25 };
 }
 
 /**

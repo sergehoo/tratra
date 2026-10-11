@@ -32,7 +32,7 @@ export default function UsersPage() {
   const m = useManagedList<Row, { type: string; active: string; verified: string; city: string; from: string; to: string }>("/users/", { type: "", active: "", verified: "", city: "", from: "", to: "" });
   const { values: f, list } = m;
   const kpis = useDashboardKpis(can("dashboard.view"))?.users;
-  const counts = useCounts("/users/", { _all: "", true: "active=true", false: "active=false" }, list.count);
+  const counts = useCounts("/users/", { _all: "", true: "active=true", false: "active=false" }, list.version);
   const [target, setTarget] = useState<{ row: Row; op: "suspend" | "reactivate" } | null>(null);
   const [notice, setNotice] = useNotice();
   const canManage = can("users.manage");

@@ -68,7 +68,7 @@ function ServicesTab({ categories, onNotice }: { categories: Category[]; onNotic
   const manage = can("services.moderate");
   const m = useManagedList<Service, { active: string; category: string; from: string; to: string }>("/services/", { active: "", category: "", from: "", to: "" });
   const { values: f, list } = m;
-  const counts = useCounts("/services/", { _all: "", true: "active=true", false: "active=false" }, list.count);
+  const counts = useCounts("/services/", { _all: "", true: "active=true", false: "active=false" }, list.version);
   const [hide, setHide] = useState<Service | null>(null);
   const [restore, setRestore] = useState<Service | null>(null);
   const [restoring, setRestoring] = useState(false);

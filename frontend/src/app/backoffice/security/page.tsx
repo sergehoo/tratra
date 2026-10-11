@@ -33,7 +33,7 @@ function StaffTab({ roles }: { roles: Roles | null }) {
   const [notice, setNotice] = useNotice();
   const m = useManagedList<Staff, { role: string; active: string; mfa: string }>("/security/staff/", { role: "", active: "", mfa: "" });
   const { values: f, list } = m;
-  const counts = useCounts("/security/staff/", { _all: "", enrolled: "mfa=enrolled", missing: "mfa=missing" }, list.count);
+  const counts = useCounts("/security/staff/", { _all: "", enrolled: "mfa=enrolled", missing: "mfa=missing" }, list.version);
   const [edit, setEdit] = useState<Staff | null>(null);
   const [sel, setSel] = useState<string[]>([]);
   const [add, setAdd] = useState(false);
