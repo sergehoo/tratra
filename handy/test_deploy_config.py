@@ -224,10 +224,12 @@ def test_images_are_built_on_a_supported_debian_release():
 
 def test_staging_does_not_depend_on_minio_images_that_can_no_longer_be_pulled():
     """MinIO n'est plus publié sur Docker Hub ni quay.io (« pull access denied ») : le staging construit MinIO depuis les sources aux versions
-    épinglées. Une référence à `minio/minio` ou `minio/mc` casserait tout serveur neuf (le compose de production, lui, ne démarre que sur un
-    serveur qui a encore l'image en cache — voir docs/pilote.md)."""
-    staging = (ROOT / "docker-compose.staging.yml").read_text(encoding="utf-8")
-    assert not re.search(r"image:\s*(quay\.io/)?minio/(minio|mc)\b", staging)
+    épinglées, aussi en production (le serveur réel a échoué sur « pull access denied for minio/mc »). Une référence à `minio/minio` ou
+    `minio/mc` casserait tout serveur neuf ou toute reconstruction."""
+    for name in ("docker-compose.staging.yml", "docker-compose.yml"):                     # staging ET production : « docker compose up --build » doit marcher sur un serveur neuf
+        compose = (ROOT / name).read_text(encoding="utf-8")
+        assert not re.search(r"image:\s*(quay\.io/)?minio/(minio|mc)\b", compose), name
+        assert "context: ./docker/minio" in compose, name
     dockerfile = (ROOT / "docker/minio/Dockerfile").read_text(encoding="utf-8")
     assert re.search(r"ARG MINIO_TAG=RELEASE\.\d{4}-\d\d-\d\dT[\d-]+Z", dockerfile) and re.search(r"ARG MC_TAG=RELEASE\.", dockerfile)
     assert "go install" in dockerfile and "sum.golang.org" in dockerfile      # intégrité des sources vérifiée par la base de sommes de contrôle de Go

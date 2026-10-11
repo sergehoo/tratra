@@ -34,9 +34,8 @@ décrit pas un hôte de staging.
    **Le compose de production utilise le même Dockerfile** : toute reconstruction d'image y échouait aussi.
 7. **MinIO n'est plus téléchargeable** : `minio/minio` et `minio/mc` (Docker Hub) et `quay.io/minio/*` répondent « pull access denied » (distribution communautaire
    passée aux sources seules). Un serveur neuf ou la CI ne pouvaient plus démarrer la pile. Corrigé pour le staging : `docker/minio/Dockerfile` construit les MÊMES versions
-   épinglées depuis les sources (`go install`, intégrité vérifiée par `sum.golang.org`) ; serveur et client `mc` dans une image `tratra-minio`. ⚠️ Le compose de
-   **production** référence toujours `minio/minio:RELEASE.2025-02-18…` : il ne tourne que parce que l'image est en cache sur le serveur ; à migrer avant toute
-   reconstruction ou nouveau serveur (décision : image construite comme ici, ou autre stockage S3).
+   épinglées depuis les sources (`go install`, intégrité vérifiée par `sum.golang.org`) ; serveur et client `mc` dans une image `tratra-minio`. Le compose de **production** utilise la même image construite
+   (le serveur réel avait échoué sur `docker compose up --build` : « pull access denied for minio/mc »).
 8. **`makemigrations --check` échouait dans l'image** : l'application inutilisée `django-push-notifications` (migrations en `AutoField`, projet en `BigAutoField`) faisait
    détecter un changement à écrire « dans le paquet installé ». Retirée (le push passe par `handy/push.py`, FCM v1).
 9. **Faux échecs de `verify.sh`** : `cmd | grep -q` sous `pipefail` (SIGPIPE) et vérifications lancées avant la fin du démarrage du worker/frontend. Corrigé (sorties capturées,

@@ -97,10 +97,31 @@ python3 scripts/pilot/recette_api.py --api https://api-staging.<domaine>/handy  
 ```
 Puis la recette manuelle sur téléphones : `docs/recette-pilote.md` (SMS réel, KYC humain, push application fermée, Android réel, Back-Office avec MFA).
 
+## 8 bis. Mettre à jour un serveur de PRODUCTION existant (docker-compose.yml) — sans coupure imprévue
+
+`docker compose up --build -d` reconstruit **et redémarre** l'API avec les réglages de production actuels : si `.env` est incomplet, elle refuse de démarrer. À faire dans l'ordre :
+
+```bash
+cd /home/ubuntu/tratra && git pull
+# 1. Compléter .env (modèle : .env.example — le gabarit complet commenté : .env.staging.example). Plus aucun « variable is not set » ci-dessous :
+docker compose config -q
+#    Variables que les versions récentes exigent : KYC_STORAGE_BUCKET_NAME (≠ AWS_STORAGE_BUCKET_NAME), FRONTEND_HOST, NEXT_PUBLIC_API_BASE (https://<hôte API>/handy),
+#    PUBLIC_WEB_URL (https), SMS_BACKEND + identifiants (l'OTP n'est jamais contourné), AWS_S3_ENDPOINT_URL en https, ALLOWED_HOSTS, CORS_ALLOWED_ORIGINS, CSRF_TRUSTED_ORIGINS.
+# 2. Sauvegarder la base :
+docker compose exec -T tratradb pg_dump -U "$(sed -n 's/^DB_USER=//p' .env)" -d "$(sed -n 's/^DB_NAME=//p' .env)" -Fc > ~/tratra-avant-maj-$(date +%F).dump
+# 3. Construire SANS redémarrer (MinIO est construit depuis les sources : docker/minio — l'image officielle n'est plus téléchargeable) :
+docker compose build minio tratraweb tratrafrontend
+# 4. Valider la configuration de production avec le NOUVEAU .env, sans toucher aux conteneurs en cours :
+docker compose run --rm --no-deps tratraweb python manage.py check --deploy
+# 5. Démarrer :
+docker compose up -d
+```
+MinIO : même version que l'ancienne image, volume `minio_data` relu tel quel (aucune migration de données). Administrateurs : la MFA est exigée et le passe-droit historique fermé par défaut ;
+pour la transition, voir le bloc « Sécurité de l'administration » de `.env.example` (relâcher explicitement, assigner les rôles, activer la MFA, puis remettre les défauts).
+
 ## 9. Ce qui demande une intervention humaine 👤
 
-0. **Image MinIO de production** : le compose de production référence `minio/minio` (plus téléchargeable). Il tourne tant que l'image est en cache sur le serveur ; migrer avant
-   toute reconstruction ou nouveau serveur (image construite depuis les sources comme `docker/minio/Dockerfile`, ou autre stockage S3). Même remarque pour le `Dockerfile` (déjà corrigé : Debian bookworm).
+0. ~~Image MinIO de production~~ : corrigée — le compose de production construit `docker/minio` comme le staging (le serveur réel avait échoué sur « pull access denied for minio/mc »).
 1. **Domaine et DNS** du staging (4 enregistrements) et accès SSH/Dokploy au serveur.
 2. **Projet Firebase de Tratra** : compte de service (`secrets/fcm-service-account.json`) et les 4 options de l'application Android (aucun identifiant n'est disponible dans le dépôt).
 3. **Fournisseur SMS** (Twilio ou Africa's Talking) : le staging refuse de démarrer sans lui ; l'OTP n'est jamais contourné.

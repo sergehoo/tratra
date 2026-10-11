@@ -32,8 +32,13 @@ services:
       retries: 20
     networks: [web]
     restart: unless-stopped
+  # MinIO n'est plus publié sur Docker Hub / quay.io (« pull access denied ») : l'image est CONSTRUITE depuis les sources officielles aux
+  # mêmes versions épinglées (docker/minio/Dockerfile) ; le client `mc` est dans la même image. Même version que l'ancienne image : le
+  # volume `minio_data` existant est relu tel quel (aucune migration de données).
   minio:
-    image: minio/minio:RELEASE.2025-02-18T16-25-55Z
+    image: tratra-minio:prod
+    build:
+      context: ./docker/minio
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
@@ -67,7 +72,8 @@ services:
   # No anonymous policy is granted: application code produces short-lived
   # signed URLs only when an authorised user needs an object.
   minio-init:
-    image: minio/mc:RELEASE.2025-02-21T16-00-46Z
+    image: tratra-minio:prod
+    pull_policy: never          # construite par le service minio (même étiquette)
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
