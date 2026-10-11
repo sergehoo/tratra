@@ -15,11 +15,10 @@ from reputation.models import ClientReview, EvaluationContest, EvaluationWatch
 def _watch_row(w: EvaluationWatch, *, detail: bool = False) -> dict:
     row = {"id": w.pk, "subject_id": w.subject_id, "subject_name": public_name(w.subject), "subject_active": w.subject.is_active, "kind": w.kind, "kind_label": w.get_kind_display(),
            "status": w.status, "status_label": w.get_status_display(), "priority": w.priority, "explanation": w.explanation, "detected_at": w.detected_at,
-           "last_detected_at": w.last_detected_at, "decisions": getattr(w, "n_decisions", None)}
+           "last_detected_at": w.last_detected_at, "decisions": getattr(w, "n_decisions", None), "evidence": w.evidence,
+           "allowed": sorted(k for k, v in watch_svc.ALLOWED.items() if w.status in v)}
     if detail:
-        row["evidence"] = w.evidence
         row["history"] = [{"decision": d.decision, "decision_label": d.get_decision_display(), "reason": d.reason, "at": d.at, "by": public_name(d.actor) if d.actor_id else None} for d in w.decisions.select_related("actor")]
-        row["allowed"] = sorted(k for k, v in watch_svc.ALLOWED.items() if w.status in v)
     return row
 
 

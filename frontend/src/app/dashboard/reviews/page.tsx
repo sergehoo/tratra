@@ -8,6 +8,7 @@ import type { ReviewRow } from "@/lib/reviews";
 import { Alert, Button, Card, EmptyState, Modal, PageHeader, SkeletonList, Tabs, TextareaField } from "@/components/ds";
 import { ReviewCard } from "@/components/reviews/ReviewCard";
 import { ReviewForm } from "@/components/reviews/ReviewForm";
+import { MutualEvaluations } from "@/components/reviews/MutualEvaluations";
 import { formatDateTimeShort } from "../_components/dates";
 
 interface ToWrite { booking_id: number; service: string; artisan: string; booking_date: string | null }
@@ -62,6 +63,7 @@ export default function ReviewsPage() {
         <Alert tone="danger" title="Avis indisponibles" action={<Button size="sm" variant="outline" onClick={() => void reload()}>Réessayer</Button>}>{error}</Alert>
       ) : (
         <>
+          <MutualEvaluations onChanged={() => void reload()} />
           <Tabs ariaLabel="Type d’avis" value={tab} onChange={setTab} items={tabs} className="mb-5" />
           {tab === "write" ? (
             data.to_write.length === 0 ? (

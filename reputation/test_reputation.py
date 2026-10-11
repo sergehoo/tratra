@@ -240,3 +240,16 @@ def test_engagement_invites_are_optional_deduplicated_and_monthly_by_default():
     from engagements import tasks
 
     assert callable(tasks.evaluation_invites)
+
+
+def test_legacy_review_endpoint_follows_the_same_reciprocity_rule():
+    c, pro = person("ev_c9"), artisan("ev_p9")
+    b = mission(c, pro)
+    rate(pro, b, 5)                                                                        # le prestataire évalue d'abord
+    ok = client_of(c).post("/handy/reviews/", {"booking": b.pk, "rating": 4, "comment": "Bien"}, format="json")
+    assert ok.status_code == 201
+    assert Review.objects.get(booking=b).revealed_at is not None and ClientReview.objects.get(booking=b).revealed_at is not None
+    b2 = mission(c, pro)
+    assert client_of(c).post("/handy/reviews/", {"booking": b2.pk, "rating": 2}, format="json").status_code == 201
+    assert Review.objects.get(booking=b2).revealed_at is None                              # l'autre partie n'a pas répondu : masquée
+    assert Notification.objects.filter(user=pro, notification_type="evaluation_invite", dedupe_key=f"evaluation:{b2.pk}:client").exists()

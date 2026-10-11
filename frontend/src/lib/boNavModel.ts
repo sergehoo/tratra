@@ -43,7 +43,7 @@ export interface SubDef {
 export const SUBS: Record<string, readonly SubDef[]> = {
   services: [{ tab: "services", label: "Services" }, { tab: "categories", label: "Catégories et métiers", keywords: "tarifs métiers" }],
   bookings: [{ tab: "bookings", label: "Réservations" }, { tab: "disputes", label: "Litiges", keywords: "médiation réclamation" }],
-  reviews: [{ tab: "reviews", label: "Avis" }, { tab: "reports", label: "Signalements", keywords: "modération abus" }],
+  reviews: [{ tab: "reviews", label: "Avis" }, { tab: "reports", label: "Signalements", keywords: "modération abus" }, { tab: "watch", label: "Surveillance", keywords: "évaluations réputation fraude contestation recours bannissement" }],
   business: [
     { tab: "organizations", label: "Organisations", keywords: "entreprises sites équipements" },
     { tab: "requests", label: "Demandes d’intervention" },
