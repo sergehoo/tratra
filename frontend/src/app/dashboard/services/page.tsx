@@ -2,6 +2,7 @@
 import { Suspense, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
+import { Recommended } from "@/components/recommendations/Recommended";
 import { ArrowRight, Clock, Search, SearchX, X } from "lucide-react";
 import { apiErrorMessage, get } from "@/lib/api";
 import {
@@ -105,6 +106,8 @@ function ServicesContent() {
         title="Explorer les services"
         description="Parcourez les services proposés par les artisans Tratra et choisissez celui qui vous convient."
       />
+
+      <Recommended query={applied || undefined} />
 
       <form
         role="search"

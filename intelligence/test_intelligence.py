@@ -231,3 +231,111 @@ def test_backoffice_analysis_endpoints_need_the_kyc_right_and_are_audited():
     assert adm.get(f"{BO}/risk/summary/").status_code == 200 and adm.get(f"{BO}/ai/status/").status_code == 200
     alerts = adm.get(f"{BO}/dashboard/").json()["alerts"]
     assert isinstance(alerts, list)
+
+
+# ═══ Recommandations ════════════════════════════════════════════════════════════════════════════════════════════════
+
+def _svc(user, title="Dépannage plomberie", price=5000, **kw):
+    from handy.test_eligibility import service
+
+    s = service(user, title=title)
+    s.price = price
+    for k, v in kw.items():
+        setattr(s, k, v)
+    s.save()
+    return s
+
+
+def _located(user, lat, lng):
+    from django.contrib.gis.geos import Point
+
+    p = user.handyman_profile
+    p.location = Point(lng, lat, srid=4326)
+    p.save()
+
+
+def test_recommendations_only_eligible_providers_ranked_and_explained():
+    from rest_framework.test import APIClient
+
+    me = User.objects.create_user("rc_me", "rcme@x.test", "pass1234", is_verified=True)
+    near, far, ineligible = artisan("rc_near"), artisan("rc_far"), artisan("rc_bad", eligible=False)
+    _located(near, 5.36, -4.0083)
+    _located(far, 5.9, -4.5)
+    _located(ineligible, 5.36, -4.0083)
+    for u in (near, far, ineligible):
+        _svc(u)
+    api = APIClient()
+    api.force_authenticate(me)
+    r = api.post("/handy/recommendations/", {"q": "plomberie", "lat": 5.37, "lng": -4.0}, format="json").json()
+    ids = [x["handyman_id"] for x in r["results"]]
+    assert near.pk in ids and far.pk in ids and ineligible.pk not in ids                       # jamais un prestataire non éligible
+    assert ids[0] == near.pk and r["results"][0]["score"] > r["results"][1]["score"]
+    top = r["results"][0]
+    assert top["distance_km"] is not None and top["distance_km"] < 3 and any("km" in x for x in top["reasons"]) and any("Peu d'avis" in x for x in top["reasons"])
+    assert r["located"] is True and r["nearby"][0]["service_id"] == top["service_id"] and set(r["criteria"]) == {"relevance", "distance", "reputation", "availability", "history", "price"}
+    assert "5.36" not in str(r) and "-4.0083" not in str(r)                                    # aucune coordonnée de prestataire exposée
+
+
+def test_recommendations_use_real_signals_and_never_invent_missing_ones():
+    from rest_framework.test import APIClient
+
+    me = User.objects.create_user("rc_me2", "rcme2@x.test", "pass1234", is_verified=True)
+    a, b = artisan("rc_a"), artisan("rc_b")
+    _svc(a, price=4000)
+    _svc(b, price=9000)
+    Booking.objects.create(client=me, handyman=a, address="x", city="x", booking_date=timezone.now(), status="completed")
+    api = APIClient()
+    api.force_authenticate(me)
+    r = api.post("/handy/recommendations/", {"category": "plomberie"}, format="json").json()
+    first = r["results"][0]
+    assert first["handyman_id"] == a.pk and "Déjà réservé avec succès" in first["reasons"]      # historique réel + prix plus bas
+    assert all(x["distance_km"] is None for x in r["results"]) and r["located"] is False       # pas de lieu : distance inconnue, pas inventée
+    assert all(x["transport"] is None for x in r["results"])
+    assert api.post("/handy/recommendations/", {"category": "inconnue-xyz"}, format="json").status_code == 400
+    from rest_framework.test import APIClient as Anon
+
+    assert Anon().post("/handy/recommendations/", {}, format="json").status_code in (401, 403)
+
+
+def test_recommendation_transport_estimate_is_real_and_availability_respects_time_off(settings):
+    from rest_framework.test import APIClient
+
+    from handy.models import TimeOff
+    from transport.models import TransportBand, TransportConfig
+
+    cfg = TransportConfig.current()
+    cfg.enabled = True
+    cfg.save()
+    TransportBand.objects.create(name="Jour", start_time=timezone.datetime(2026, 1, 1, 0, 0).time(), end_time=timezone.datetime(2026, 1, 1, 23, 59).time(), rate_per_km=100)
+    me = User.objects.create_user("rc_me3", "rcme3@x.test", "pass1234", is_verified=True)
+    pro = artisan("rc_t")
+    _located(pro, 5.36, -4.0083)
+    _svc(pro)
+    when = timezone.now() + timedelta(days=1)
+    TimeOff.objects.create(handyman=pro.handyman_profile, start=when - timedelta(hours=1), end=when + timedelta(hours=1))
+    api = APIClient()
+    api.force_authenticate(me)
+    with mock.patch("transport.pricing.road_distance_km", return_value=5.0):
+        r = api.post("/handy/recommendations/", {"lat": 5.4, "lng": -4.0, "when": when.isoformat()}, format="json").json()
+    item = r["results"][0]
+    assert item["transport"]["amount"] == 1000 and item["available"] is False and "Absent à ce moment" in item["reasons"]     # 5 km × 2 × 100 FCFA
+
+
+def test_primary_address_is_used_by_default_and_only_the_users_own():
+    from decimal import Decimal
+
+    from rest_framework.test import APIClient
+
+    from handy.models import UserAddress
+
+    me, other = User.objects.create_user("rc_me4", "rcme4@x.test", "pass1234"), User.objects.create_user("rc_o4", "rco4@x.test", "pass1234")
+    UserAddress.objects.create(user=me, city="Abidjan", street="x", latitude=Decimal("5.36"), longitude=Decimal("-4.0083"), is_primary=True)
+    theirs = UserAddress.objects.create(user=other, city="Abidjan", street="y", latitude=Decimal("5.30"), longitude=Decimal("-4.0"), is_primary=True)
+    pro = artisan("rc_p4")
+    _located(pro, 5.37, -4.0)
+    _svc(pro)
+    api = APIClient()
+    api.force_authenticate(me)
+    r = api.post("/handy/recommendations/", {}, format="json").json()
+    assert r["located"] and r["used_primary_address"] and r["results"][0]["distance_km"] is not None
+    assert api.post("/handy/recommendations/", {"address_id": theirs.pk}, format="json").status_code == 400

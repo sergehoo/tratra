@@ -12,3 +12,6 @@ OCR local Tesseract (images ; paquets installés dans l'image Docker) puis, si a
 
 ## Dossiers de risque
 Types : doublon potentiel, document incohérent, identité incomplète, KYC expiré, activité anormale, réservations artificielles possibles. Un doublon exige un identifiant fort (fichier, numéro de document, téléphone E.164) : un nom, une adresse ou un appareil partagé ne suffit jamais. Décisions humaines motivées (enquête, confirmer, écarter, rouvrir), historisées et journalisées ; confirmer n'a aucun effet automatique. Les évaluations suspectes ont leur propre surveillance (Avis > Surveillance).
+
+## Recommandations de services (`POST /handy/recommendations/`)
+Moteur **déterministe** (aucune IA externe) : pertinence (catégorie/besoin) 35, distance 20, réputation vérifiable 20 (moyenne retenue dès 3 avis), disponibilité réelle (horaires déclarés, absences) 10, historique 10, prix 5. Seuls les services actifs de profils **publiables** (KYC approuvé, profil complet) sont candidats ; chaque résultat liste ses raisons ; un critère sans donnée reste « inconnu » (score neutre, jamais inventé). Le transport estimé est calculé avec les tarifs et la distance routière réels pour les meilleurs résultats. Aucune coordonnée de prestataire n'est exposée ; l'adresse utilisée est celle du compte courant.
