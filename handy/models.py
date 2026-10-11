@@ -371,6 +371,8 @@ class Service(models.Model):
     is_active = models.BooleanField(default=True, db_index=True)
     banner = models.ImageField(upload_to='service_images/',null=True)
     image_url = models.URLField(blank=True, null=True)
+    # Les frais de déplacement ne s'appliquent qu'aux prestations qui nécessitent que l'artisan se rende chez le client.
+    requires_travel = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -486,6 +488,9 @@ class Booking(models.Model):
     requested_start = models.DateTimeField(null=True, blank=True, db_index=True)
     requested_end = models.DateTimeField(null=True, blank=True, db_index=True)
     total_price = models.DecimalField(max_digits=10, decimal_places=2, blank=True, null=True)
+    # Déplacement : montant FIGÉ à la réservation (calculé côté serveur) + détail du calcul (tarif, distance, créneau, version).
+    transport_fee = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    transport_quote = models.JSONField(default=dict, blank=True)
     cancellation_fee = models.DecimalField(max_digits=10, decimal_places=2, default=0)  # pénalité d'annulation appliquée
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending', db_index=True)
     booking_type = models.CharField(

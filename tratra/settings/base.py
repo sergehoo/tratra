@@ -95,6 +95,7 @@ INSTALLED_APPS = [
     'announcements',
     'continuity',
     'engagements',
+    'transport',
     'backoffice',
     # Libs
     'allauth',

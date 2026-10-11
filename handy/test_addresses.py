@@ -162,3 +162,20 @@ def test_dashboard_exposes_address_completeness_without_technical_username():
     assert "tech_username_xyz" not in str(body["user"])
     c.post(ADDR, GOOD, format="json")
     assert c.get("/handy/me/dashboard/").json()["user"]["address_complete"] is True
+
+
+def test_backfill_creates_one_primary_address_from_legacy_fields_and_is_idempotent():
+    from importlib import import_module
+
+    from django.apps import apps
+
+    backfill = import_module("handy.migrations.0042_backfill_primary_addresses").backfill
+    legacy = User.objects.create_user("adr_legacy", "adr_legacy@x.test", "pass1234", address="Rue 5", city="Yamoussoukro")
+    User.objects.create_user("adr_none", "adr_none@x.test", "pass1234")
+    backfill(apps, None)
+    backfill(apps, None)                                                                              # rejouée : aucun doublon
+    rows = UserAddress.objects.filter(user=legacy)
+    assert rows.count() == 1 and rows.get().is_primary and rows.get().city == "Yamoussoukro" and rows.get().street == "Rue 5"
+    assert not UserAddress.objects.filter(user__username="adr_none").exists()
+    legacy.refresh_from_db()
+    assert legacy.address == "Rue 5"                                                                  # champs historiques intacts

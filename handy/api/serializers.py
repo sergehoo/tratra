@@ -652,6 +652,10 @@ class BookingCreateSerializer(serializers.ModelSerializer):
     # Coordonnées facultatives du lieu d'intervention (alimentent l'ETA du suivi en direct) : jamais exigées.
     lat = serializers.FloatField(write_only=True, required=False, min_value=-90, max_value=90)
     lng = serializers.FloatField(write_only=True, required=False, min_value=-180, max_value=180)
+    # Quartier du lieu (zones de transport) et montant de déplacement que le client a vu : le serveur RECALCULE, ce montant n'est
+    # qu'un accord à confirmer (écart => 409 `transport_changed`, aucune réservation créée).
+    commune = serializers.CharField(write_only=True, required=False, allow_blank=True, max_length=100)
+    expected_transport_fee = serializers.IntegerField(write_only=True, required=False, min_value=0)
 
     class Meta:
         model = Booking
@@ -661,10 +665,11 @@ class BookingCreateSerializer(serializers.ModelSerializer):
             "address", "city", "postal_code",
             "description", "proposed_price", "handyman_comment",
             "response_date", "status", "type", "is_immediate", "version",
+            "transport_fee", "transport_quote",
             # auxiliaires (write_only)
-            "category_id", "minutes", "lat", "lng",
+            "category_id", "minutes", "lat", "lng", "commune", "expected_transport_fee",
         ]
-        read_only_fields = ["client", "status", "response_date", "is_immediate", "version"]
+        read_only_fields = ["client", "status", "response_date", "is_immediate", "version", "transport_fee", "transport_quote"]
 
     def validate(self, attrs):
         start = attrs.get("booking_date")
@@ -711,9 +716,22 @@ class BookingCreateSerializer(serializers.ModelSerializer):
         validated_data.pop("category_id", None)
         validated_data.pop("minutes", None)
         lat, lng = validated_data.pop("lat", None), validated_data.pop("lng", None)
+        commune, expected_fee = validated_data.pop("commune", ""), validated_data.pop("expected_transport_fee", None)
         if lat is not None and lng is not None:
             validated_data["job_location"] = Point(lng, lat, srid=4326)
         validated_data["client"] = request.user
+        # Frais de déplacement : calculés ICI côté serveur (tarifs, distance routière, créneau) puis figés sur la réservation.
+        from transport import pricing
+        from transport.api import TransportChanged
+
+        service = validated_data.get("service")
+        quote = pricing.quote(
+            handyman=validated_data["handyman"], destination=(lat, lng) if lat is not None and lng is not None else None,
+            when=validated_data.get("booking_date") or timezone.now(), commune=commune, city=validated_data.get("city", ""),
+            needs_travel=service.requires_travel if service else True)
+        if expected_fee is not None and expected_fee != quote["amount"]:
+            raise TransportChanged(quote)
+        validated_data["transport_fee"], validated_data["transport_quote"] = quote["amount"], quote
         # tarification non gérée ici : c'est le rôle de /payments/initiate/
         return super().create(validated_data)
 
@@ -750,9 +768,10 @@ class BookingSerializer(serializers.ModelSerializer):
             "response_date", "status", "type", "is_immediate",
             "mission_type", "contract_id",
             "created_at", "updated_at", "version",
+            "transport_fee", "transport_quote",
         ]
         # 'status' n'est PAS modifiable via PATCH : passer par /bookings/{id}/transition/.
-        read_only_fields = ["created_at", "updated_at", "status", "version"]
+        read_only_fields = ["created_at", "updated_at", "status", "version", "transport_fee", "transport_quote"]
 
 
 # ========= PAYMENTS =========
@@ -1121,8 +1140,10 @@ class PaymentInitSerializer(serializers.Serializer):
                 amount = c.apply(amount)
                 coupon = c
 
-        # frais plateforme sur le montant NET
+        # frais plateforme sur le montant NET de la prestation ; le déplacement (figé à la réservation) s'ajoute APRÈS, une seule fois :
+        # le montant est toujours recalculé depuis ses sources (jamais incrémenté), donc une nouvelle tentative ne facture rien en double.
         fee = compute_platform_fee(amount, category_id=category_id)
+        amount += Decimal(booking.transport_fee or 0)
 
         method = validated["method"]
         provider = provider_for_method(method)

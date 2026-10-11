@@ -2,7 +2,7 @@ from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
 from announcements.api import AnnouncementAdminViewSet
-from backoffice import api_core, api_engagements, api_mfa, api_money, api_ops, api_people, api_system
+from backoffice import api_core, api_engagements, api_mfa, api_money, api_ops, api_people, api_system, api_transport
 
 router = DefaultRouter()
 router.register("announcements", AnnouncementAdminViewSet, basename="bo-announcements")
@@ -113,6 +113,11 @@ urlpatterns = [
     path("settings/cancellation-policies/", api_system.CancellationPolicyUpsert.as_view(), name="bo-cancellation-policies"),
     path("settings/cancellation-policies/<int:pk>/", api_system.CancellationPolicyUpsert.as_view(), name="bo-cancellation-policy"),
     path("settings/trust/", api_system.TrustSettingsUpdate.as_view(), name="bo-settings-trust"),
+    path("settings/transport/", api_transport.TransportOverview.as_view(), name="bo-transport"),
+    path("settings/transport/bands/", api_transport.TransportBandCreate.as_view(), name="bo-transport-bands"),
+    path("settings/transport/bands/<int:pk>/", api_transport.TransportBandUpdate.as_view(), name="bo-transport-band"),
+    path("settings/transport/zones/", api_transport.TransportZoneCreate.as_view(), name="bo-transport-zones"),
+    path("settings/transport/zones/<int:pk>/", api_transport.TransportZoneUpdate.as_view(), name="bo-transport-zone"),
     path("settings/coupons/", api_system.CouponList.as_view(), name="bo-coupons"),
     path("settings/coupons/<int:pk>/", api_system.CouponUpdate.as_view(), name="bo-coupon"),
     # Sécurité
