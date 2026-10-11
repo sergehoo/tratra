@@ -3,6 +3,7 @@ from decimal import Decimal
 from pathlib import Path
 from uuid import uuid4
 
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import AbstractUser, Group, Permission
 from django.contrib.contenttypes.fields import GenericForeignKey
@@ -955,8 +956,16 @@ class Review(models.Model):
     reply_text = models.TextField(blank=True, null=True)
     reply_at = models.DateTimeField(null=True, blank=True)
     is_hidden = models.BooleanField(default=False, db_index=True)  # modération : jamais publié ni compté
+    # Évaluation mutuelle : la note n'est publiée (et comptée) qu'une fois révélée, c'est-à-dire quand l'autre partie a aussi évalué
+    # ou à l'expiration du délai (reputation/reveal.py). Délai 0 (EVALUATION_REVEAL_DAYS=0) : publication immédiate.
+    revealed_at = models.DateTimeField(null=True, blank=True, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    def save(self, *args, **kwargs):
+        if self._state.adding and self.revealed_at is None and getattr(settings, 'EVALUATION_REVEAL_DAYS', 7) <= 0:
+            self.revealed_at = timezone.now()
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"Avis pour la réservation #{self.booking.id}"
@@ -1036,6 +1045,7 @@ class Notification(models.Model):
         ('payment_confirmed', 'Paiement confirmé'),
         ('schedule_event', 'Événement de planning'),
         ('evaluation_received', 'Évaluation reçue'),
+        ('evaluation_invite', 'Évaluation à laisser'),
         ('engagement_dispute', "Litige sur un contrat"),
     ]
     CATEGORIES = [

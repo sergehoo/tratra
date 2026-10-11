@@ -211,7 +211,7 @@ def me_dashboard(request):
                            .order_by("-created_at", "-id")[:LIST_SIZE])
         provider["recent_missions"] = [_item(b, "handyman") for b in recent_missions]
 
-    received = Review.objects.filter(booking__handyman=user)
+    received = Review.objects.filter(booking__handyman=user, revealed_at__isnull=False)
     reviews = received.aggregate(count=Count("id"), average=Avg("rating"))
     unread = {
         "notifications": Notification.objects.filter(user=user, is_read=False).count(),
@@ -388,7 +388,7 @@ def me_reviews(request):
         return item
 
     base = Review.objects.select_related("booking", "booking__service", "booking__client", "booking__handyman").prefetch_related("media")
-    received = [row(r, "client") for r in base.filter(booking__handyman=user).order_by("-created_at")[:50]]
+    received = [row(r, "client") for r in base.filter(booking__handyman=user, revealed_at__isnull=False).order_by("-created_at")[:50]]
     given = [row(r, "handyman") for r in base.filter(booking__client=user).order_by("-created_at")[:50]]
     to_write = (Booking.objects.filter(client=user, status="completed", review__isnull=True)
                 .select_related("service", "handyman").order_by("-booking_date", "-id")[:20])

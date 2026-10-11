@@ -22,7 +22,7 @@ class Rules:
     max_advance_percent: int = 50
     late_grace_days: int = 5
     min_days_for_evaluation: int = 30
-    evaluation_interval_days: int = 90
+    evaluation_interval_days: int = 30      # évaluation mensuelle proposée à chaque échéance (réglable par catégorie dans le Back-Office)
     evaluation_edit_days: int = 7
     source: str = "factory"
 

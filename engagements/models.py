@@ -45,7 +45,7 @@ class EngagementRule(models.Model):
     max_advance_percent = models.PositiveSmallIntegerField(default=50, validators=[MaxValueValidator(100)])
     late_grace_days = models.PositiveSmallIntegerField(default=5, validators=[MaxValueValidator(60)])
     min_days_for_evaluation = models.PositiveSmallIntegerField(default=30, validators=[MaxValueValidator(365)])
-    evaluation_interval_days = models.PositiveSmallIntegerField(default=90, validators=[MaxValueValidator(365)])
+    evaluation_interval_days = models.PositiveSmallIntegerField(default=30, validators=[MaxValueValidator(365)])
     evaluation_edit_days = models.PositiveSmallIntegerField(default=7, validators=[MaxValueValidator(60)])
     updated_at = models.DateTimeField(auto_now=True)
 

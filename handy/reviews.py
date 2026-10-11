@@ -16,7 +16,7 @@ from handy.models import Review
 
 def published(handyman_user_id=None):
     """Avis publiables (mission terminée, non masqués), éventuellement d'un artisan."""
-    qs = Review.objects.filter(booking__status="completed", is_hidden=False)
+    qs = Review.objects.filter(booking__status="completed", is_hidden=False, revealed_at__isnull=False)
     if handyman_user_id is not None:
         qs = qs.filter(booking__handyman_id=handyman_user_id)
     return qs

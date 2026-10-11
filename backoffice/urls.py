@@ -2,7 +2,7 @@ from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
 from announcements.api import AnnouncementAdminViewSet
-from backoffice import api_core, api_engagements, api_mfa, api_money, api_ops, api_people, api_system, api_transport
+from backoffice import api_core, api_engagements, api_mfa, api_money, api_ops, api_people, api_system, api_transport, api_reputation
 
 router = DefaultRouter()
 router.register("announcements", AnnouncementAdminViewSet, basename="bo-announcements")
@@ -107,6 +107,12 @@ urlpatterns = [
     path("analytics/overview/", api_system.AnalyticsOverview.as_view(), name="bo-analytics"),
     path("analytics/export/<str:dataset>/", api_system.AnalyticsExport.as_view(), name="bo-export"),
     # Réglages
+    path("reputation/summary/", api_reputation.ReputationSummary.as_view(), name="bo-reputation-summary"),
+    path("reputation/watch/", api_reputation.WatchList.as_view(), name="bo-watch"),
+    path("reputation/watch/<int:pk>/", api_reputation.WatchDetail.as_view(), name="bo-watch-detail"),
+    path("reputation/watch/<int:pk>/decision/", api_reputation.WatchDecide.as_view(), name="bo-watch-decision"),
+    path("reputation/contests/", api_reputation.ContestList.as_view(), name="bo-contests"),
+    path("reputation/contests/<int:pk>/resolve/", api_reputation.ContestResolve.as_view(), name="bo-contest-resolve"),
     path("settings/", api_system.SettingsOverview.as_view(), name="bo-settings"),
     path("settings/pricing-rules/", api_system.PricingRuleCreate.as_view(), name="bo-pricing-rules"),
     path("settings/pricing-rules/<int:pk>/", api_system.PricingRuleUpdate.as_view(), name="bo-pricing-rule"),

@@ -96,6 +96,7 @@ INSTALLED_APPS = [
     'continuity',
     'engagements',
     'transport',
+    'reputation',
     'backoffice',
     # Libs
     'allauth',
@@ -431,6 +432,11 @@ GEO_CACHE_TTL = config('GEO_CACHE_TTL', default=86400, cast=int)
 GEO_MAX_CALLS_PER_MINUTE = config('GEO_MAX_CALLS_PER_MINUTE', default=30, cast=int)
 GEO_USER_AGENT = config('GEO_USER_AGENT', default='Tratra/1.0 (contact: support@tratra.net)')
 
+# Évaluations mutuelles : une note est masquée à l'autre partie jusqu'à ce qu'elle ait évalué à son tour, ou pendant ce délai (en jours) ;
+# 0 = publication immédiate. `EVALUATION_WINDOW_DAYS` : durée pendant laquelle une mission terminée peut encore être évaluée.
+EVALUATION_REVEAL_DAYS = config('EVALUATION_REVEAL_DAYS', default=7, cast=int)
+EVALUATION_WINDOW_DAYS = config('EVALUATION_WINDOW_DAYS', default=30, cast=int)
+
 # Push mobile (FCM HTTP v1) : voir handy/push.py. Sans identifiants, aucun push n'est envoyé (jamais d'erreur).
 FCM_CREDENTIALS_FILE = config('FCM_CREDENTIALS_FILE', default='')
 FCM_CREDENTIALS_JSON = config('FCM_CREDENTIALS_JSON', default='')
@@ -470,6 +476,11 @@ CELERY_BEAT_SCHEDULE = {
         'schedule': 86400.0,
     },
     # Annonces : publication des annonces programmées échues et expiration des annonces dépassées.
+    # Évaluations : révélation des notes dont le délai est écoulé, détection des évaluations abusives ou répétées (liste de surveillance).
+    'reputation-tick': {
+        'task': 'reputation.tasks.tick',
+        'schedule': 3600.0,
+    },
     'announcements-tick': {
         'task': 'announcements.tasks.tick',
         'schedule': 60.0,

@@ -67,6 +67,7 @@ def reminders(today: date) -> int:
         notify_role(c, "principal", "installment_overdue", f"L'échéance {inst.sequence + 1} de « {c.title} » est en retard.", title="Échéance en retard", key=f"inst-{inst.pk}-overdue")
         notify_role(c, "worker", "installment_overdue", f"L'échéance {inst.sequence + 1} de « {c.title} » n'est pas réglée.", title="Échéance en retard", key=f"inst-{inst.pk}-overdue")
         n += 1
+    n += evaluation_invites(today)
     cutoff = timezone.now() - timedelta(days=STALE_PAYMENT_DAYS)
     for p in InstallmentPayment.objects.filter(status="declared", declared_at__lte=cutoff).select_related("installment", "installment__contract"):
         c = p.installment.contract
@@ -79,6 +80,38 @@ def reminders(today: date) -> int:
         for role in ("worker", "principal"):
             notify_role(c, role, "contract_renewal", text, title="Fin de contrat prochaine", key=f"ending-{c.end_date.isoformat()}")
         n += 1
+    return n
+
+
+def evaluation_invites(today: date) -> int:
+    """Invitation à évaluer, NON intrusive (une notification par échéance et par partie, jamais répétée) : à chaque échéance passée d'un contrat
+    en cours dont l'évaluation périodique est possible, puis une invitation d'évaluation finale à la clôture. Facultatives."""
+    from engagements.models import EngagementEvaluation
+    from engagements.rules import rules_for
+    from engagements.services.evaluations import FINAL_WINDOW_DAYS
+
+    n = 0
+    for c in EngagementContract.objects.filter(status__in=("active", "notice"), activated_at__isnull=False).select_related("worker", "principal"):
+        rules = rules_for(c.category_id)
+        if (today - c.activated_at.date()).days < rules.min_days_for_evaluation:
+            continue
+        inst = c.installments.filter(due_date__lte=today).order_by("-due_date").first()
+        if inst is None:
+            continue
+        for role, user in (("worker", c.worker), ("principal", c.principal)):
+            last = EngagementEvaluation.objects.filter(contract=c, author=user, kind="periodic").order_by("-created_at").first()
+            if last is not None and (today - timezone.localtime(last.created_at).date()).days < rules.evaluation_interval_days:
+                continue
+            notify_role(c, role, "evaluation_invite", f"C'est le moment de faire le point sur « {c.title} » : votre évaluation du mois est facultative et ne prend qu'une minute.",
+                        title="Évaluation du mois", key=f"evalinvite-{inst.pk}")
+            n += 1
+    for c in EngagementContract.objects.filter(status__in=("terminated", "completed"), ended_at__isnull=False, ended_at__gte=timezone.now() - timedelta(days=FINAL_WINDOW_DAYS)).select_related("worker", "principal"):
+        for role, user in (("worker", c.worker), ("principal", c.principal)):
+            if EngagementEvaluation.objects.filter(contract=c, author=user, kind="final").exists():
+                continue
+            notify_role(c, role, "evaluation_invite", f"« {c.title} » est terminé : laissez votre évaluation finale (facultative, sous {FINAL_WINDOW_DAYS} jours).",
+                        title="Évaluation finale", key="evalinvite-final")
+            n += 1
     return n
 
 

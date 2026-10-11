@@ -36,7 +36,7 @@ CATEGORY_BY_TYPE: Dict[str, str] = {
     "contract_amendment": "engagement", "contract_suspended": "engagement", "contract_notice": "engagement",
     "contract_ended": "engagement", "contract_renewal": "engagement", "installment_due": "engagement",
     "installment_overdue": "engagement", "payment_declared": "engagement", "payment_confirmed": "engagement",
-    "schedule_event": "engagement", "evaluation_received": "engagement", "engagement_dispute": "engagement",
+    "schedule_event": "engagement", "evaluation_received": "engagement", "evaluation_invite": "review", "engagement_dispute": "engagement",
 }
 
 # Catégories dont le push ne peut pas être désactivé (vérification d'identité, sécurité du compte).

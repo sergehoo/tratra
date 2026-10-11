@@ -41,7 +41,7 @@ def test_periodic_evaluations_wait_for_seniority_respect_the_interval_and_block_
     assert first.subject_id == worker.id and first.author_id == owner.id
     EngagementEvaluation.objects.filter(pk=first.pk).update(created_at=moment(day))                  # dates simulées cohérentes
     assert err(ev_svc.create, c, owner, good(), today=day + timedelta(days=1)).code in ("too_soon", "already_evaluated")
-    assert err(ev_svc.create, c, owner, good(), today=day + timedelta(days=60)).code == "too_soon"           # intervalle de 90 jours
+    assert err(ev_svc.create, c, owner, good(), today=day + timedelta(days=20)).code == "too_soon"           # intervalle de 30 jours (évaluation mensuelle)
     EngagementEvaluation.objects.filter(pk=first.pk).update(created_at=moment(day - timedelta(days=91)))
     second = ev_svc.create(c, owner, good(rating=5), today=day + timedelta(days=95))
     assert second.period_key != first.period_key

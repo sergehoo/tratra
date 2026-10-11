@@ -70,6 +70,7 @@ urlpatterns = [
     path("handy/", include("continuity.urls")),
     path("handy/", include("engagements.urls")),
     path("handy/", include("transport.urls")),
+    path("handy/", include("reputation.urls")),
     path("handy/", include("handy.api.urls")),
 
     # OpenAPI / documentation interactive

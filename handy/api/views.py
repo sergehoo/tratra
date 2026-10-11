@@ -281,7 +281,7 @@ def published_reviews():
     Publics seulement pour un artisan éligible (handy/eligibility.py) : un avis ne met pas
     en avant un artisan qui n'est pas publié.
     """
-    return Review.objects.filter(booking__status="completed", is_hidden=False,
+    return Review.objects.filter(booking__status="completed", is_hidden=False, revealed_at__isnull=False,
                                  booking__handyman_id__in=publishable_user_ids())
 
 
@@ -1178,6 +1178,14 @@ class ReviewViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
     owner_lookups = ("booking__client", "booking__handyman")
     ordering = ["-created_at"]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        user = self.request.user
+        if getattr(user, "is_staff", False):
+            return qs
+        # Évaluation mutuelle : l'artisan ne voit la note reçue qu'une fois révélée ; l'auteur voit toujours la sienne.
+        return qs.filter(Q(revealed_at__isnull=False) | Q(booking__client=user))
     pagination_class = DefaultPageNumberPagination
 
     def get_object(self):

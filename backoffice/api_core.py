@@ -105,6 +105,11 @@ class DashboardView(BOView):
             if count:
                 out["alerts"].append({"key": key, "label": label, "count": count, "href": href, "severity": severity})
 
+        if "reviews.moderate" in perms:
+            from reputation.models import EvaluationContest, EvaluationWatch
+
+            alert("watch_open", "Surveillance des évaluations à examiner", EvaluationWatch.objects.filter(status="open").count(), "/backoffice/reviews?tab=watch")
+            alert("contest_open", "Contestations d’évaluations à traiter", EvaluationContest.objects.filter(status="open").count(), "/backoffice/reviews?tab=watch")
         if "kyc.review" in perms:
             alert("kyc_pending", "Pièces KYC à examiner", HandymanDocument.objects.filter(status="pending").count(), "/backoffice/kyc")
         if "bookings.manage" in perms or "support.manage" in perms:
