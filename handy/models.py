@@ -1426,3 +1426,36 @@ class HeroSlide(models.Model):
         if self.cta_action == 'open_url' and not self.target_url:
             from django.core.exceptions import ValidationError
             raise ValidationError("Renseignez target_url pour l'action 'open_url'.")
+
+
+class UserAddress(models.Model):
+    """Adresse d'un compte : une principale (au plus), des secondaires, des favorites. Visible de son seul propriétaire :
+    jamais exposée par une API publique (les coordonnées sont des données privées). Une réservation garde sa propre adresse."""
+    SOURCE_CHOICES = [('manual', 'Saisie manuelle'), ('geocoder', 'Suggestion de recherche'), ('map', 'Point choisi sur la carte'),
+                      ('device', 'Position de l\'appareil (avec consentement)')]
+    MAX_PER_USER = 10
+
+    user = models.ForeignKey('User', on_delete=models.CASCADE, related_name='addresses')
+    label = models.CharField(max_length=60, blank=True, default='')
+    country = models.CharField(max_length=80, default="Côte d'Ivoire")
+    city = models.CharField(max_length=100)
+    commune = models.CharField(max_length=100, blank=True, default='')
+    street = models.CharField(max_length=255, blank=True, default='')
+    complement = models.CharField(max_length=255, blank=True, default='')
+    latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    coords_source = models.CharField(max_length=10, choices=SOURCE_CHOICES, blank=True, default='')
+    location_consent_at = models.DateTimeField(null=True, blank=True)  # renseigné si les coordonnées viennent de l'appareil
+    is_primary = models.BooleanField(default=False)
+    is_favorite = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-is_primary', '-is_favorite', 'id']
+        constraints = [
+            UniqueConstraint(fields=['user'], condition=Q(is_primary=True), name='uniq_primary_address_per_user'),
+        ]
+
+    def __str__(self):
+        return f"Adresse #{self.pk} de {self.user_id}"

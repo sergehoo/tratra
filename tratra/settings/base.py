@@ -229,6 +229,7 @@ REST_FRAMEWORK = {
         'login': config('THROTTLE_LOGIN', default='10/min'),
         'recovery': config('THROTTLE_RECOVERY', default='20/hour'),
         'webhook': config('THROTTLE_WEBHOOK', default='120/min'),
+        'geo': config('THROTTLE_GEO', default='30/min'),  # recherche d'adresse (appels au fournisseur cartographique)
         'verify': config('THROTTLE_VERIFY', default='60/min'),  # vérification publique d'un QR Tratra ID
         'mfa': config('THROTTLE_MFA', default='20/min'),  # codes de double authentification du personnel
         'payment_refresh': config('THROTTLE_PAYMENT_REFRESH', default='30/min'),  # vérifications de paiement auprès du prestataire
@@ -418,6 +419,16 @@ PUBLIC_WEB_URL = config('PUBLIC_WEB_URL', default='http://localhost:3000').rstri
 # d'OSRM en production.
 ROUTING_OSRM_URL = config('ROUTING_OSRM_URL', default='')
 ROUTING_TIMEOUT = config('ROUTING_TIMEOUT', default=3, cast=int)
+
+# Adresses : fournisseur de recherche / géocodage (nominatim | google | none). Aucun appel externe avec `none` (saisie manuelle).
+GEO_PROVIDER = config('GEO_PROVIDER', default='nominatim')
+GEO_NOMINATIM_URL = config('GEO_NOMINATIM_URL', default='https://nominatim.openstreetmap.org')
+GEO_GOOGLE_API_KEY = config('GEO_GOOGLE_API_KEY', default='')  # secret : jamais renvoyé par l'API ni journalisé
+GEO_COUNTRY = config('GEO_COUNTRY', default='ci')
+GEO_TIMEOUT = config('GEO_TIMEOUT', default=4, cast=int)
+GEO_CACHE_TTL = config('GEO_CACHE_TTL', default=86400, cast=int)
+GEO_MAX_CALLS_PER_MINUTE = config('GEO_MAX_CALLS_PER_MINUTE', default=30, cast=int)
+GEO_USER_AGENT = config('GEO_USER_AGENT', default='Tratra/1.0 (contact: support@tratra.net)')
 
 # Push mobile (FCM HTTP v1) : voir handy/push.py. Sans identifiants, aucun push n'est envoyé (jamais d'erreur).
 FCM_CREDENTIALS_FILE = config('FCM_CREDENTIALS_FILE', default='')

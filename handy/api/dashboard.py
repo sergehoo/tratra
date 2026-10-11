@@ -22,6 +22,7 @@ from rest_framework.response import Response
 
 from handy.api.serializers import absolute_media_url
 from handy.eligibility import is_publishable, profile_checklist
+from handy import addresses as address_service
 from handy.models import (
     Booking, CompanyProfile, Conversation, HandymanDocument, HandymanProfile, Message, Notification, Review, Service,
     artisan_available_earnings,
@@ -227,10 +228,11 @@ def me_dashboard(request):
         "user": {
             "id": user.id,
             "first_name": user.first_name or "",
-            "display_name": public_name(user) if user.first_name else (user.username or "Membre Tratra"),
+            "display_name": public_name(user) if user.first_name else "Membre Tratra",  # jamais l'identifiant technique
             "phone": user.phone or None,
             "is_verified": bool(user.is_verified),
             "user_type": user.user_type,
+            "address_complete": address_service.is_complete(user),  # demandée avant la première demande ou prestation, jamais à l'inscription
         },
         "capabilities": {
             "client": user.user_type != "admin",
