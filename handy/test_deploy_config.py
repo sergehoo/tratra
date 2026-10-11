@@ -364,3 +364,36 @@ def test_check_env_catches_spaces_around_equals_urls_in_allowed_hosts_and_duplic
     env.write_text(fixed, encoding="utf-8")
     issues = []
     assert module.check(module.parse(env, issues))[0] == [] and issues == []
+
+
+# ---- Volumes d'un ancien serveur (créés par une image qui tournait en root) ----------------------------------------------
+
+def _run_volume_check(*dirs):
+    """Exécute la VRAIE fonction de l'entrypoint (extraite du script) sur des dossiers donnés."""
+    src = (ROOT / "entrypoint.sh").read_text()
+    func = re.search(r"^check_volumes_writable\(\) \{\n.*?^\}\n", src, re.S | re.M).group(0)
+    script = 'error() { printf "%s\\n" "$*" >&2; }\nset -eu\n' + func + 'check_volumes_writable "$@"\n'
+    return subprocess.run(["sh", "-c", script, "sh", *map(str, dirs)], capture_output=True, text=True)
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root ignore les droits d'écriture : le cas ne peut pas se produire")
+def test_entrypoint_refuses_a_volume_the_app_user_cannot_write_and_names_the_repair(tmp_path):
+    static = tmp_path / "staticfiles"
+    (static / "img").mkdir(parents=True)
+    (static / "img" / "favicon.png").write_text("x")
+    (static / "img").chmod(0o555)  # dossier « à root » : le fichier ne peut pas être supprimé (cas réel du serveur)
+    try:
+        res = _run_volume_check(static, tmp_path / "absent")
+    finally:
+        (static / "img").chmod(0o755)
+    assert res.returncode != 0
+    assert "n'est pas inscriptible" in res.stderr
+    assert "chown -R" in res.stderr and "--user root" in res.stderr and "/app/staticfiles /app/media" in res.stderr
+
+
+def test_entrypoint_accepts_writable_or_missing_volumes_and_runs_the_check_before_collectstatic(tmp_path):
+    (tmp_path / "staticfiles" / "img").mkdir(parents=True)
+    assert _run_volume_check(tmp_path / "staticfiles", tmp_path / "absent").returncode == 0
+    src = (ROOT / "entrypoint.sh").read_text()
+    sequence = src.split("# ---------- Run sequence ----------")[1]
+    assert sequence.index("check_volumes_writable /app/staticfiles /app/media") < sequence.index("\ncollect_static")

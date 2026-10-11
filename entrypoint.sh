@@ -170,6 +170,20 @@ PYCODE
   esac
 }
 
+# Un volume créé par une ancienne image (qui tournait en root) reste à root : collectstatic échouerait en PermissionError
+# au milieu d'une trace Python. Seuls les DOSSIERS comptent (supprimer/créer un fichier exige l'écriture sur son dossier).
+check_volumes_writable() {
+  for d in "$@"; do
+    [ -d "$d" ] || continue
+    bad="$(find "$d" -xdev -type d -exec sh -c 'for p; do [ -w "$p" ] || echo "$p"; done' sh {} + 2>/dev/null | head -n 1)"
+    if [ -n "$bad" ]; then
+      error "$bad n'est pas inscriptible par $(id -un) (uid $(id -u)) : volume créé par une ancienne image."
+      error "Réparer (une fois) : docker compose run --rm --no-deps --user root --entrypoint sh tratraweb -c 'chown -R $(id -u):$(id -g) /app/staticfiles /app/media'"
+      return 1
+    fi
+  done
+}
+
 ensure_dirs_permissions() {
   mkdir -p /app/staticfiles /app/media
   chmod -R u+rwX,go+rX /app/staticfiles /app/media || true
@@ -206,6 +220,7 @@ wait_for_redis
 django_checks
 channels_preflight
 run_migrations
+check_volumes_writable /app/staticfiles /app/media
 collect_static
 ensure_dirs_permissions
 create_superuser_if_needed

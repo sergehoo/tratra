@@ -146,6 +146,15 @@ docker compose run --rm --no-deps tratraweb python manage.py migrate
 ```
 Ne lancer `docker compose up -d` qu'une fois `migrate` terminé sans erreur.
 
+### Si l'API redémarre en boucle avec « PermissionError: … /app/staticfiles/… » (volumes d'un ancien serveur)
+
+Le conteneur tourne en utilisateur non-root (`appuser`, uid 10001). Un volume `static_volume` / `media_volume` créé par une ancienne image qui tournait en root reste à root :
+`collectstatic` ne peut ni supprimer ni écrire dedans et l'entrypoint s'arrête après `migrate`. L'entrypoint le détecte désormais avant `collectstatic` et affiche cette commande. Réparation, une seule fois (ne supprime rien) :
+
+```bash
+docker compose run --rm --no-deps --user root --entrypoint sh tratraweb -c 'chown -R 10001:10001 /app/staticfiles /app/media' && docker compose up -d && docker compose ps
+```
+
 ## 9. Ce qui demande une intervention humaine 👤
 
 0. ~~Image MinIO de production~~ : corrigée — le compose de production construit `docker/minio` comme le staging (le serveur réel avait échoué sur « pull access denied for minio/mc »).
