@@ -69,6 +69,7 @@ export const SUBS: Record<string, readonly SubDef[]> = {
     { tab: "cancellation", label: "Annulation", keywords: "pénalité politique" },
     { tab: "trust", label: "Tratra Trust", keywords: "seuils poids badges score" },
     { tab: "coupons", label: "Codes promo", keywords: "promotion réduction" },
+    { tab: "transport", label: "Transport", keywords: "déplacement frais kilomètre tranches horaires zones forfait" },
   ],
   security: [
     { tab: "staff", label: "Personnel et rôles", keywords: "administrateurs double authentification mfa" },

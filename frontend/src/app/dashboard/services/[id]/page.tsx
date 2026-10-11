@@ -35,6 +35,9 @@ import {
 import { useAuth } from "@/lib/auth";
 import { formatDuration, priceLabel } from "@/lib/format";
 import type { Service } from "@/lib/types";
+import { TransportEstimate } from "@/components/transport/TransportEstimate";
+import { listAddresses, type Address } from "@/lib/addresses";
+import { changedTransportQuote, fcfa, type TransportQuote } from "@/lib/transport";
 import { ArtisanLine } from "../../_components/ArtisanLine";
 import { formatDateTimeLong, parseDate } from "../../_components/dates";
 import { ServiceCover } from "../../_components/ServiceCover";
@@ -93,6 +96,12 @@ export default function ServiceDetailPage() {
   const [coords, setCoords] = useState<{ lat: number; lng: number; accuracy: number } | null>(null);
   const [locating, setLocating] = useState(false);
   const [locateError, setLocateError] = useState("");
+  // Adresses enregistrées (une différente par réservation), devis de déplacement vu par le client et avis de changement serveur.
+  const [saved, setSaved] = useState<Address[]>([]);
+  const [addressId, setAddressId] = useState<number | null>(null);
+  const [commune, setCommune] = useState("");
+  const [quote, setQuote] = useState<TransportQuote | null>(null);
+  const [transportNotice, setTransportNotice] = useState("");
   const [pay, setPay] = useState(true);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>(PAYMENT_METHODS[0].value);
   const [createdBookingId, setCreatedBookingId] = useState<number | null>(null);
@@ -130,6 +139,11 @@ export default function ServiceDetailPage() {
   useEffect(() => {
     void loadService();
   }, [loadService]);
+
+  useEffect(() => {
+    if (!user) return;
+    listAddresses().then((r) => setSaved(r.results)).catch(() => setSaved([])); // facultatif : sans adresses enregistrées, la saisie manuelle reste possible
+  }, [user]);
 
   // Restauration du brouillon une fois le compte et le service connus (jamais celui d'un autre compte).
   useEffect(() => {
@@ -231,6 +245,8 @@ export default function ServiceDetailPage() {
             description: form.description,
             type: "scheduled",
             ...(coords ? { lat: coords.lat, lng: coords.lng } : {}),
+            ...(commune ? { commune } : {}),
+            ...(quote ? { expected_transport_fee: quote.amount } : {}),
             minutes: 60,
             category_id: svc.category ?? svc.category_detail?.id,
           }),
@@ -246,6 +262,13 @@ export default function ServiceDetailPage() {
         router.push(`/dashboard/bookings/${bookingId}`);
       }
     } catch (requestError) {
+      const changed = changedTransportQuote(requestError);
+      if (changed && !bookingId) {
+        // Le serveur a recalculé un autre montant : rien n'est réservé, le client confirme le nouveau montant.
+        setQuote(changed);
+        setTransportNotice(`Les frais de déplacement ont changé : ${fcfa(changed.amount)}. Vérifiez puis confirmez à nouveau.`);
+        return;
+      }
       const existing = duplicateBookingId(requestError);
       if (existing !== null && !bookingId) {
         // Doublon (double clic, renvoi) : la réservation existe déjà, on la montre au lieu d'en créer une autre.
@@ -425,6 +448,29 @@ export default function ServiceDetailPage() {
                   required
                   disabled={bookingCreated}
                 />
+                {saved.length ? (
+                  <div>
+                    <label htmlFor="saved-address" className="mb-1 block text-sm font-semibold text-ink">Utiliser une de mes adresses</label>
+                    <select
+                      id="saved-address"
+                      value={addressId ?? ""}
+                      disabled={bookingCreated}
+                      onChange={(e) => {
+                        const a = saved.find((x) => x.id === Number(e.target.value));
+                        setAddressId(a?.id ?? null);
+                        if (a) {
+                          setForm((f) => ({ ...f, address: [a.street, a.commune].filter(Boolean).join(", ") || f.address, city: a.city }));
+                          setCommune(a.commune);
+                          setCoords(a.latitude !== null && a.longitude !== null ? { lat: a.latitude, lng: a.longitude, accuracy: 0 } : null);
+                        }
+                      }}
+                      className="block min-h-[44px] w-full rounded-control border border-line bg-white px-3 text-sm text-ink focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
+                    >
+                      <option value="">Saisir une autre adresse</option>
+                      {saved.map((a) => <option key={a.id} value={a.id}>{(a.label || "Adresse") + (a.is_primary ? " (principale)" : "")} — {[a.street || a.commune, a.city].filter(Boolean).join(", ")}</option>)}
+                    </select>
+                  </div>
+                ) : null}
                 <div className="space-y-1.5">
                   <Button
                     type="button"
@@ -477,6 +523,24 @@ export default function ServiceDetailPage() {
                     disabled={bookingCreated}
                   />
                 </div>
+                {svc ? (
+                  <TransportEstimate
+                    quote={quote}
+                    onQuote={setQuote}
+                    notice={transportNotice}
+                    input={
+                      coords || addressId
+                        ? {
+                            service: svc.id,
+                            ...(addressId ? { address_id: addressId } : coords ? { lat: coords.lat, lng: coords.lng } : {}),
+                            ...(commune ? { commune } : {}),
+                            city: form.city,
+                            ...(form.booking_date && !Number.isNaN(new Date(form.booking_date).getTime()) ? { when: new Date(form.booking_date).toISOString() } : {}),
+                          }
+                        : null
+                    }
+                  />
+                ) : null}
               </FormSection>
 
               <FormSection step={3} title="Votre besoin">

@@ -4,6 +4,7 @@ import { Plus } from "lucide-react";
 import { Alert, Badge, Button, Checkbox, DataTable, EmptyState, Input, Modal, PageHeader, SkeletonPage, Tabs, TextField, type Column } from "@/components/ds";
 import { bo, boError, fieldErrors } from "@/lib/bo";
 import { Section, dt, useNotice, useTabParam } from "../_components/ui";
+import { TransportSettings } from "./TransportSettings";
 
 interface Rule { id: number; category: number | null; category_name: string | null; fee_percent: string; fee_min_xof: number; active: boolean }
 interface Policy { id: number; name: string; free_until_minutes: number; fee_percent: string; active: boolean }
@@ -33,7 +34,7 @@ function FormModal({ open, title, description, children, onClose, onSubmit, subm
   );
 }
 
-const TABS = ["integrations", "commissions", "cancellation", "trust", "coupons"] as const;
+const TABS = ["integrations", "commissions", "cancellation", "trust", "coupons", "transport"] as const;
 
 export default function SettingsPage() {
   const [tab, setTab] = useTabParam(TABS, "integrations");
@@ -143,7 +144,7 @@ export default function SettingsPage() {
       <PageHeader title="Réglages" description="Règles métier et état des intégrations. Chaque modification est validée, puis journalisée avec l’ancienne et la nouvelle valeur." />
       {notice ? <p role="status" className="mb-4 rounded-xl bg-successSoft px-4 py-3 text-sm font-semibold text-successInk">{notice}</p> : null}
       <Tabs ariaLabel="Sections des réglages" value={tab} onChange={setTab} className="mb-5"
-        items={[{ id: "integrations", label: "Intégrations" }, { id: "commissions", label: "Commissions", count: s.pricing_rules.length }, { id: "cancellation", label: "Annulation" }, { id: "trust", label: "Tratra Trust" }, { id: "coupons", label: "Codes promo", count: s.coupons.length }]} />
+        items={[{ id: "integrations", label: "Intégrations" }, { id: "commissions", label: "Commissions", count: s.pricing_rules.length }, { id: "cancellation", label: "Annulation" }, { id: "trust", label: "Tratra Trust" }, { id: "coupons", label: "Codes promo", count: s.coupons.length }, { id: "transport", label: "Transport" }]} />
 
       {tab === "integrations" ? (
         <Section title="Intégrations" className="mb-6">
@@ -186,6 +187,7 @@ export default function SettingsPage() {
       </Section>
       ) : null}
 
+      {tab === "transport" ? <TransportSettings onNotice={setNotice} /> : null}
       {tab === "coupons" ? (
         <Section title="Codes promotionnels" actions={<Button size="sm" leftIcon={<Plus aria-hidden className="h-4 w-4" />} onClick={() => { setCf({ code: "", kind: "percent", value: "", valid_from: "", valid_to: "" }); setCouErr({}); setCouFail(""); setCou(true); }}>Nouveau code</Button>}>
         <p className="mb-3 text-xs text-ash">Une fois créé, seule l’activation d’un code est modifiable (jamais sa valeur).</p>
