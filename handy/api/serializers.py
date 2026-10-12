@@ -983,6 +983,14 @@ class NotificationSerializer(serializers.ModelSerializer):
         read_only_fields = ["created_at"]
 
 
+# Signatures (octets de tête) des formats acceptés pour les pièces KYC.
+KYC_SIGNATURES = (
+    (b"%PDF-", "application/pdf", ".pdf"),
+    (b"\xff\xd8\xff", "image/jpeg", ".jpg"),
+    (b"\x89PNG\r\n\x1a\n", "image/png", ".png"),
+)
+
+
 class HandymanDocumentSerializer(serializers.ModelSerializer):
     # lecture détail (le 'handyman' est posé côté serveur = profil du requérant)
     handyman_detail = HandymanProfileSerializer(source="handyman", read_only=True)
@@ -1006,20 +1014,19 @@ class HandymanDocumentSerializer(serializers.ModelSerializer):
                 f"Le document ne doit pas dépasser {max_size // (1024 * 1024)} Mo."
             )
 
-        content_type = (getattr(uploaded_file, "content_type", "") or "").lower()
-        allowed_extensions = {
-            "application/pdf": {".pdf"},
-            "image/jpeg": {".jpg", ".jpeg"},
-            "image/png": {".png"},
-        }
-        extension = Path(uploaded_file.name).suffix.lower()
-        if (
-            content_type not in settings.KYC_ALLOWED_CONTENT_TYPES
-            or extension not in allowed_extensions.get(content_type, set())
-        ):
+        # Le type est déterminé par le CONTENU du fichier (signature), jamais par le nom ni le type déclaré par le client : les applications
+        # mobiles renvoient parfois un nom sans extension, ou l'extension d'origine (.webp, .heic) sur des octets déjà convertis en JPEG.
+        # Un fichier dont le contenu n'est pas un PDF, un JPEG ou un PNG reste refusé, quel que soit son nom.
+        head = uploaded_file.read(8)
+        uploaded_file.seek(0)
+        detected = next(((ctype, ext) for sig, ctype, ext in KYC_SIGNATURES if head.startswith(sig)), None)
+        if detected is None or detected[0] not in settings.KYC_ALLOWED_CONTENT_TYPES:
             raise serializers.ValidationError(
                 "Formats autorisés : PDF, JPEG et PNG."
             )
+        # Type et extension du fichier conservé = ceux du contenu réel (cohérence pour le stockage et la revue).
+        uploaded_file.content_type = detected[0]
+        uploaded_file.name = f"{Path(uploaded_file.name or '').stem or 'document'}{detected[1]}"
         return uploaded_file
 
     @extend_schema_field(OpenApiTypes.URI)
