@@ -90,3 +90,20 @@ def test_a_non_superuser_staff_cannot_delete_the_account_through_the_cascade():
     c = _login(superuser=False)
     resp = _delete_user(c, pro)
     assert User.objects.filter(pk=pro.pk).exists() and resp.status_code in (200, 302, 403)
+
+
+def test_a_storage_outage_during_an_upload_is_a_clear_503_not_an_opaque_500():
+    """Journal de production : « Connect timeout on endpoint URL … minioapi » pendant un dépôt de pièce ou une photo de profil → 500."""
+    from botocore.exceptions import ConnectTimeoutError
+    from rest_framework.test import APIClient
+
+    pro = artisan("outage_pro", eligible=False)
+    api = APIClient()
+    api.force_authenticate(pro)
+    from django.core.files.uploadedfile import SimpleUploadedFile
+
+    pdf = SimpleUploadedFile("id.pdf", b"%PDF-1.4 fake", content_type="application/pdf")
+    with mock.patch("django.core.files.storage.FileSystemStorage.save", side_effect=ConnectTimeoutError(endpoint_url="https://minio.example")):
+        r = api.post("/handy/handyman-docs/", {"document_type": "id_card", "file": pdf}, format="multipart")
+    assert r.status_code == 503 and r.json()["code"] == "storage_unavailable" and "réessayez" in r.json()["detail"]
+    # (la requête est annulée : set_rollback marque la transaction de test, aucune interrogation de la base ensuite)

@@ -13,6 +13,7 @@ EXACTEMENT leur format historique : les clients installés (React, Flutter) les
 lisent tels quels. Seule exception ajoutée : une suppression bloquée par une
 relation ``PROTECT`` (migration 0029) renvoie 409 au lieu d'une erreur 500.
 """
+import logging
 from typing import Dict, List, Optional
 
 from django.db.models import ProtectedError, RestrictedError
@@ -21,6 +22,8 @@ from rest_framework.exceptions import APIException
 from rest_framework.response import Response
 from rest_framework.views import exception_handler as drf_exception_handler
 from rest_framework.views import set_rollback
+
+logger = logging.getLogger(__name__)
 
 FieldErrors = Dict[str, List[Dict[str, str]]]
 
@@ -68,6 +71,17 @@ class CodedAPIException(APIException):
         return payload
 
 
+STORAGE_UNAVAILABLE_DETAIL = "Le stockage des fichiers est momentanément indisponible. Votre saisie n'a pas été perdue : réessayez dans quelques instants."
+
+
+def _is_storage_outage(exc) -> bool:
+    try:
+        from botocore.exceptions import BotoCoreError, ClientError
+    except ImportError:  # pragma: no cover - sans boto3, aucun stockage S3
+        return False
+    return isinstance(exc, (BotoCoreError, ClientError))
+
+
 def exception_handler(exc, context):
     """Gestionnaire global : format codé pour ``CodedAPIException``, 409 pour une
     suppression protégée, comportement DRF inchangé pour tout le reste."""
@@ -79,4 +93,9 @@ def exception_handler(exc, context):
         # Depuis 0029 : refus explicite plutôt qu'une erreur 500.
         set_rollback()
         return Response({"detail": PROTECTED_DELETE_DETAIL}, status=http_status.HTTP_409_CONFLICT)
+    if _is_storage_outage(exc):
+        # Stockage d'objets (MinIO) injoignable ou en erreur : message clair et 503 (réessayer), plutôt qu'une erreur 500 opaque.
+        set_rollback()
+        logger.error("Stockage de fichiers indisponible (%s) sur %s", type(exc).__name__, getattr(context.get("request"), "path", "?"))
+        return Response({"code": "storage_unavailable", "detail": STORAGE_UNAVAILABLE_DETAIL}, status=http_status.HTTP_503_SERVICE_UNAVAILABLE)
     return drf_exception_handler(exc, context)
