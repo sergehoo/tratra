@@ -1,6 +1,7 @@
+from .admin_utils import ReadOnlyHistoryAdmin
 from .models import (
     HandymanDocument, ServiceImage, Report, PaymentLog, Device, IPBlacklist, ServiceCategory, Service, Booking,
-    Notification, Message, DepositTransaction, HeroSlide
+    Notification, Message, DepositTransaction, HeroSlide, Review, UserAddress,
 )
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
@@ -16,9 +17,9 @@ admin.empty_value_display = '**Empty**'
 
 class CustomUserAdmin(UserAdmin):
     model = User
-    list_display = ('username', 'email', 'phone', 'user_type', 'is_verified', 'is_staff', 'latitude',
-                    'longitude')
-    list_filter = ('user_type', 'is_verified', 'is_staff', 'is_superuser')
+    # Pas de coordonnées dans la liste : données privées (elles restent dans la fiche, réservée aux superutilisateurs côté Back-Office).
+    list_display = ('username', 'first_name', 'last_name', 'phone', 'email', 'is_active', 'is_verified', 'is_staff', 'date_joined', 'last_login')
+    list_filter = ('is_active', 'is_verified', 'is_staff', 'is_superuser', 'user_type')
     search_fields = ('username', 'email', 'phone', 'first_name', 'last_name')
     ordering = ('-date_joined',)
 
@@ -247,13 +248,13 @@ class ServiceCategoryAdmin(admin.ModelAdmin):
 @admin.register(Service)
 class ServiceAdmin(admin.ModelAdmin):
     list_display = ('title', 'handyman', 'category', 'price_type', 'price', 'is_active')
-    list_filter = ('is_active', 'price_type', 'category')
+    list_filter = ('is_active', 'requires_travel', 'price_type', 'category')
     search_fields = ('title', 'description', 'handyman__username', 'handyman__email')
     raw_id_fields = ('handyman', 'category')  # Pour les relations avec beaucoup d'instances
     readonly_fields = ('created_at', 'updated_at')
     fieldsets = (
         (None, {'fields': ('handyman', 'category', 'title', 'description','banner','image_url')}),
-        ('Pricing', {'fields': ('price_type', 'price', 'duration')}),
+        ('Pricing', {'fields': ('price_type', 'price', 'duration', 'requires_travel')}),
         ('Status', {'fields': ('is_active',)}),
         ('Timestamps', {'fields': ('created_at', 'updated_at')}),
     )
@@ -273,11 +274,12 @@ class ServiceAdmin(admin.ModelAdmin):
 
 @admin.register(Booking)
 class BookingAdmin(admin.ModelAdmin):
-    list_display = ('id', 'client', 'handyman', 'service', 'booking_date', 'status', 'short_address')
+    list_display = ('id', 'client', 'handyman', 'service', 'booking_date', 'status', 'transport_fee', 'short_address')
     list_filter = ('status', 'city', 'booking_date')
     search_fields = ('client__username', 'handyman__username', 'address', 'city', 'postal_code')
     raw_id_fields = ('client', 'handyman', 'service')
-    readonly_fields = ('created_at', 'updated_at')
+    # Le déplacement est calculé par le serveur et FIGÉ à la réservation (tarif, distance, créneau, version) : jamais modifié à la main.
+    readonly_fields = ('created_at', 'updated_at', 'transport_fee', 'transport_quote')
     date_hierarchy = 'booking_date'
 
     def short_address(self, obj):
@@ -337,3 +339,23 @@ class HeroSlideAdmin(admin.ModelAdmin):
             'fields': ('created_by', 'created_at', 'updated_at')
         }),
     )
+
+
+@admin.register(UserAddress)
+class UserAddressAdmin(ReadOnlyHistoryAdmin, admin.ModelAdmin):
+    """Adresses des comptes : lecture seule, SANS coordonnées (données privées) ; elles se corrigent depuis l'application du titulaire."""
+    list_display = ('user', 'label', 'city', 'commune', 'is_primary', 'is_favorite', 'coords_source', 'updated_at')
+    list_filter = ('is_primary', 'is_favorite', 'coords_source', 'country')
+    search_fields = ('user__username', 'user__phone', 'user__first_name', 'user__last_name', 'city', 'commune', 'street')
+    raw_id_fields = ('user',)
+    exclude = ('latitude', 'longitude')
+
+
+@admin.register(Review)
+class ReviewAdmin(ReadOnlyHistoryAdmin, admin.ModelAdmin):
+    """Avis clients : lecture seule (la modération — masquer, republier — se fait dans le Back-Office, motivée et journalisée)."""
+    list_display = ('id', 'booking', 'rating', 'is_hidden', 'revealed_at', 'created_at')
+    list_filter = ('is_hidden', 'rating', ('revealed_at', admin.EmptyFieldListFilter))
+    search_fields = ('booking__id', 'booking__client__username', 'booking__handyman__username', 'comment')
+    raw_id_fields = ('booking',)
+    date_hierarchy = 'created_at'
