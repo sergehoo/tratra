@@ -2,7 +2,7 @@ from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
 from announcements.api import AnnouncementAdminViewSet
-from backoffice import api_core, api_engagements, api_mfa, api_money, api_ops, api_people, api_system, api_transport, api_reputation, api_intelligence, api_biometrics
+from backoffice import api_core, api_engagements, api_mfa, api_money, api_ops, api_people, api_system, api_transport, api_reputation, api_intelligence, api_biometrics, api_messaging
 
 router = DefaultRouter()
 router.register("announcements", AnnouncementAdminViewSet, basename="bo-announcements")
@@ -37,6 +37,15 @@ urlpatterns = [
     path("risk/cases/<int:pk>/", api_intelligence.RiskCaseDetail.as_view(), name="bo-risk-case"),
     path("risk/cases/<int:pk>/decision/", api_intelligence.RiskCaseDecide.as_view(), name="bo-risk-decision"),
     path("ai/status/", api_intelligence.AIStatus.as_view(), name="bo-ai-status"),
+    # Messagerie administrateur : écrire à un ou plusieurs membres (envoi individuel), suivre les envois, répondre
+    path("messages/preview/", api_messaging.MessagePreview.as_view(), name="bo-message-preview"),
+    path("messages/send/", api_messaging.MessageSend.as_view(), name="bo-message-send"),
+    path("messages/batches/", api_messaging.BatchList.as_view(), name="bo-message-batches"),
+    path("messages/batches/<int:pk>/", api_messaging.BatchDetail.as_view(), name="bo-message-batch"),
+    path("messages/threads/", api_messaging.ThreadList.as_view(), name="bo-message-threads"),
+    path("messages/threads/<int:pk>/", api_messaging.ThreadDetail.as_view(), name="bo-message-thread"),
+    path("messages/threads/<int:pk>/reply/", api_messaging.ThreadReply.as_view(), name="bo-message-reply"),
+    path("messages/threads/<int:pk>/read/", api_messaging.ThreadRead.as_view(), name="bo-message-read"),
     # Tratra Trust
     path("trust/", api_people.TrustList.as_view(), name="bo-trust"),
     path("trust/config/", api_people.TrustConfigView.as_view(), name="bo-trust-config"),

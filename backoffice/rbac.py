@@ -23,6 +23,8 @@ PERMISSIONS = {
     "finance.view": "Consulter paiements, commissions, remboursements",
     "finance.manage": "Rembourser, valider un retrait",
     "announcements.manage": "Créer, programmer et publier des annonces",
+    "messages.send": "Messagerie : écrire à un membre ou à quelques membres choisis (jusqu'à 20), répondre à ses réponses",
+    "messages.bulk": "Messagerie : envoi individuel à de nombreux membres (sélection par critères ou plus de 20 destinataires)",
     "notifications.view": "Historique et état des envois (push, SMS, e-mail)",
     "continuity.view": "Activités en cours et erreurs de synchronisation",
     "support.manage": "Tickets, réclamations et médiation",
@@ -33,10 +35,10 @@ PERMISSIONS = {
 
 ROLES = {
     "super_admin": set(PERMISSIONS),
-    "ops": {"dashboard.view", "users.view", "kyc.review", "trust.manage", "tratra_id.manage", "services.moderate", "bookings.view",
+    "ops": {"messages.send", "messages.bulk", "dashboard.view", "users.view", "kyc.review", "trust.manage", "tratra_id.manage", "services.moderate", "bookings.view",
             "bookings.manage", "live.view", "reviews.moderate", "business.manage", "continuity.view", "analytics.view",
             "notifications.view", "engagements.view", "engagements.manage"},
-    "support": {"dashboard.view", "users.view", "bookings.view", "bookings.manage", "reviews.moderate", "support.manage",
+    "support": {"messages.send", "dashboard.view", "users.view", "bookings.view", "bookings.manage", "reviews.moderate", "support.manage",
                 "notifications.view", "continuity.view", "engagements.view", "engagements.manage"},
     "finance": {"dashboard.view", "bookings.view", "finance.view", "finance.manage", "analytics.view", "business.manage", "engagements.view"},
     "marketing": {"dashboard.view", "announcements.manage", "notifications.view", "analytics.view"},
