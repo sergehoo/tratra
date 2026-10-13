@@ -113,11 +113,14 @@ function MessagesContent() {
     }
   }, [markRead]);
 
+  // La conversation n'est réinitialisée que lorsqu'on en CHANGE (jamais parce qu'un compteur ou un contexte a évolué).
+  const loadThreadRef = useRef(loadThread);
+  loadThreadRef.current = loadThread;
   useEffect(() => {
     setThread(null); setMessages([]); setThreadError(""); setSendError(""); setFile(null); setMenu(false);
     stick.current = true;
-    if (selected) void loadThread(selected, false);
-  }, [selected, loadThread]);
+    if (selected) void loadThreadRef.current(selected, false);
+  }, [selected]);
 
   // Ouverture directe d'un fil avec un membre (ex. depuis un profil) : /dashboard/messages?u=<id>
   useEffect(() => {

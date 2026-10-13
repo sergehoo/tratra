@@ -42,13 +42,17 @@ export function StatusViewer({ groups, startGroup = 0, onClose, onViewed }: Prop
   const changed = useRef(false);
   const holdTimer = useRef<ReturnType<typeof setTimeout>>();
   const holdActive = useRef(false);
+  const openedAt = useRef(0);
 
   const group = groups[gi];
   const live = useMemo(() => group?.statuses.filter((s) => !removed.includes(s.id)) ?? [], [group, removed]);
   const status: StatusItem | undefined = live[si];
   const paused = holding || userPaused || sheet !== null || replyFocus;
 
-  useEffect(() => setMounted(true), []);
+  useEffect(() => {
+    setMounted(true);
+    openedAt.current = performance.now();
+  }, []);
   useEffect(() => {
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
@@ -193,6 +197,8 @@ export function StatusViewer({ groups, startGroup = 0, onClose, onViewed }: Prop
   }
   function onPointerUp(zone: "prev" | "next") {
     clearTimeout(holdTimer.current);
+    // Le geste qui a ouvert la visionneuse (double appui, clic « fantôme ») ne doit pas faire sauter un statut.
+    if (performance.now() - openedAt.current < 400) return;
     if (holdActive.current) {
       holdActive.current = false;
       setHolding(false);

@@ -73,9 +73,9 @@ export function StatusBar() {
         ))}
         {feed.discover_count > 0 ? (
           <li className="shrink-0">
-            <Link href="/dashboard/statuses" className="flex w-[68px] flex-col items-center gap-1.5 rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2">
-              <span className="grid h-16 w-16 place-items-center rounded-full bg-primarySoft text-primary"><Compass aria-hidden className="h-6 w-6" /></span>
-              <span className="w-full truncate text-center text-[11px] font-semibold text-primaryDark">Découvrir ({feed.discover_count})</span>
+            <Link href="/dashboard/statuses" aria-label={`Découvrir les statuts : ${feed.discover_count} membre${feed.discover_count > 1 ? "s" : ""} à découvrir`} className="relative flex w-[68px] flex-col items-center gap-1.5 rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2">
+              <span className="relative grid h-16 w-16 place-items-center rounded-full bg-primarySoft text-primary"><Compass aria-hidden className="h-6 w-6" /><span aria-hidden className="absolute -right-0.5 top-0 grid h-5 min-w-5 place-items-center rounded-full bg-accent px-1 text-[11px] font-bold text-ink ring-2 ring-white">{feed.discover_count}</span></span>
+              <span className="w-full truncate text-center text-[11px] font-semibold text-primaryDark">Découvrir</span>
             </Link>
           </li>
         ) : null}
