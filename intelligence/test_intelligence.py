@@ -89,8 +89,27 @@ def _pro(name, first="Awa", last="Kone"):
     return u
 
 
+def _img(seed: bytes) -> bytes:
+    """Vraie image JPEG nette et lisible, déterministe : mêmes octets d'entrée = même fichier (détection des doublons), octets différents = fichier différent."""
+    import hashlib
+    import io
+
+    from PIL import Image, ImageDraw
+
+    h = hashlib.sha256(seed).digest()
+    img = Image.new("RGB", (1000, 700), (150, 150, 150))
+    d = ImageDraw.Draw(img)
+    for i in range(0, 1000, 20):
+        d.rectangle([i, h[i % 32] * 2 % 700, i + 10, 699], fill=(h[(i + 1) % 32], h[(i + 2) % 32], 60))
+    out = io.BytesIO()
+    img.save(out, "JPEG", quality=92)
+    return out.getvalue()
+
+
 def _doc(user, data=b"fichier-1", doc_type="id_card", **kw):
-    return HandymanDocument.objects.create(handyman=user.handyman_profile, document_type=doc_type, file=ContentFile(data, name="cni.png"), **kw)
+    if not data.startswith((b"\xff\xd8\xff", b"%PDF")):
+        data = _img(data)
+    return HandymanDocument.objects.create(handyman=user.handyman_profile, document_type=doc_type, file=ContentFile(data, name="cni.jpg"), **kw)
 
 
 def _text(name="KONE", given="AWA", expiry="12/03/2031", number="CI0123456"):
@@ -154,15 +173,18 @@ def test_same_file_or_same_document_number_on_two_accounts_is_a_strong_signal_bu
 def test_external_vision_only_when_explicitly_allowed(settings):
     u = _pro("an_ext")
     settings.AI_ANTHROPIC_API_KEY = "k-secret"
+    def documents_sent(post):
+        return [c for c in post.call_args_list if "base64" in str(c)]                                       # seul un envoi d'image/PDF compte comme « document sorti »
+
     with mock.patch("intelligence.documents.local_ocr", return_value=None), mock.patch("intelligence.ai.requests.post", return_value=reply(ANTHROPIC_OK)) as post:
-        documents.analyze(_doc(u, b"x1"), by=None)
-        assert not post.called                                                                              # par défaut : rien ne sort
+        a1 = documents.analyze(_doc(u, b"x1"), by=None)
+        assert not documents_sent(post) and not a1.external_used                                            # par défaut : aucun document ne sort (le rapport n'envoie que des états de contrôles)
         settings.AI_KYC_EXTERNAL_ENABLED = True
         documents.analyze(_doc(u, b"x2"), by=None)
-        assert not post.called                                                                              # activé sans base légale : rien ne sort
+        assert not documents_sent(post)                                                                     # activé sans base légale : aucun document ne sort
         settings.AI_KYC_LEGAL_BASIS = "Consentement explicite ; accord de traitement"
         a = documents.analyze(_doc(u, b"x3"), by=None)
-    assert post.call_count == 1 and a.external_used and a.ocr_engine == "anthropic" and a.legal_basis.startswith("Consentement")
+    assert len(documents_sent(post)) == 1 and a.external_used and a.ocr_engine == "anthropic" and a.legal_basis.startswith("Consentement")
     assert a.fields["surname"] == "KONE" and "k-secret" not in str(a.__dict__)
 
 
@@ -339,3 +361,45 @@ def test_primary_address_is_used_by_default_and_only_the_users_own():
     r = api.post("/handy/recommendations/", {}, format="json").json()
     assert r["located"] and r["used_primary_address"] and r["results"][0]["distance_km"] is not None
     assert api.post("/handy/recommendations/", {"address_id": theirs.pk}, format="json").status_code == 400
+
+
+# ═══ Qualité, champs manquants, rapport IA ═══════════════════════════════════════════════════════════════════════════
+
+def test_image_quality_and_missing_fields_are_real_checks_and_never_block_alone():
+    import io
+
+    from PIL import Image
+
+    flat = io.BytesIO()
+    Image.new("RGB", (300, 200), (130, 130, 130)).save(flat, "JPEG")
+    u = _pro("an_q")
+    doc = HandymanDocument.objects.create(handyman=u.handyman_profile, document_type="id_card", file=ContentFile(flat.getvalue(), name="flat.jpg"))
+    with mock.patch("intelligence.documents.local_ocr", return_value="CARTE NATIONALE D'IDENTITE\nNOM: KONE\n"):
+        a = documents.analyze(doc, by=None)
+    by = {c["code"]: c for c in a.checks}
+    assert by["image_quality"]["status"] == "warn" and "résolution insuffisante" in by["image_quality"]["detail"].lower() and "floue" in by["image_quality"]["detail"]
+    assert by["fields_complete"]["status"] == "warn" and "prénoms" in by["fields_complete"]["detail"] and "numéro" in by["fields_complete"]["detail"]
+    doc.refresh_from_db()
+    assert doc.status == "pending"                                                               # une qualité insuffisante ne rejette jamais seule : l'humain décide
+
+
+def test_ai_report_uses_deepseek_first_then_anthropic_and_never_sends_names_numbers_or_images(settings):
+    u = _pro("an_rep", first="Awa", last="Konaté")
+    doc = _doc(u, b"rapport-1")
+    settings.AI_DEEPSEEK_API_KEY, settings.AI_ANTHROPIC_API_KEY = "k-ds", "k-an"
+    ok = {"choices": [{"message": {"content": '{"rapport": "Le nom correspond ; la pièce expire bientôt."}'}}]}
+    with mock.patch("intelligence.documents.local_ocr", return_value=_text(name="KONATE", given="AWA", number="CI7777777")), \
+            mock.patch("intelligence.ai.requests.post", return_value=reply(ok)) as post:
+        a = documents.analyze(doc, by=None)
+    assert a.ai_provider == "deepseek" and "nom correspond" in a.ai_report and post.call_count == 1
+    sent = str(post.call_args.kwargs["json"])
+    assert "Konaté" not in sent and "Awa" not in sent and "CI7777777" not in sent and "KONATE" not in sent and "base64" not in sent
+    assert "name_match" in sent and "[date]" in sent or "name_match" in sent
+    with mock.patch("intelligence.documents.local_ocr", return_value=_text()), mock.patch("intelligence.ai.requests.post", side_effect=[TimeoutError("x"), reply(
+            {"content": [{"type": "text", "text": '{"rapport": "Analyse de repli."}'}]})]):
+        b = documents.analyze(_doc(u, b"rapport-2"), by=None)
+    assert b.ai_provider == "anthropic" and b.ai_report == "Analyse de repli."
+    settings.AI_DEEPSEEK_API_KEY = settings.AI_ANTHROPIC_API_KEY = ""
+    with mock.patch("intelligence.documents.local_ocr", return_value=_text()):
+        c = documents.analyze(_doc(u, b"rapport-3"), by=None)
+    assert c.ai_report == "" and c.summary                                                       # sans fournisseur : le rapport déterministe suffit

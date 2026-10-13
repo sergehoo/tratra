@@ -538,3 +538,14 @@ def test_app_and_worker_reach_the_public_minio_host_from_inside_the_containers()
     services = yaml.safe_load((ROOT / "docker-compose.yml").read_text(encoding="utf-8"))["services"]
     for name in ("tratraweb", "worker"):
         assert "${MINIO_API_HOST}:host-gateway" in services[name].get("extra_hosts", []), name
+
+
+def test_production_refuses_biometrics_without_an_encryption_key_or_with_an_incomplete_provider():
+    r = _load_prod_settings(PUBLIC_WEB_URL="https://app.example.test", BIOMETRIC_ENABLED="true")
+    assert r.returncode != 0 and "BIOMETRIC_ENCRYPTION_KEY must be configured" in r.stderr
+    r = _load_prod_settings(PUBLIC_WEB_URL="https://app.example.test", BIOMETRIC_ENABLED="true", BIOMETRIC_ENCRYPTION_KEY="k", BIOMETRIC_PROVIDER="mock")
+    assert r.returncode != 0 and 'must be "none" or "http"' in r.stderr                      # aucun fournisseur simulé en production
+    r = _load_prod_settings(PUBLIC_WEB_URL="https://app.example.test", BIOMETRIC_ENABLED="true", BIOMETRIC_ENCRYPTION_KEY="k", BIOMETRIC_PROVIDER="http", BIOMETRIC_API_URL="http://x")
+    assert r.returncode != 0 and "https BIOMETRIC_API_URL" in r.stderr
+    r = _load_prod_settings(PUBLIC_WEB_URL="https://app.example.test", BIOMETRIC_ENABLED="true", BIOMETRIC_ENCRYPTION_KEY="k")
+    assert r.returncode == 0, r.stderr[-300:]

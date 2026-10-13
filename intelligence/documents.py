@@ -2,6 +2,7 @@
 document, l'approbation d'un profil ni un badge. Un OCR n'est pas une preuve d'authenticité."""
 import hashlib
 import hmac
+import json
 import os
 import re
 import shutil
@@ -162,6 +163,36 @@ def _parse_iso(value) -> Optional[date]:
         return None
 
 
+def image_quality_check(data: bytes) -> Dict:
+    """Qualité documentaire réelle (résolution, éclairage, netteté) : une pièce illisible ne peut pas être examinée correctement."""
+    import io
+
+    from PIL import Image, ImageFilter, ImageStat
+
+    try:
+        img = Image.open(io.BytesIO(data))
+        img.load()
+    except Exception:  # noqa: BLE001
+        return _check("image_quality", "warn", "Qualité de l'image", "Image illisible.")
+    gray = img.convert("L")
+    w, h = gray.size
+    small = gray.resize((min(w, 800), max(1, int(h * min(w, 800) / w))))
+    edges = small.filter(ImageFilter.FIND_EDGES)
+    ew, eh = edges.size
+    sharp = ImageStat.Stat(edges.crop((3, 3, max(4, ew - 3), max(4, eh - 3)))).var[0]
+    bright = ImageStat.Stat(small).mean[0]
+    problems = []
+    if max(w, h) < 800:
+        problems.append("résolution insuffisante")
+    if bright < 50:
+        problems.append("trop sombre")
+    elif bright > 225:
+        problems.append("surexposée")
+    if sharp < 40:
+        problems.append("floue")
+    return _check("image_quality", "warn" if problems else "ok", "Qualité de l'image (résolution, éclairage, netteté)", ", ".join(problems).capitalize() + "." if problems else "")
+
+
 def analyze(document: HandymanDocument, by=None) -> DocumentAnalysis:
     user = document.handyman.user
     today = timezone.localdate()
@@ -185,10 +216,17 @@ def analyze(document: HandymanDocument, by=None) -> DocumentAnalysis:
             pass
 
     readable = mime != "application/octet-stream"
+    if mime in IMAGE_MIMES.values():
+        checks.append(image_quality_check(data))
     checks.append(_check("readable", "ok" if readable else "fail", "Fichier lisible (image ou PDF)", "" if readable else "Format de fichier non reconnu."))
     if ocr_engine == "none":
         checks.append(_check("ocr", "unknown", "Lecture automatique du contenu", "Aucun OCR disponible pour ce fichier : le contrôle reste entièrement manuel."))
 
+    if document.document_type == "id_card" and fields:
+        required = {"surname": "nom", "given_names": "prénoms", "birth_date": "date de naissance", "document_number": "numéro", "expiry_date": "date d'expiration"}
+        missing = [label for key, label in required.items() if not fields.get(key)]
+        checks.append(_check("fields_complete", "warn" if missing else "ok", "Champs essentiels lisibles sur la pièce",
+                             f"Non lus : {', '.join(missing)}." if missing else ""))
     detected = fields.get("detected_type")
     if detected:
         expected = DECLARED_TO_DETECTED.get(document.document_type)
@@ -240,11 +278,24 @@ def analyze(document: HandymanDocument, by=None) -> DocumentAnalysis:
     statuses = {c["status"] for c in checks}
     level = "high" if "fail" in statuses else "medium" if "warn" in statuses else "low" if "ok" in statuses and "unknown" not in statuses else "unknown"
     summary = _summary(checks, level)
+    ai_report, ai_provider = _ai_report(checks, level)
     safe_fields = {k: (v if k != "document_number" else "•••" + str(v)[-3:]) for k, v in fields.items()}      # numéro masqué : jamais en clair
     analysis = DocumentAnalysis.objects.create(document=document, requested_by=by, ocr_engine=ocr_engine, external_used=external, legal_basis=legal, fields=safe_fields,
-                                               id_fingerprint=fp, file_sha256=sha, checks=checks, risk_level=level, summary=summary)
+                                               id_fingerprint=fp, file_sha256=sha, checks=checks, risk_level=level, summary=summary, ai_report=ai_report, ai_provider=ai_provider)
     _propose_cases(document, user, analysis)
     return analysis
+
+
+def _ai_report(checks: List[Dict], level: str) -> Tuple[str, str]:
+    """Rapport rédigé par un modèle de langage (DeepSeek d'abord, Anthropic en repli) À PARTIR DES SEULS résultats des contrôles : jamais un nom, un
+    numéro, une date de naissance ni une image. Aide à la décision, jamais une preuve ; vide si aucun fournisseur n'est configuré."""
+    safe = [{"controle": c["code"], "etat": c["status"], "detail": re.sub(r"\d{2}/\d{2}/\d{4}", "[date]", c["detail"])} for c in checks]
+    try:
+        res = ai.complete("kyc_report", "Tu aides un examinateur KYC. Tu résumes en français, en 4 phrases maximum, des résultats de contrôles automatiques. Tu ne déclares jamais un document authentique ou faux.",
+                          'Résultats : ' + json.dumps({"niveau_de_risque": level, "controles": safe}, ensure_ascii=False) + '\nRéponds par un objet JSON {"rapport": "..."}.', sensitive=False)
+        return str(res["data"].get("rapport", ""))[:1200], res["provider"]
+    except (ai.AIUnavailable, KeyError, ValueError):
+        return "", ""
 
 
 def _summary(checks: List[Dict], level: str) -> str:

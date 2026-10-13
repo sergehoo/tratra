@@ -41,6 +41,15 @@ if not AWS_S3_ENDPOINT_URL.lower().startswith('https://'):
 if not AWS_S3_VERIFY:
     raise ImproperlyConfigured('AWS_S3_VERIFY must remain enabled in production.')
 
+# Vérification faciale (KYC biométrique) : jamais activée sans clé de chiffrement des captures ; un fournisseur HTTP exige une URL HTTPS et une clé.
+if BIOMETRIC_ENABLED:
+    if not BIOMETRIC_ENCRYPTION_KEY:
+        raise ImproperlyConfigured('BIOMETRIC_ENCRYPTION_KEY must be configured when BIOMETRIC_ENABLED=true in production.')
+    if BIOMETRIC_PROVIDER not in ('none', 'http'):
+        raise ImproperlyConfigured('BIOMETRIC_PROVIDER must be "none" or "http" in production.')
+    if BIOMETRIC_PROVIDER == 'http' and not (BIOMETRIC_API_URL.lower().startswith('https://') and BIOMETRIC_API_KEY):
+        raise ImproperlyConfigured('BIOMETRIC_PROVIDER=http requires an https BIOMETRIC_API_URL and a BIOMETRIC_API_KEY.')
+
 # URL publique du site web : encodée dans les QR (Tratra ID, QR de mission, équipements). Sans elle, les QR pointeraient
 # vers http://localhost:3000 (valeur par défaut de base.py) et seraient inutilisables.
 _require_production_setting('PUBLIC_WEB_URL')

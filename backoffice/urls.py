@@ -2,7 +2,7 @@ from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
 from announcements.api import AnnouncementAdminViewSet
-from backoffice import api_core, api_engagements, api_mfa, api_money, api_ops, api_people, api_system, api_transport, api_reputation, api_intelligence
+from backoffice import api_core, api_engagements, api_mfa, api_money, api_ops, api_people, api_system, api_transport, api_reputation, api_intelligence, api_biometrics
 
 router = DefaultRouter()
 router.register("announcements", AnnouncementAdminViewSet, basename="bo-announcements")
@@ -25,6 +25,9 @@ urlpatterns = [
     path("kyc/<int:pk>/", api_people.KycDetail.as_view(), name="bo-kyc-detail"),
     path("kyc/<int:pk>/approve/", api_people.KycProfileApprove.as_view(), name="bo-kyc-approve"),
     path("kyc/<int:pk>/suspend/", api_people.KycProfileSuspend.as_view(), name="bo-kyc-suspend"),
+    path("kyc/<int:pk>/biometric/", api_biometrics.BiometricDetail.as_view(), name="bo-kyc-biometric"),
+    path("kyc/<int:pk>/biometric/decision/", api_biometrics.BiometricDecision.as_view(), name="bo-kyc-biometric-decision"),
+    path("kyc/biometric/captures/<int:pk>/", api_biometrics.BiometricCaptureFile.as_view(), name="bo-kyc-biometric-capture"),
     path("kyc/documents/<int:pk>/file/", api_people.KycDocumentFile.as_view(), name="bo-kyc-file"),
     path("kyc/documents/<int:pk>/review/", api_people.KycDocumentReview.as_view(), name="bo-kyc-review"),
     path("kyc/documents/<int:pk>/analyze/", api_intelligence.DocumentAnalyze.as_view(), name="bo-kyc-analyze"),

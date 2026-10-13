@@ -11,7 +11,7 @@ from intelligence.models import DocumentAnalysis, RiskCase
 
 
 def analysis_row(a: DocumentAnalysis) -> dict:
-    return {"id": a.pk, "created_at": a.created_at, "risk_level": a.risk_level, "risk_label": a.get_risk_level_display(), "summary": a.summary, "checks": a.checks, "fields": a.fields,
+    return {"id": a.pk, "created_at": a.created_at, "risk_level": a.risk_level, "risk_label": a.get_risk_level_display(), "summary": a.summary, "ai_report": a.ai_report, "ai_provider": a.ai_provider, "checks": a.checks, "fields": a.fields,
             "ocr_engine": a.ocr_engine, "external_used": a.external_used, "disclaimer": a.ocr_disclaimer, "needs_human": True}
 
 

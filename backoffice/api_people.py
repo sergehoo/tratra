@@ -223,7 +223,7 @@ KYC_STATES = {"pending": "Pièces à examiner", "ready": "Prêt pour approbation
 def kyc_profiles():
     """Profils annotés de leur état de dossier, calculé en base (filtrable, triable)."""
     docs = HandymanDocument.objects.filter(handyman=OuterRef("pk"))
-    return HandymanProfile.objects.select_related("user").annotate(
+    return HandymanProfile.objects.select_related("user", "biometric").annotate(
         n_pending=Count("documents", filter=Q(documents__status="pending")),
         n_approved=Count("documents", filter=Q(documents__status="approved")),
         n_rejected=Count("documents", filter=Q(documents__status="rejected")),
@@ -240,7 +240,8 @@ def kyc_profiles():
 def _kyc_row(p) -> dict:
     return {"profile_id": p.pk, "user_id": p.user_id, "name": public_name(p.user), "commune": p.commune, "state": p.kyc_state,
             "state_label": KYC_STATES[p.kyc_state], "is_approved": p.is_approved, "documents": {"pending": p.n_pending, "approved": p.n_approved, "rejected": p.n_rejected},
-            "oldest_pending_at": p.oldest_pending, "account_active": p.user.is_active}
+            "oldest_pending_at": p.oldest_pending, "account_active": p.user.is_active,
+            "biometric_status": getattr(getattr(p, "biometric", None), "status", None) or "not_started"}
 
 
 class KycList(BOView):

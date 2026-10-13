@@ -10,6 +10,7 @@ PERMISSIONS = {
     "dashboard.view": "Tableau de bord et indicateurs",
     "users.view": "Consulter les comptes", "users.manage": "Suspendre / réactiver un compte",
     "kyc.review": "Valider, rejeter ou suspendre un dossier KYC (et consulter les pièces)",
+    "kyc.biometric": "Données biométriques : captures du visage, scores, approbation ou refus de la vérification faciale (Super Admin par défaut)",
     "trust.manage": "Badges, réputation, certifications",
     "tratra_id.manage": "QR professionnels et révocations",
     "services.moderate": "Catégories, métiers, tarifs et modération des services",

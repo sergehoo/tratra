@@ -22,6 +22,8 @@ class DocumentAnalysis(models.Model):
     checks = models.JSONField(default=list, blank=True)
     risk_level = models.CharField(max_length=8, choices=RISK, default="unknown")
     summary = models.TextField(blank=True, default="")
+    ai_report = models.TextField(blank=True, default="")                          # explication rédigée par un modèle de langage (jamais de nom, numéro ni image envoyés)
+    ai_provider = models.CharField(max_length=20, blank=True, default="")
     ocr_disclaimer = models.CharField(max_length=200, default="Lecture automatique indicative : ce n'est pas une preuve d'authenticité du document.")
 
     class Meta:
