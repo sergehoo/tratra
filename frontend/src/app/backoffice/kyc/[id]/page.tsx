@@ -8,6 +8,7 @@ import { useBo } from "@/lib/BoProvider";
 import Link from "next/link";
 import { DocumentViewer, type Doc } from "../../_components/DocumentViewer";
 import { AnalysisModal } from "../AnalysisModal";
+import { BiometricPanel } from "../BiometricPanel";
 import { useCrumb } from "../../_components/crumbs";
 import { Fiche, Pane, Restricted } from "../../_components/fiche";
 import { KV, ReasonModal, Section, dt, postTo } from "../../_components/ui";
@@ -145,6 +146,7 @@ export default function KycDetailPage() {
         alert={!d.account_active ? <Alert tone="warning" className="mb-4">Le compte de cet artisan est suspendu : il n’est ni publié ni éligible aux missions.</Alert> : undefined}
         tabs={[
           { id: "general", label: "Informations générales", content: <Pane>{eligibility}<Section title="Compte de l’artisan"><KV items={[["Commune", d.commune], ["Dossier", d.state_label], ["Compte", d.account_active ? "Actif" : "Suspendu"]]} /><p className="mt-3 text-sm font-semibold text-primaryDark">{can("users.view") ? <Link className="underline underline-offset-2" href={`/backoffice/users/${d.user_id}`}>Ouvrir la fiche complète du compte</Link> : null}</p></Section></Pane> },
+          { id: "biometric", label: "Vérification faciale", content: <BiometricPanel profileId={d.profile_id} canReview={manage} onChanged={() => void load()} /> },
           { id: "documents", label: "Documents et justificatifs", count: d.documents.length || undefined, content: documents },
           { id: "activity", label: "Activités et historique", content: <Section title="Activité de l’artisan"><p className="text-sm text-inkSoft">Missions, litiges, paiements et engagements de ce compte sont regroupés sur sa fiche.</p>{can("users.view") ? <p className="mt-3"><Link className="text-sm font-semibold text-primaryDark underline underline-offset-2" href={`/backoffice/users/${d.user_id}?tab=activity`}>Voir ses activités</Link></p> : <Restricted right="users.view" />}</Section> },
           { id: "notes", label: "Notes internes et audit", content: (

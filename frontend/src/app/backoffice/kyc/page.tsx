@@ -17,7 +17,14 @@ interface Row {
   documents: { pending: number; approved: number; rejected: number };
   oldest_pending_at: string | null;
   account_active: boolean;
+  biometric_status: string;
 }
+
+const BIO_FR: Record<string, [string, BadgeTone]> = {
+  not_started: ["Non commencée", "gray"], in_progress: ["En cours", "info"], pending_review: ["Revue humaine", "warning"], passed: ["Satisfaisante", "success"],
+  failed: ["Échec", "danger"], inconclusive: ["Non concluante", "warning"], manual_approved: ["Approuvée", "success"], alternative_approved: ["Alternative approuvée", "success"],
+  rejected: ["Refusée", "danger"], recapture_requested: ["Nouvelle capture", "warning"], documents_requested: ["Pièces demandées", "warning"],
+};
 
 const TONE: Record<string, BadgeTone> = { pending: "warning", ready: "info", approved: "success", rejected: "danger", incomplete: "gray" };
 
@@ -31,6 +38,7 @@ function DossiersTab() {
     { key: "name", header: "Prestataire", primary: true, cell: (r) => <span className="font-semibold text-ink">{r.name} <span className="font-normal text-ash">#{r.profile_id}</span></span> },
     { key: "commune", header: "Commune", from: "xl", hideOnMobile: true, cell: (r) => r.commune ?? "—" },
     { key: "state", header: "Dossier", cell: (r) => <span className="flex flex-wrap gap-1.5"><Badge tone={TONE[r.state] ?? "gray"}>{r.state_label}</Badge>{!r.account_active ? <Badge tone="danger">Compte suspendu</Badge> : null}</span> },
+    { key: "face", header: "Vérification faciale", from: "lg", hideOnMobile: true, cell: (r) => { const [label, tone] = BIO_FR[r.biometric_status] ?? [r.biometric_status, "gray" as BadgeTone]; return <Badge tone={tone}>{label}</Badge>; } },
     { key: "docs", header: "Pièces", wrap: true, cell: (r) => <span className="text-inkSoft">{r.documents.pending} à examiner · {r.documents.approved} approuvée(s) · {r.documents.rejected} refusée(s)</span> },
     { key: "since", header: "En attente depuis", from: "lg", hideOnMobile: true, cell: (r) => dd(r.oldest_pending_at) },
   ];
