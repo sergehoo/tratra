@@ -29,6 +29,12 @@ Aucun push, aucun déploiement. Tout est en commits locaux sur `feat/compte-uniq
 - Flutter : profil unifié et adresses enregistrées dans la réservation faits (13 oct. 2026). Reste : Firebase (push) à renseigner, bundle Play Store (.aab) avec clé d'upload, test sur appareil des parcours d'écriture (adresse, évaluation, déplacement) une fois MinIO joignable depuis le conteneur.
 - Validation sur appareil Android non refaite pour cette série (aucun APK reconstruit).
 
+## Vérification faciale KYC (13 oct. 2026) — état réel
+- **Fait** (backend `biometrics/`, Back-Office web, Flutter) : consentement explicite et versionné ; sessions courtes à jeton limité (ordre des défis aléatoire, anti-rejeu, 3 essais/jour) ; captures chiffrées dans MinIO privé ; adaptateur fournisseur agnostique (`none` par défaut → revue humaine ; `http` générique) ; décision côté serveur sur les seuils ; jamais de validation par simulation ; alerte de fraude expliquée sans comparaison de visages entre comptes ; BO : droits séparés (`kyc.review` = statut/anomalies, `kyc.biometric` = scores, captures, décisions) ; badge VÉRIFIÉ conditionné par `KYC_BIOMETRIC_REQUIRED=true`. Voir `docs/kyc-biometrique.md`.
+- **Vérifié sur appareil** (Galaxy S10+, build debug `.bio`, serveur de recette) : consentement, caméra avant, 6 étapes guidées, envoi, résultat « en attente de l'équipe » (fournisseur `none`), captures stockées chiffrées. Tests : Flutter 192 OK, `biometrics`/`backoffice`/`intelligence`/`trust`/`transport` 261 OK.
+- **Non fait / à valider** : aucun fournisseur de liveness réel branché (contrat HTTP générique seulement : il faut un adaptateur et une clé du fournisseur choisi) ; seuils `BIOMETRIC_LIVENESS_THRESHOLD`/`BIOMETRIC_MATCH_THRESHOLD` à calibrer sur données réelles ; sens gauche/droite (`kLeftYawSign`) accepté sur un seul appareil ; parcours membre web absent (Flutter + BO seulement) ; iOS non testé ; DeepSeek/Anthropic testés par simulation uniquement.
+- Image Docker : reconstruire (Tesseract, `cryptography`) et appliquer les migrations `biometrics` ; générer `BIOMETRIC_ENCRYPTION_KEY` hors Git avant d'activer `BIOMETRIC_ENABLED`.
+
 ## Côté utilisateur (hors code)
 - Serveur : `.env` des hôtes, `docker compose build tratrafrontend && up -d`, diagnostic Traefik/ACME de `minioapi.tratra.net`.
 - Après un push explicite : `SMS_BACKEND=twilio,orange` et identifiants Orange sur le serveur.
