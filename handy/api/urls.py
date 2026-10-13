@@ -2,6 +2,7 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from handy.api import cash as cash_api
+from handy.api import messaging as msg_api
 from handy.api.addresses import geo_reverse, geo_search, me_address_detail, me_address_set_primary, me_addresses
 from handy.api.recovery import password_reset_confirm, password_reset_request
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView, TokenBlacklistView
@@ -17,7 +18,7 @@ from .views import (
 
 from .notification_views import NotificationViewSet, me_marketing_consent, me_notification_preferences
 from .dashboard import (
-    me_become_provider, me_conversation_messages, me_conversations, me_dashboard,
+    me_become_provider, me_dashboard,
     me_notifications_read_all, me_reviews, me_services,
 )
 
@@ -76,13 +77,25 @@ urlpatterns = [
     path('geo/reverse/', geo_reverse, name='geo-reverse'),
     path('me/handyman-profile/', me_become_provider, name='me-handyman-profile'),
     path('me/services/', me_services, name='me-services'),
-    path('me/conversations/', me_conversations, name='me-conversations'),
-    path('me/conversations/<int:pk>/messages/', me_conversation_messages, name='me-conversation-messages'),
+    # Messagerie : conversations privées uniques, messages persistants, états, rattrapage, blocage, signalement, billet WebSocket.
+    path('me/conversations/', msg_api.me_conversations, name='me-conversations'),
+    path('me/conversations/<int:pk>/messages/', msg_api.me_conversation_messages, name='me-conversation-messages'),
+    path('me/conversations/<int:pk>/send/', msg_api.me_conversation_send, name='me-conversation-send'),
+    path('me/conversations/<int:pk>/read/', msg_api.me_conversation_read, name='me-conversation-read'),
+    path('me/conversations/<int:pk>/report/', msg_api.me_conversation_report, name='me-conversation-report'),
+    path('me/messages/delivered/', msg_api.me_messages_delivered, name='me-messages-delivered'),
+    path('me/messages/sync/', msg_api.me_messages_sync, name='me-messages-sync'),
+    path('me/messages/unread/', msg_api.me_messages_unread, name='me-messages-unread'),
+    path('me/messages/search/', msg_api.me_messages_search, name='me-messages-search'),
+    path('me/blocks/', msg_api.me_blocks, name='me-blocks'),
+    path('me/blocks/<int:user_id>/', msg_api.me_block_detail, name='me-block-detail'),
+    path('me/realtime/ticket/', msg_api.me_realtime_ticket, name='me-realtime-ticket'),
     path('me/reviews/', me_reviews, name='me-reviews'),
     path('me/notifications/read-all/', me_notifications_read_all, name='me-notifications-read-all'),
     path('me/notification-preferences/', me_notification_preferences, name='me-notification-preferences'),
     path('me/marketing-consent/', me_marketing_consent, name='me-marketing-consent'),
 
+    path('', include('statuses.urls')),  # Statuts éphémères
     path('', include('trust.urls')),  # Tratra Trust / Tratra ID
     path('', include('live.urls')),   # Tratra Live : suivi en direct des missions
     path('', include('business.urls')),  # Tratra Business : organisations, interventions, budgets

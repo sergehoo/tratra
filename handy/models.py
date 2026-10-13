@@ -972,11 +972,26 @@ class Review(models.Model):
 
 
 class Conversation(models.Model):
+    """Fil de discussion. `booking` : conversation d'une réservation ; `direct` : fil privé UNIQUE entre deux membres (clé `pair_key`) ;
+    `support` : fil « Équipe Tratra » d'UN membre (clé `support:<id>`), alimenté par le Back-Office — jamais un groupe."""
+    BOOKING, DIRECT, SUPPORT = 'booking', 'direct', 'support'
+    KINDS = [(BOOKING, 'Réservation'), (DIRECT, 'Privée'), (SUPPORT, 'Équipe Tratra')]
+
     participants = models.ManyToManyField(User, related_name='conversations')
     booking = models.ForeignKey('Booking', on_delete=models.CASCADE, related_name='conversation', null=True,
                                 blank=True)
+    kind = models.CharField(max_length=10, choices=KINDS, default=BOOKING, db_index=True)
+    pair_key = models.CharField(max_length=40, null=True, blank=True)
+    # Dénormalisation : la liste des conversations ne lit aucun message (aperçu et tri constants).
+    last_message_at = models.DateTimeField(null=True, blank=True)
+    last_message_preview = models.CharField(max_length=160, blank=True, default='')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['pair_key'], condition=models.Q(pair_key__isnull=False),
+                                               name='uniq_conversation_pair_key')]
+        indexes = [models.Index(fields=['-last_message_at', '-id'], name='conv_last_msg_idx')]
 
     def __str__(self):
         if self.booking:
@@ -985,14 +1000,46 @@ class Conversation(models.Model):
 
 
 class Message(models.Model):
+    TEXT, IMAGE, VIDEO, FILE = 'text', 'image', 'video', 'file'
+    KINDS = [(TEXT, 'Texte'), (IMAGE, 'Photo'), (VIDEO, 'Vidéo'), (FILE, 'Document')]
+
     conversation = models.ForeignKey(Conversation, on_delete=models.CASCADE, related_name='messages')
     sender = models.ForeignKey(User, on_delete=models.CASCADE, related_name='sent_messages')
-    content = models.TextField()
+    content = models.TextField(blank=True, default='')
     is_read = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
+    # Messagerie temps réel : idempotence de l'envoi, médias, états d'envoi (envoyé -> distribué -> lu).
+    client_id = models.UUIDField(null=True, blank=True)
+    kind = models.CharField(max_length=8, choices=KINDS, default=TEXT)
+    attachment = models.FileField(upload_to='chat/%Y/%m/', null=True, blank=True, max_length=255)
+    attachment_name = models.CharField(max_length=120, blank=True, default='')
+    attachment_mime = models.CharField(max_length=60, blank=True, default='')
+    attachment_size = models.PositiveIntegerField(default=0)
+    attachment_meta = models.JSONField(default=dict, blank=True)     # largeur, hauteur, durée mesurées côté serveur
+    delivered_at = models.DateTimeField(null=True, blank=True)
+    read_at = models.DateTimeField(null=True, blank=True)
+    via_staff = models.BooleanField(default=False)                   # écrit par l'équipe Tratra (l'identité de l'agent n'est jamais exposée)
+    context = models.JSONField(default=dict, blank=True)             # contexte d'affichage : réponse à un statut {"status": id, "text": aperçu}
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['conversation', 'sender', 'client_id'], condition=models.Q(client_id__isnull=False),
+                                               name='uniq_message_client_id')]
+        indexes = [models.Index(fields=['conversation', '-id'], name='msg_conv_id_idx'),
+                   models.Index(fields=['conversation', 'is_read', 'sender'], name='msg_conv_unread_idx')]
 
     def __str__(self):
         return f"Message de {self.sender} dans la conversation #{self.conversation.id}"
+
+
+class UserBlock(models.Model):
+    """Blocage entre membres : plus de message ni de statut visible dans un sens comme dans l'autre."""
+    blocker = models.ForeignKey(User, on_delete=models.CASCADE, related_name='blocks_made')
+    blocked = models.ForeignKey(User, on_delete=models.CASCADE, related_name='blocks_received')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['blocker', 'blocked'], name='uniq_user_block'),
+                       models.CheckConstraint(check=~models.Q(blocker=models.F('blocked')), name='block_not_self')]
 
 
 class Notification(models.Model):

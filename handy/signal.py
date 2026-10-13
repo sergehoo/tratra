@@ -123,7 +123,8 @@ def notify_review_received(sender, instance: Review, created, **kwargs):
 @receiver(post_save, sender=Message)
 def notify_message_received(sender, instance: Message, created, **kwargs):
     if created:
-        from handy import notification_events
+        from handy import messaging, notification_events
+        messaging.on_message_created(instance)         # aperçu de la conversation + diffusion temps réel (après validation de la transaction)
         notification_events.message_created(instance)
 
 

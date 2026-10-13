@@ -938,8 +938,8 @@ class ReviewSerializer(serializers.ModelSerializer):
 # ========= CONVERSATION / MESSAGE =========
 
 class ConversationSerializer(serializers.ModelSerializer):
-    # écriture par IDs
-    participants = serializers.PrimaryKeyRelatedField(queryset=User.objects.all(), many=True)
+    # lecture seule : les participants d'une conversation ne se choisissent jamais depuis le client
+    participants = serializers.PrimaryKeyRelatedField(many=True, read_only=True)
     # lecture
     participants_detail = UserMiniSerializer(source="participants", many=True, read_only=True)
 
@@ -948,20 +948,6 @@ class ConversationSerializer(serializers.ModelSerializer):
         fields = ["id", "participants", "participants_detail", "booking", "created_at", "updated_at"]
         read_only_fields = ["created_at", "updated_at"]
 
-    def create(self, validated_data):
-        participants = validated_data.pop("participants", [])
-        obj = super().create(validated_data)
-        if participants:
-            obj.participants.set(participants)
-        return obj
-
-    def update(self, instance, validated_data):
-        participants = validated_data.pop("participants", None)
-        obj = super().update(instance, validated_data)
-        if participants is not None:
-            obj.participants.set(participants)
-        return obj
-
 
 class MessageSerializer(serializers.ModelSerializer):
     sender_detail = UserMiniSerializer(source="sender", read_only=True)
@@ -969,7 +955,7 @@ class MessageSerializer(serializers.ModelSerializer):
     class Meta:
         model = Message
         fields = ["id", "conversation", "sender", "sender_detail", "content", "is_read", "created_at"]
-        read_only_fields = ["created_at"]
+        read_only_fields = ["sender", "is_read", "created_at"]
 
 
 # ========= NOTIFICATIONS / DOCUMENTS / REPORTS / DEVICES =========

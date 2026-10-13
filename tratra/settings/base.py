@@ -99,6 +99,7 @@ INSTALLED_APPS = [
     'reputation',
     'intelligence',
     'biometrics',
+    'statuses',
     'backoffice',
     # Libs
     'allauth',
@@ -234,6 +235,8 @@ REST_FRAMEWORK = {
         'recovery': config('THROTTLE_RECOVERY', default='20/hour'),
         'webhook': config('THROTTLE_WEBHOOK', default='120/min'),
         'biometric': config('THROTTLE_BIOMETRIC', default='60/min'),  # sessions et captures de vérification faciale
+        'messaging': config('THROTTLE_MESSAGING', default='60/min'),  # envoi de messages (texte et médias)
+        'statuses': config('THROTTLE_STATUSES', default='30/min'),  # publication et vues de statuts
         'geo': config('THROTTLE_GEO', default='30/min'),  # recherche d'adresse (appels au fournisseur cartographique)
         'verify': config('THROTTLE_VERIFY', default='60/min'),  # vérification publique d'un QR Tratra ID
         'mfa': config('THROTTLE_MFA', default='20/min'),  # codes de double authentification du personnel
@@ -460,6 +463,29 @@ KYC_FINGERPRINT_PEPPER = config('KYC_FINGERPRINT_PEPPER', default='')  # secret 
 
 # Vérification faciale biométrique (KYC) : OFF par défaut. Sans fournisseur réel (BIOMETRIC_PROVIDER=none), les dossiers restent EN ATTENTE d'une revue
 # humaine : aucune validation automatique. Les captures sont chiffrées (Fernet) dans le stockage privé ; ni DeepSeek ni Anthropic ne les reçoivent.
+# === Messagerie interne (conversations, médias) ===
+MESSAGE_MAX_CHARS = config('MESSAGE_MAX_CHARS', default=4000, cast=int)
+MESSAGE_MAX_IMAGE_BYTES = config('MESSAGE_MAX_IMAGE_BYTES', default=10 * 1024 * 1024, cast=int)
+MESSAGE_MAX_VIDEO_BYTES = config('MESSAGE_MAX_VIDEO_BYTES', default=25 * 1024 * 1024, cast=int)
+MESSAGE_MAX_VIDEO_SECONDS = config('MESSAGE_MAX_VIDEO_SECONDS', default=60, cast=int)
+MESSAGE_MAX_FILE_BYTES = config('MESSAGE_MAX_FILE_BYTES', default=10 * 1024 * 1024, cast=int)
+MESSAGE_NEW_CONVERSATIONS_PER_DAY = config('MESSAGE_NEW_CONVERSATIONS_PER_DAY', default=20, cast=int)
+# === Statuts éphémères (valeurs initiales, toutes modifiables par variable d'environnement) ===
+STATUS_TTL_HOURS = config('STATUS_TTL_HOURS', default=24, cast=int)
+STATUS_TEXT_MAX = config('STATUS_TEXT_MAX', default=700, cast=int)
+STATUS_VIDEO_MAX_SECONDS = config('STATUS_VIDEO_MAX_SECONDS', default=30, cast=int)
+STATUS_MAX_IMAGE_BYTES = config('STATUS_MAX_IMAGE_BYTES', default=10 * 1024 * 1024, cast=int)
+STATUS_MAX_VIDEO_BYTES = config('STATUS_MAX_VIDEO_BYTES', default=30 * 1024 * 1024, cast=int)
+STATUS_IMAGE_MAX_SIDE = config('STATUS_IMAGE_MAX_SIDE', default=1600, cast=int)
+STATUS_MAX_ACTIVE_PER_USER = config('STATUS_MAX_ACTIVE_PER_USER', default=30, cast=int)
+STATUS_REPEAT_VIEWS_ENABLED = config('STATUS_REPEAT_VIEWS_ENABLED', default=False, cast=bool)   # compter aussi les consultations répétées
+STATUS_VIEW_DEBOUNCE_SECONDS = config('STATUS_VIEW_DEBOUNCE_SECONDS', default=30, cast=int)
+STATUS_MEDIA_RETENTION_HOURS = config('STATUS_MEDIA_RETENTION_HOURS', default=24, cast=int)     # conservation du média APRÈS expiration
+STATUS_ROW_RETENTION_DAYS = config('STATUS_ROW_RETENTION_DAYS', default=30, cast=int)
+
+# Origine publique de l'API, pour les URLs de médias relatives (stockage local de développement) diffusées par WebSocket.
+API_PUBLIC_URL = config('API_PUBLIC_URL', default='')
+
 BIOMETRIC_ENABLED = config('BIOMETRIC_ENABLED', default=False, cast=bool)
 BIOMETRIC_PROVIDER = config('BIOMETRIC_PROVIDER', default='none')          # none | http (contrat générique, voir docs/kyc-biometrique.md)
 BIOMETRIC_API_URL = config('BIOMETRIC_API_URL', default='')
@@ -528,6 +554,11 @@ CELERY_BEAT_SCHEDULE = {
     'biometrics-tick': {
         'task': 'biometrics.tasks.tick',
         'schedule': 3600.0,
+    },
+    # Statuts : purge des médias expirés (après la durée de conservation), des lignes anciennes et des fichiers orphelins.
+    'statuses-purge': {
+        'task': 'statuses.tasks.purge',
+        'schedule': 900.0,
     },
     'announcements-tick': {
         'task': 'announcements.tasks.tick',

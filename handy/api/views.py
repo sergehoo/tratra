@@ -1324,7 +1324,8 @@ class ReviewViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
         })
 
 
-class ConversationViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
+class ConversationViewSet(OwnerScopedQuerysetMixin, viewsets.ReadOnlyModelViewSet):
+    """Lecture seule : une conversation ne se crée ni ne se modifie par ce point d'accès (isolation des fils). Création : `POST /me/conversations/`."""
     queryset = Conversation.objects.select_related("booking").prefetch_related("participants").all()
     serializer_class = ConversationSerializer
     permission_classes = [permissions.IsAuthenticated]
@@ -1332,26 +1333,29 @@ class ConversationViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
     ordering = ["-updated_at"]
     pagination_class = DefaultPageNumberPagination
 
-    def perform_create(self, serializer):
-        obj = serializer.save()
-        # le créateur est toujours participant de sa conversation
-        obj.participants.add(self.request.user)
-
 
 class MessageViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
+    """Lecture et envoi seulement (ni modification ni suppression d'un message). L'envoi passe par `handy.messaging.send` : participation,
+    blocages, longueur, idempotence (`client_id`) et diffusion temps réel sont vérifiés côté serveur."""
     queryset = Message.objects.select_related("conversation", "sender").all()
     serializer_class = MessageSerializer
     permission_classes = [permissions.IsAuthenticated]
     owner_lookups = ("conversation__participants",)
     ordering = ["-created_at"]
     pagination_class = DefaultPageNumberPagination
+    http_method_names = ["get", "post", "head", "options"]
 
-    def perform_create(self, serializer):
-        conv = serializer.validated_data.get("conversation")
-        if (conv and not staff_may(self.request.user, None)
-                and not conv.participants.filter(pk=self.request.user.pk).exists()):
+    def create(self, request, *args, **kwargs):
+        from handy import messaging
+
+        conv = Conversation.objects.filter(pk=request.data.get("conversation")).first()
+        if conv is None or not conv.participants.filter(pk=request.user.pk).exists():
             raise PermissionDenied("Vous ne participez pas à cette conversation.")
-        serializer.save(sender=self.request.user)
+        try:
+            message, created = messaging.send(request.user, conv, request.data.get("content", ""), client_id=request.data.get("client_id") or None)
+        except messaging.MessagingError as exc:
+            return Response({"detail": exc.detail, "code": exc.code}, status=exc.status)
+        return Response(self.get_serializer(message).data, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
 
 
 class HandymanDocumentViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):

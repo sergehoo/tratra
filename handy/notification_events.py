@@ -81,12 +81,17 @@ def review_replied(review) -> None:
 
 @_safe
 def message_created(message) -> None:
-    """Message reçu : les AUTRES participants sont prévenus, par conversation (le push remplace le précédent)."""
+    """Message reçu : les AUTRES participants sont prévenus, par conversation (le push remplace le précédent). Un message de l'équipe
+    Tratra est présenté sous le nom « Équipe Tratra » (l'identité de l'agent n'est jamais exposée)."""
+    from handy import contacts, messaging
+
     conversation = message.conversation
-    preview = (message.content or "").strip().replace("\n", " ")
-    preview = preview if len(preview) <= 90 else preview[:87] + "…"
-    sender = _first(message.sender, "Nouveau message")
+    preview = messaging.preview_of(message)
+    sender = messaging.STAFF_LABEL if message.via_staff else _first(message.sender, "Nouveau message")
+    blocked = contacts.blocked_ids(message.sender_id)
     for user_id in conversation.participants.exclude(pk=message.sender_id).values_list("pk", flat=True):
+        if user_id in blocked:
+            continue
         notify(user_id, "message_received", preview or "Nouveau message", title=sender,
                data={"kind": "conversation", "id": conversation.pk}, dedupe_key=f"message:{message.pk}",
                collapse_key=f"conversation-{conversation.pk}")
