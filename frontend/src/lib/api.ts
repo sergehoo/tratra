@@ -248,6 +248,42 @@ export async function upload<T>(path: string, form: FormData, retry = true, extr
   return data as T;
 }
 
+/**
+ * Envoi multipart AVEC progression (XMLHttpRequest : `fetch` n'expose pas la progression d'envoi). Rafraîchit le jeton sur 401 puis rejoue UNE fois.
+ * `signal` permet d'annuler. Les envois de messages et de statuts sont idempotents (`client_id`) : rejouer après une coupure ne crée pas de doublon.
+ */
+export function uploadWithProgress<T>(path: string, form: FormData, onProgress?: (ratio: number) => void, signal?: AbortSignal): Promise<T> {
+  const attempt = (access: string | null, retry: boolean): Promise<T> =>
+    new Promise<T>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", apiUrl(path));
+      xhr.setRequestHeader("Accept", "application/json");
+      if (access) xhr.setRequestHeader("Authorization", `Bearer ${access}`);
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) onProgress?.(e.loaded / e.total);
+      };
+      xhr.onerror = () => reject(new TypeError("network"));
+      xhr.onabort = () => reject(new DOMException("aborted", "AbortError"));
+      xhr.onload = async () => {
+        if (xhr.status === 401 && retry) {
+          const fresh = await refreshAccess();
+          if (fresh) return attempt(fresh, false).then(resolve, reject);
+        }
+        let data: unknown = null;
+        try {
+          data = xhr.responseText ? JSON.parse(xhr.responseText) : null;
+        } catch {
+          data = xhr.responseText;
+        }
+        if (xhr.status >= 200 && xhr.status < 300) resolve(data as T);
+        else reject(new ApiError(xhr.status, data));
+      };
+      signal?.addEventListener("abort", () => xhr.abort(), { once: true });
+      xhr.send(form);
+    });
+  return attempt(tokens.access, true);
+}
+
 // ---- Auth ----
 /** Connexion : `identifier` = téléphone (+225 par défaut), ou identifiant / e-mail d'un ancien compte. */
 export async function login(identifier: string, password: string): Promise<User> {

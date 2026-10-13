@@ -44,6 +44,7 @@ import { formatFCFA } from "@/lib/format";
 import { iconForCategory } from "@/lib/trades";
 import type { Category, Paginated, Service } from "@/lib/types";
 import { useData } from "@/lib/useData";
+import { StatusBar } from "@/components/statuses/StatusBar";
 import { ActivityBanner } from "./_components/ActivityBanner";
 import { AnnouncementsBanner } from "./_components/Announcements";
 import { formatDateTimeShort } from "./_components/dates";
@@ -386,6 +387,9 @@ export default function DashboardHome() {
 
   return (
     <div className="space-y-8">
+      {/* Statuts : « Mon statut » d'abord, puis ceux des contacts Tratra (non lus avant les consultés) */}
+      <StatusBar />
+
       {/* Activité en cours (reprise après fermeture, coupure, déconnexion ou changement d'appareil) */}
       <ActivityBanner />
 

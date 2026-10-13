@@ -151,7 +151,7 @@ function UserMenu({ onLogout }: { onLogout: () => void }) {
  * barre latérale ≥ lg, barre supérieure + navigation basse en mobile.
  * L'unique <h1> d'une page est fourni par <PageHeader /> dans le contenu.
  */
-export function AppShell({ title, nav, children }: { title: string; nav: NavItem[]; children: ReactNode }) {
+export function AppShell({ title, nav, children, actions }: { title: string; nav: NavItem[]; children: ReactNode; actions?: ReactNode }) {
   const { user, logout } = useAuth();
   const pathname = usePathname();
   // Numéro enregistré mais non vérifié : rappel discret vers la vérification par code.
@@ -245,7 +245,10 @@ export function AppShell({ title, nav, children }: { title: string; nav: NavItem
               </Link>
               <p className="truncate font-display text-base font-bold text-ink">{title}</p>
             </div>
-            <UserMenu onLogout={() => void logout()} />
+            <div className="flex shrink-0 items-center gap-1.5">
+              {actions}
+              <UserMenu onLogout={() => void logout()} />
+            </div>
           </div>
         </header>
 

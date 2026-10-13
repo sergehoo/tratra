@@ -410,3 +410,28 @@ def test_realtime_event_is_pushed_to_contacts_on_publish_and_to_the_author_on_fi
             await ws.disconnect()
 
     async_to_sync(scenario)()
+
+
+# ---------------------------------------------------------------------------------------------------- modération (BO)
+
+def test_staff_moderation_lists_reports_removes_the_status_with_reason_and_notifies_the_author(django_capture_on_commit_callbacks):
+    from backoffice.test_people import BO, staff
+    from handy.models import Notification
+    from trust.models import AuditEvent
+
+    pro, cli = pair("st_mod")
+    post(pro, "contenu litigieux")
+    sid = Status.objects.get().pk
+    api(cli).post(f"/handy/statuses/{sid}/report/", {"reason": "Contenu choquant"}, format="json")
+    mod, analyst = staff("st_mod_s", "support"), staff("st_mod_a", "analyst")
+    assert api(analyst).get(f"{BO}/statuses/reports/").status_code == 403
+    rows = api(mod).get(f"{BO}/statuses/reports/").json()["results"]
+    assert len(rows) == 1 and rows[0]["text"] == "contenu litigieux" and rows[0]["resolved"] is False
+    assert api(mod).post(f"{BO}/statuses/{sid}/remove/", {"reason": "x"}, format="json").status_code == 400
+    with django_capture_on_commit_callbacks(execute=True):
+        assert api(mod).post(f"{BO}/statuses/{sid}/remove/", {"reason": "Propos inappropriés"}, format="json").status_code == 200
+    st = Status.objects.get()
+    assert st.deleted_at and st.removed_by_staff and st.text == "" and feed(cli)["contacts"] == []
+    assert Notification.objects.filter(user=pro, title="Statut retiré").exists()
+    assert AuditEvent.objects.filter(action="backoffice.status.removed", actor=mod).exists()
+    assert api(mod).get(f"{BO}/statuses/reports/").json()["results"][0]["resolved"] is True

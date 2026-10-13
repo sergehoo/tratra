@@ -1,4 +1,5 @@
 "use client";
+import Link from "next/link";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   Bell,
@@ -6,6 +7,7 @@ import {
   Briefcase,
   Building2,
   CalendarCheck,
+  CircleDot,
   Compass,
   FileSignature,
   IdCard,
@@ -21,10 +23,32 @@ import { RoleGuard } from "@/components/RoleGuard";
 import { AppShell, type NavItem } from "@/components/ds";
 import { get } from "@/lib/api";
 import { DashboardProvider, useDashboard } from "@/lib/dashboard";
+import { InboxProvider, useInbox } from "@/lib/inbox";
+
+/** Accès rapides de la barre supérieure : statuts, messages (non lus en temps réel) et notifications. */
+function HeaderActions({ notifications }: { notifications: number }) {
+  const { unread } = useInbox();
+  const items = [
+    { href: "/dashboard/statuses", label: "Statuts", icon: CircleDot, badge: 0 },
+    { href: "/dashboard/messages", label: unread ? `Messages, ${unread} non lu${unread > 1 ? "s" : ""}` : "Messages", icon: MessageSquare, badge: unread },
+    { href: "/dashboard/notifications", label: notifications ? `Notifications, ${notifications} non lue${notifications > 1 ? "s" : ""}` : "Notifications", icon: Bell, badge: notifications },
+  ];
+  return (
+    <nav aria-label="Accès rapides" className="flex items-center gap-0.5">
+      {items.map(({ href, label, icon: Icon, badge }) => (
+        <Link key={href} href={href} aria-label={label} className="relative grid h-11 w-11 place-items-center rounded-full text-inkSoft transition hover:bg-primarySoft hover:text-primaryDark focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
+          <Icon aria-hidden className="h-5 w-5" />
+          {badge ? <span className="absolute right-1 top-1 grid h-4 min-w-4 place-items-center rounded-full bg-accent px-1 text-[10px] font-bold leading-none text-ink ring-2 ring-white">{badge > 99 ? "99+" : badge}</span> : null}
+        </Link>
+      ))}
+    </nav>
+  );
+}
 
 /** Navigation de l'espace unifié : les entrées « artisan » dépendent du profil réel du compte. */
 function Shell({ children }: { children: ReactNode }) {
   const { data } = useDashboard();
+  const { unread: unreadMessages } = useInbox();
   const provider = data?.capabilities.provider ?? false;
   const company = data?.capabilities.company ?? false;
   const business = data?.capabilities.business ?? false;
@@ -50,7 +74,7 @@ function Shell({ children }: { children: ReactNode }) {
     items.push(
       { href: "/dashboard/provide", label: "Proposer un service", short: "Proposer", icon: PlusCircle, primary: !provider },
       { href: "/dashboard/engagements", label: "Engagements", icon: FileSignature, badge: engagementTodo || undefined },
-      { href: "/dashboard/messages", label: "Messages", icon: MessageSquare, badge: data?.unread.messages },
+      { href: "/dashboard/messages", label: "Messages", icon: MessageSquare, badge: unreadMessages },
       { href: "/dashboard/wallet", label: "Portefeuille", icon: Wallet },
       { href: "/dashboard/reviews", label: "Avis", icon: Star },
       { href: "/dashboard/notifications", label: "Notifications", icon: Bell, badge: data?.unread.notifications },
@@ -64,10 +88,10 @@ function Shell({ children }: { children: ReactNode }) {
         : { href: "/dashboard/company/new", label: "Créer un espace entreprise", icon: Building2 },
     );
     return items;
-  }, [provider, company, business, engagementTodo, data?.unread.messages, data?.unread.notifications]);
+  }, [provider, company, business, engagementTodo, unreadMessages, data?.unread.notifications]);
 
   return (
-    <AppShell title="Mon espace" nav={nav}>
+    <AppShell title="Mon espace" nav={nav} actions={<HeaderActions notifications={data?.unread.notifications ?? 0} />}>
       {children}
     </AppShell>
   );
@@ -77,7 +101,9 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
   return (
     <RoleGuard roles={["client", "employeur", "entreprise", "handyman"]}>
       <DashboardProvider>
-        <Shell>{children}</Shell>
+        <InboxProvider>
+          <Shell>{children}</Shell>
+        </InboxProvider>
       </DashboardProvider>
     </RoleGuard>
   );

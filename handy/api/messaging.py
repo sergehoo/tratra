@@ -226,4 +226,4 @@ def me_block_detail(request, user_id):
 @api_view(["POST"])
 @permission_classes(_AUTH)
 def me_realtime_ticket(request):
-    return Response({"ticket": inbox.make_ticket(request.user.pk), "expires_in": inbox.TICKET_MAX_AGE})
+    return Response({"ticket": inbox.make_ticket(request.user.pk), "path": "/ws/inbox/", "expires_in": inbox.TICKET_MAX_AGE})

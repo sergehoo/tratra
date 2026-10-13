@@ -2,7 +2,7 @@ from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
 from announcements.api import AnnouncementAdminViewSet
-from backoffice import api_core, api_engagements, api_mfa, api_money, api_ops, api_people, api_system, api_transport, api_reputation, api_intelligence, api_biometrics, api_messaging
+from backoffice import api_core, api_engagements, api_mfa, api_money, api_ops, api_people, api_system, api_transport, api_reputation, api_intelligence, api_biometrics, api_messaging, api_statuses
 
 router = DefaultRouter()
 router.register("announcements", AnnouncementAdminViewSet, basename="bo-announcements")
@@ -46,6 +46,10 @@ urlpatterns = [
     path("messages/threads/<int:pk>/", api_messaging.ThreadDetail.as_view(), name="bo-message-thread"),
     path("messages/threads/<int:pk>/reply/", api_messaging.ThreadReply.as_view(), name="bo-message-reply"),
     path("messages/threads/<int:pk>/read/", api_messaging.ThreadRead.as_view(), name="bo-message-read"),
+    # Modération des statuts signalés
+    path("statuses/reports/", api_statuses.StatusReportList.as_view(), name="bo-status-reports"),
+    path("statuses/reports/<int:pk>/dismiss/", api_statuses.StatusReportDismiss.as_view(), name="bo-status-report-dismiss"),
+    path("statuses/<int:pk>/remove/", api_statuses.StatusRemove.as_view(), name="bo-status-remove"),
     # Tratra Trust
     path("trust/", api_people.TrustList.as_view(), name="bo-trust"),
     path("trust/config/", api_people.TrustConfigView.as_view(), name="bo-trust-config"),

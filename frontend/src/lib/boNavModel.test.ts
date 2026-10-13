@@ -11,8 +11,8 @@ function serverModules(): ModuleLike[] {
   return rows.map(([, id, label, path]) => ({ id, label, path }));
 }
 
-test("le registre serveur est lu en entier (19 modules)", () => {
-  assert.equal(serverModules().length, 19);
+test("le registre serveur est lu en entier (20 modules)", () => {
+  assert.equal(serverModules().length, 20);
 });
 
 test("7 rubriques, dans l'ordre demandé", () => {
