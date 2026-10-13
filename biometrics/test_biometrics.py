@@ -343,7 +343,8 @@ def test_state_never_exposes_scores_thresholds_or_the_session_token_twice():
     assert st["active_session"]["session_id"] == s["session_id"] and st["provider_configured"] is False
 
 
-def test_failed_attempts_still_count_against_the_token_usage_limit(settings):
+def test_failed_attempts_still_count_against_the_token_usage_limit(monkeypatch):
+    monkeypatch.setattr(services, "MAX_TOKEN_USES", 6)                                          # (le plafond réel de 60 dépasserait d'abord le débit autorisé par minute)
     u, c = member("bio_tok")
     give_consent(c)
     s = start(c).json()
