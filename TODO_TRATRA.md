@@ -26,7 +26,7 @@ Aucun push, aucun déploiement. Tout est en commits locaux sur `feat/compte-uniq
 ## Reste à faire du brief
 - Lot 4 (Trust) : l'IA ne propose pas encore de badges ni n'analyse la pertinence d'un justificatif de compétence par catégorie ; le moteur de badges existant est inchangé (aucun badge attribué par l'IA).
 - Lot 8 (Back-Office) : tout y est réparti dans les modules existants (Utilisateurs, KYC > Risques, Avis > Surveillance, Réglages > Transport) ; pas de page « Doublons » dédiée ni de statistiques de réputation agrégées.
-- Flutter : sélecteur d'adresses enregistrées dans la réservation ; Back-Office mobile inexistant (hors périmètre).
+- Flutter : profil unifié et adresses enregistrées dans la réservation faits (13 oct. 2026). Reste : Firebase (push) à renseigner, bundle Play Store (.aab) avec clé d'upload, test sur appareil des parcours d'écriture (adresse, évaluation, déplacement) une fois MinIO joignable depuis le conteneur.
 - Validation sur appareil Android non refaite pour cette série (aucun APK reconstruit).
 
 ## Côté utilisateur (hors code)
