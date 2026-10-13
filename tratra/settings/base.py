@@ -98,6 +98,7 @@ INSTALLED_APPS = [
     'transport',
     'reputation',
     'intelligence',
+    'biometrics',
     'backoffice',
     # Libs
     'allauth',
@@ -232,6 +233,7 @@ REST_FRAMEWORK = {
         'login': config('THROTTLE_LOGIN', default='10/min'),
         'recovery': config('THROTTLE_RECOVERY', default='20/hour'),
         'webhook': config('THROTTLE_WEBHOOK', default='120/min'),
+        'biometric': config('THROTTLE_BIOMETRIC', default='60/min'),  # sessions et captures de vérification faciale
         'geo': config('THROTTLE_GEO', default='30/min'),  # recherche d'adresse (appels au fournisseur cartographique)
         'verify': config('THROTTLE_VERIFY', default='60/min'),  # vérification publique d'un QR Tratra ID
         'mfa': config('THROTTLE_MFA', default='20/min'),  # codes de double authentification du personnel
@@ -456,6 +458,23 @@ AI_KYC_EXTERNAL_ENABLED = config('AI_KYC_EXTERNAL_ENABLED', default=False, cast=
 AI_KYC_LEGAL_BASIS = config('AI_KYC_LEGAL_BASIS', default='')         # ex. « consentement explicite du titulaire, DPA signé avec le fournisseur »
 KYC_FINGERPRINT_PEPPER = config('KYC_FINGERPRINT_PEPPER', default='')  # secret : sel de l'empreinte des numéros de documents (défaut : SECRET_KEY)
 
+# Vérification faciale biométrique (KYC) : OFF par défaut. Sans fournisseur réel (BIOMETRIC_PROVIDER=none), les dossiers restent EN ATTENTE d'une revue
+# humaine : aucune validation automatique. Les captures sont chiffrées (Fernet) dans le stockage privé ; ni DeepSeek ni Anthropic ne les reçoivent.
+BIOMETRIC_ENABLED = config('BIOMETRIC_ENABLED', default=False, cast=bool)
+BIOMETRIC_PROVIDER = config('BIOMETRIC_PROVIDER', default='none')          # none | http (contrat générique, voir docs/kyc-biometrique.md)
+BIOMETRIC_API_URL = config('BIOMETRIC_API_URL', default='')
+BIOMETRIC_API_KEY = config('BIOMETRIC_API_KEY', default='')                # secret : jamais renvoyé ni journalisé
+BIOMETRIC_TIMEOUT = config('BIOMETRIC_TIMEOUT', default=20, cast=int)
+BIOMETRIC_ENCRYPTION_KEY = config('BIOMETRIC_ENCRYPTION_KEY', default='')  # clé Fernet (secret) ; obligatoire si BIOMETRIC_ENABLED en production
+BIOMETRIC_LIVENESS_THRESHOLD = config('BIOMETRIC_LIVENESS_THRESHOLD', default=0.90, cast=float)
+BIOMETRIC_MATCH_THRESHOLD = config('BIOMETRIC_MATCH_THRESHOLD', default=0.80, cast=float)
+BIOMETRIC_SESSION_TTL_SECONDS = config('BIOMETRIC_SESSION_TTL_SECONDS', default=600, cast=int)
+BIOMETRIC_MAX_ATTEMPTS_PER_DAY = config('BIOMETRIC_MAX_ATTEMPTS_PER_DAY', default=3, cast=int)
+BIOMETRIC_MAX_ATTEMPTS_PER_WEEK = config('BIOMETRIC_MAX_ATTEMPTS_PER_WEEK', default=6, cast=int)
+BIOMETRIC_RETENTION_DAYS = config('BIOMETRIC_RETENTION_DAYS', default=30, cast=int)              # suppression des captures après la fin d'une session
+BIOMETRIC_CONSENT_VERSION = config('BIOMETRIC_CONSENT_VERSION', default='2026-10')
+KYC_BIOMETRIC_REQUIRED = config('KYC_BIOMETRIC_REQUIRED', default=False, cast=bool)              # le badge « Vérifié » exige alors la vérification faciale ou une procédure alternative approuvée
+
 # Push mobile (FCM HTTP v1) : voir handy/push.py. Sans identifiants, aucun push n'est envoyé (jamais d'erreur).
 FCM_CREDENTIALS_FILE = config('FCM_CREDENTIALS_FILE', default='')
 FCM_CREDENTIALS_JSON = config('FCM_CREDENTIALS_JSON', default='')
@@ -504,6 +523,11 @@ CELERY_BEAT_SCHEDULE = {
     'intelligence-risk-scan': {
         'task': 'intelligence.tasks.scan',
         'schedule': 21600.0,
+    },
+    # Biométrie KYC : expiration des sessions et suppression des captures arrivées au terme de la conservation.
+    'biometrics-tick': {
+        'task': 'biometrics.tasks.tick',
+        'schedule': 3600.0,
     },
     'announcements-tick': {
         'task': 'announcements.tasks.tick',

@@ -45,7 +45,9 @@ class AIRun(models.Model):
 class RiskCase(models.Model):
     """Dossier de risque PROPOSÉ par les règles ou l'IA. Statut : l'humain seul le fait évoluer ; la confirmation n'a aucun effet automatique."""
     KINDS = [("duplicate_account", "Doublon potentiel de compte"), ("document_inconsistent", "Document incohérent"), ("identity_incomplete", "Identité incomplète"),
-             ("kyc_expired", "Document KYC expiré"), ("abnormal_activity", "Activité anormale"), ("artificial_bookings", "Réservations artificielles possibles")]
+             ("kyc_expired", "Document KYC expiré"), ("abnormal_activity", "Activité anormale"), ("artificial_bookings", "Réservations artificielles possibles"),
+             ("biometric_attempts", "Tentatives biométriques répétées"), ("liveness_bypass", "Contournement possible du liveness"),
+             ("biometric_technical", "Résultat biométrique technique à revoir")]
     STATUSES = [("open", "À examiner"), ("investigating", "Enquête en cours"), ("confirmed", "Confirmé par l'équipe"), ("dismissed", "Écarté")]
     ACTIVE = ("open", "investigating")
 

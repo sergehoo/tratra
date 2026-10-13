@@ -9,6 +9,7 @@ from datetime import timedelta
 from statistics import median
 from typing import Dict, Optional
 
+from django.conf import settings
 from django.utils import timezone
 
 from handy.eligibility import is_publishable
@@ -99,7 +100,9 @@ def collect(profile, config, now=None) -> Dict:
     since = window_start(config, now)
     reviews = review_stats(profile.user_id)
     return {
-        "verified": is_publishable(profile),
+        # Badge « Vérifié » : KYC approuvé et dossier complet (règle d'éligibilité) ET, si la politique l'exige (KYC_BIOMETRIC_REQUIRED), une vérification faciale
+        # satisfaisante ou une procédure alternative approuvée par un humain. Les badges Expert et Sûr en dépendent, comme avant.
+        "verified": is_publishable(profile) and _biometric_ok(profile),
         "account_active": bool(profile.user.is_active),
         "reviews": reviews,
         "punctuality": punctuality(profile, config, now),
@@ -110,3 +113,11 @@ def collect(profile, config, now=None) -> Dict:
         "certifications": certifications(profile),
         "declared_experience_years": profile.experience_years or 0,
     }
+
+
+def _biometric_ok(profile) -> bool:
+    if not getattr(settings, "KYC_BIOMETRIC_REQUIRED", False):
+        return True
+    from biometrics import services as biometric
+
+    return biometric.satisfied(profile)
