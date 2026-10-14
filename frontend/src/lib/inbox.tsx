@@ -43,6 +43,7 @@ export interface Conversation {
 export type InboxEvent =
   | { type: "message"; message: ChatMessage; conversation: Conversation; unread_total: number }
   | { type: "read"; conversation: number; reader: number; upto: number; count: number; at: string }
+  | { type: "read_self"; conversation: number; count: number; unread_total: number }
   | { type: "delivered"; ids: number[]; at: string }
   | { type: "status"; action: "new" | "deleted"; author: number; status: number }
   | { type: "status_view"; status: number; views: { unique: number; total: number } }
@@ -133,6 +134,10 @@ export function InboxProvider({ children }: { children: ReactNode }) {
         } else if (data.type === "read") {
           void refreshUnread();
           emit(data as unknown as InboxEvent);
+        } else if (data.type === "read_self") {
+          // Lu sur un autre appareil : seul le compteur est synchronisé (les messages du lecteur ne changent pas d'état).
+          if (typeof data.unread_total === "number") setUnread(data.unread_total);
+          emit({ type: "resync" });
         } else if (data.type === "delivered" || data.type === "status" || data.type === "status_view") emit(data as unknown as InboxEvent);
       };
       ws.onclose = () => {

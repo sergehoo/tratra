@@ -274,8 +274,11 @@ def mark_read(user, conversation: Conversation) -> int:
         return 0
     senders = set(Message.objects.filter(pk__in=ids).values_list("sender_id", flat=True))
     n = Message.objects.filter(pk__in=ids).update(is_read=True, read_at=now, delivered_at=Coalesce(F("delivered_at"), Value(now), output_field=DateTimeField()))
-    inbox.push(senders | {user.pk}, {"type": "read", "conversation": conversation.pk, "reader": user.pk, "upto": max(ids), "count": n,
-                                      "at": now.isoformat(), "unread_total": None})
+    # Les EXPÉDITEURS voient leurs messages passer à « lu » ; le LECTEUR (et ses autres appareils) reçoit seulement un évènement de
+    # synchronisation des non-lus : jamais l'évènement « lu », qui ferait passer ses PROPRES messages à « lu ».
+    inbox.push(senders - {user.pk}, {"type": "read", "conversation": conversation.pk, "reader": user.pk, "upto": max(ids), "count": n,
+                                      "at": now.isoformat()})
+    inbox.push([user.pk], {"type": "read_self", "conversation": conversation.pk, "count": n, "unread_total": unread_total(user)})
     return n
 
 

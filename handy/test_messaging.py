@@ -370,8 +370,9 @@ def test_websocket_inbox_requires_a_valid_ticket_and_streams_messages_and_receip
         read = await cli_ws.receive_json_from()
         assert read["type"] == "read" and read["conversation"] == conv
         await pro_ws.send_json_to({"type": "ping"})
-        seen = [await pro_ws.receive_json_from() for _ in range(2)]          # lu (pour le lecteur) + pong
-        assert {m["type"] for m in seen} == {"read", "pong"}
+        seen = [await pro_ws.receive_json_from() for _ in range(2)]          # synchronisation des non-lus (pour le lecteur) + pong
+        assert {m["type"] for m in seen} == {"read_self", "pong"}          # le lecteur ne reçoit JAMAIS « read » (il marquerait ses propres messages lus)
+        assert [m for m in seen if m["type"] == "read_self"][0]["unread_total"] == 0
         for c in (pro_ws, cli_ws, out_ws):
             await c.disconnect()
 
