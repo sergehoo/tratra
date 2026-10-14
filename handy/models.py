@@ -54,6 +54,8 @@ class User(AbstractUser):
     is_verified = models.BooleanField(default=False, db_index=True)  # téléphone prouvé par OTP (jamais avant)
     # Horodatage de l'acceptation des conditions d'utilisation et de la politique de confidentialité.
     terms_accepted_at = models.DateTimeField(null=True, blank=True)
+    # Suppression de compte demandée par la personne : le compte est ANONYMISÉ (voir handy/account_deletion.py), jamais restauré.
+    deleted_at = models.DateTimeField(null=True, blank=True)
 
     groups = models.ManyToManyField(
         Group, verbose_name=_('groups'), blank=True,

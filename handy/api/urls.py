@@ -3,6 +3,7 @@ from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from handy.api import cash as cash_api
 from handy.api import messaging as msg_api
+from handy.api.account import me_account_deletion
 from handy.api.addresses import geo_reverse, geo_search, me_address_detail, me_address_set_primary, me_addresses
 from handy.api.recovery import password_reset_confirm, password_reset_request
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView, TokenBlacklistView
@@ -70,6 +71,7 @@ urlpatterns = [
     path('public/stats/', public_stats, name='public-stats'),
     # Compte unifié : tableau de bord agrégé + création du profil professionnel du compte courant.
     path('me/dashboard/', me_dashboard, name='me-dashboard'),
+    path('me/account/deletion/', me_account_deletion, name='me-account-deletion'),
     path('me/addresses/', me_addresses, name='me-addresses'),
     path('me/addresses/<int:pk>/', me_address_detail, name='me-address-detail'),
     path('me/addresses/<int:pk>/primary/', me_address_set_primary, name='me-address-primary'),
