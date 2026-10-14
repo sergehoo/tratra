@@ -434,4 +434,107 @@ def test_staff_moderation_lists_reports_removes_the_status_with_reason_and_notif
     assert st.deleted_at and st.removed_by_staff and st.text == "" and feed(cli)["contacts"] == []
     assert Notification.objects.filter(user=pro, title="Statut retiré").exists()
     assert AuditEvent.objects.filter(action="backoffice.status.removed", actor=mod).exists()
-    assert api(mod).get(f"{BO}/statuses/reports/").json()["results"][0]["resolved"] is True
+    assert api(mod).get(f"{BO}/statuses/reports/?resolved=true").json()["results"][0]["resolved"] is True
+
+
+# ----------------------------------------------------------------- permissions : cas croisés (contacts, découverte, exclusions, blocages)
+
+def endpoints(sid):
+    return [("post", f"/handy/statuses/{sid}/view/", {}), ("post", f"/handy/statuses/{sid}/reply/", {"content": "Bonjour"}),
+            ("post", f"/handy/statuses/{sid}/report/", {"reason": "motif valable"}), ("get", f"/handy/statuses/{sid}/viewers/", None)]
+
+
+def hit(user, method, url, body):
+    c = api(user)
+    return getattr(c, method)(url, body, format="json") if body is not None else getattr(c, method)(url)
+
+
+def test_a_contacts_only_status_is_closed_to_non_contacts_on_every_endpoint():
+    pro, cli = pair("pm_c")
+    stranger = _client("pm_c_out")
+    sid = post(pro, "réservé aux contacts", audience="contacts").json()["status"]["id"]
+    for method, url, body in endpoints(sid):
+        assert hit(stranger, method, url, body).status_code == 404, url
+    assert Status.objects.get().views.count() == 0 and not Message.objects.exists() and not StatusReport.objects.exists()
+    assert hit(cli, "post", f"/handy/statuses/{sid}/view/", {}).status_code == 200            # le contact, lui, y accède
+
+
+def test_an_excluded_member_gets_nothing_even_for_an_extended_status_and_exclusion_is_reversible():
+    pro, cli = pair("pm_x")
+    sid = post(pro, "ouvert à tous sauf exclus", audience="extended").json()["status"]["id"]
+    api(pro).post("/handy/statuses/exclusions/", {"user": cli.id}, format="json")
+    stranger_excluded = _client("pm_x_out")
+    api(pro).post("/handy/statuses/exclusions/", {"user": stranger_excluded.id}, format="json")
+    for who in (cli, stranger_excluded):
+        f = feed(who)
+        assert f["contacts"] == [] and f["discover_count"] == 0
+        assert api(who).get("/handy/statuses/discover/").json()["results"] == []
+        for method, url, body in endpoints(sid):
+            assert hit(who, method, url, body).status_code == 404, url
+    api(pro).delete(f"/handy/statuses/exclusions/{stranger_excluded.id}/")
+    assert api(stranger_excluded).get("/handy/statuses/discover/").json()["results"][0]["author"]["id"] == pro.id
+
+
+def test_exclusion_is_one_way_and_does_not_hide_the_excluded_members_own_statuses_from_the_author():
+    pro, cli = pair("pm_ow")
+    post(pro, "de l'auteur")
+    mine = post(cli, "du membre exclu").json()["status"]["id"]
+    api(pro).post("/handy/statuses/exclusions/", {"user": cli.id}, format="json")
+    assert feed(cli)["contacts"] == []
+    assert [g["author"]["id"] for g in feed(pro)["contacts"]] == [cli.id]
+    assert hit(pro, "post", f"/handy/statuses/{mine}/view/", {}).status_code == 200
+
+
+def test_blocked_members_cannot_view_reply_report_or_list_viewers_and_unblocking_restores_access():
+    pro, cli = pair("pm_b")
+    sid = post(pro, "bloqué", audience="extended").json()["status"]["id"]
+    api(cli).post("/handy/me/blocks/", {"user": pro.id}, format="json")          # le BLOQUEUR ne voit plus non plus
+    for method, url, body in endpoints(sid):
+        assert hit(cli, method, url, body).status_code == 404, url
+    api(cli).delete(f"/handy/me/blocks/{pro.id}/")
+    assert hit(cli, "post", f"/handy/statuses/{sid}/view/", {}).status_code == 200
+    api(pro).post("/handy/me/blocks/", {"user": cli.id}, format="json")           # blocage dans l'autre sens
+    for method, url, body in endpoints(sid)[:3]:
+        assert hit(cli, method, url, body).status_code == 404, url
+
+
+def test_staff_and_superusers_have_no_special_access_to_member_statuses():
+    from django.contrib.auth import get_user_model
+
+    User = get_user_model()
+    pro, cli = pair("pm_s")
+    sid = post(pro, "privé", audience="contacts").json()["status"]["id"]
+    api(cli).post(f"/handy/statuses/{sid}/view/")
+    legacy = User.objects.create_user("pm_s_legacy", "pm_l@x.test", "pass1234", is_staff=True)
+    root = User.objects.create_superuser("pm_s_root", "pm_r@x.test", "pass1234")
+    for staff_user in (legacy, root):
+        assert feed(staff_user)["contacts"] == [] and api(staff_user).get("/handy/statuses/discover/").json()["results"] == []
+        for method, url, body in endpoints(sid):
+            assert hit(staff_user, method, url, body).status_code == 404, url
+        assert api(staff_user).delete(f"/handy/statuses/{sid}/").status_code == 404      # ni suppression par les accès membres
+    assert Status.objects.get(pk=sid).deleted_at is None
+
+
+def test_statuses_of_inactive_accounts_and_unauthenticated_requests():
+    pro, cli = pair("pm_i")
+    sid = post(pro, "compte suspendu", audience="extended").json()["status"]["id"]
+    assert len(feed(cli)["contacts"]) == 1
+    pro.is_active = False
+    pro.save()
+    services.bump()
+    assert feed(cli)["contacts"] == [] and hit(cli, "post", f"/handy/statuses/{sid}/view/", {}).status_code == 404
+    anon = APIClient()
+    for url in ("/handy/statuses/", "/handy/statuses/feed/", "/handy/statuses/discover/", f"/handy/statuses/{sid}/viewers/"):
+        assert anon.get(url).status_code in (401, 403), url
+    assert anon.post(f"/handy/statuses/{sid}/view/").status_code in (401, 403)
+
+
+def test_viewers_are_never_listed_to_the_members_who_viewed_even_with_the_extended_audience():
+    pro = artisan("pm_v_pro")
+    a, b = _client("pm_v_a"), _client("pm_v_b")
+    sid = post(pro, "lecteurs privés", audience="extended").json()["status"]["id"]
+    for u in (a, b):
+        api(u).post(f"/handy/statuses/{sid}/view/")
+    assert api(pro).get(f"/handy/statuses/{sid}/viewers/").json()["counters"]["unique"] == 2
+    for u in (a, b):
+        assert api(u).get(f"/handy/statuses/{sid}/viewers/").status_code == 404

@@ -49,6 +49,7 @@ urlpatterns = [
     # Modération des statuts signalés
     path("statuses/reports/", api_statuses.StatusReportList.as_view(), name="bo-status-reports"),
     path("statuses/reports/<int:pk>/dismiss/", api_statuses.StatusReportDismiss.as_view(), name="bo-status-report-dismiss"),
+    path("statuses/<int:pk>/", api_statuses.StatusDetail.as_view(), name="bo-status-detail"),
     path("statuses/<int:pk>/remove/", api_statuses.StatusRemove.as_view(), name="bo-status-remove"),
     # Tratra Trust
     path("trust/", api_people.TrustList.as_view(), name="bo-trust"),

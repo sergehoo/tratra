@@ -400,3 +400,60 @@ def test_realtime_ticket_requires_authentication_and_is_short_lived():
     t = api(cli).post("/handy/me/realtime/ticket/").json()
     assert t["expires_in"] == 60 and inbox.read_ticket(t["ticket"]) == cli.id
     assert inbox.read_ticket(t["ticket"] + "x") is None
+
+
+# ------------------------------------------------------------------- isolation : comptes du personnel et accès génériques
+
+def test_staff_and_superusers_cannot_read_private_conversations_through_the_generic_endpoints():
+    """Le personnel (même superutilisateur, même historique sans rôle) ne lit JAMAIS la conversation privée de deux membres par les accès
+    génériques : l'équipe n'a accès qu'aux fils « Équipe Tratra » (Back-Office, droit `messages.send`)."""
+    from django.contrib.auth import get_user_model
+
+    pro, cli = artisan("iso_pro"), _client("iso_cli")
+    link(pro, cli)
+    conv = open_direct(cli, pro)
+    mid = send(cli, conv, "secret entre deux membres").json()["message"]["id"]
+    User = get_user_model()
+    legacy = User.objects.create_user("iso_legacy", "iso_l@x.test", "pass1234", is_staff=True)
+    root = User.objects.create_superuser("iso_root", "iso_r@x.test", "pass1234")
+    for staff in (legacy, root):
+        a = api(staff)
+        assert a.get("/handy/messages/").json()["results"] == []
+        assert a.get("/handy/conversations/").json()["results"] == []
+        assert a.get(f"/handy/messages/{mid}/").status_code == 404
+        assert a.get(f"/handy/conversations/{conv}/").status_code == 404
+        assert a.get(f"/handy/me/conversations/{conv}/messages/").status_code == 404
+        assert a.post("/handy/messages/", {"conversation": conv, "content": "intrusion"}, format="json").status_code == 403
+    assert Message.objects.filter(conversation_id=conv).count() == 1
+
+
+def test_generic_message_lists_only_return_the_callers_own_conversations():
+    pro, cli, other = artisan("iso2_pro"), _client("iso2_cli"), _client("iso2_oth")
+    link(pro, cli)
+    link(pro, other)
+    c1, c2 = open_direct(cli, pro), open_direct(other, pro)
+    m1 = send(cli, c1, "fil 1").json()["message"]["id"]
+    m2 = send(other, c2, "fil 2").json()["message"]["id"]
+    a = api(cli)
+    assert [m["id"] for m in a.get("/handy/messages/").json()["results"]] == [m1]
+    assert [c["id"] for c in a.get("/handy/conversations/").json()["results"]] == [c1]
+    assert a.get(f"/handy/messages/{m2}/").status_code == 404
+    assert all(m["conversation"] != c2 for m in a.get(f"/handy/messages/?conversation={c2}").json()["results"])
+    assert api(cli).get(f"/handy/me/conversations/{c2}/messages/").status_code == 404
+    # la recherche, le rattrapage et le compteur ne fuient pas non plus
+    assert a.get("/handy/me/messages/search/?q=fil 2").json()["results"] == []
+    assert [m["id"] for m in a.get("/handy/me/messages/sync/?after=0").json()["messages"]] == [m1]
+    assert a.get("/handy/me/messages/unread/").json()["total"] == 0
+
+
+def test_a_members_support_thread_is_invisible_to_other_members():
+    from backoffice.test_people import staff
+
+    admin = staff("iso3_admin", "support")
+    u1, u2 = _client("iso3_u1"), _client("iso3_u2")
+    for u in (u1, u2):
+        api(admin).post("/handy/backoffice/messages/send/", {"user_ids": [u.id], "body": f"Pour {u.username}"}, format="json")
+    t1 = Conversation.objects.get(kind="support", participants=u1)
+    assert api(u2).get(f"/handy/me/conversations/{t1.pk}/messages/").status_code == 404
+    assert [c["counterpart"] for c in api(u2).get("/handy/me/conversations/").json()["results"]] == ["Équipe Tratra"]
+    assert api(u2).post(f"/handy/me/conversations/{t1.pk}/send/", {"content": "x"}, format="json").status_code == 404

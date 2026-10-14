@@ -115,6 +115,9 @@ class OwnerScopedQuerysetMixin:
     # Sans droit déclaré, seuls les comptes du personnel historiques sans rôle gardent ce passe-droit (voir staff_access).
     staff_permission = None
     staff_write_permission = None
+    # Faux : même le personnel (superutilisateur compris) ne voit que SES objets. Réservé aux données privées entre membres (messages) :
+    # l'équipe n'y accède que par les canaux dédiés et audités du Back-Office.
+    staff_bypass = True
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -122,7 +125,7 @@ class OwnerScopedQuerysetMixin:
         if not (user and user.is_authenticated):
             return qs.none()
         write = self.request.method not in permissions.SAFE_METHODS
-        if staff_may(user, (self.staff_write_permission if write else None) or self.staff_permission):
+        if self.staff_bypass and staff_may(user, (self.staff_write_permission if write else None) or self.staff_permission):
             return qs
         q = Q()
         for lookup in self.owner_lookups:
@@ -1330,6 +1333,7 @@ class ConversationViewSet(OwnerScopedQuerysetMixin, viewsets.ReadOnlyModelViewSe
     serializer_class = ConversationSerializer
     permission_classes = [permissions.IsAuthenticated]
     owner_lookups = ("participants",)
+    staff_bypass = False
     ordering = ["-updated_at"]
     pagination_class = DefaultPageNumberPagination
 
@@ -1341,6 +1345,7 @@ class MessageViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
     serializer_class = MessageSerializer
     permission_classes = [permissions.IsAuthenticated]
     owner_lookups = ("conversation__participants",)
+    staff_bypass = False
     ordering = ["-created_at"]
     pagination_class = DefaultPageNumberPagination
     http_method_names = ["get", "post", "head", "options"]
