@@ -2,6 +2,8 @@
 et évènements de statuts. Lecture seule pour l'essentiel : les écritures passent par l'API REST (autorisations, idempotence, médias).
 Le client peut seulement envoyer `ping` et accuser réception (`ack`). `/ws/chat/<id>/` reste disponible (même billet) pour une
 conversation précise : accès refusé à tout membre non participant."""
+import asyncio
+import logging
 from urllib.parse import parse_qs
 
 from channels.db import database_sync_to_async
@@ -11,8 +13,15 @@ from handy import inbox, messaging
 from handy.models import Conversation
 
 
+logger = logging.getLogger(__name__)
+
+
 class InboxConsumer(AsyncJsonWebsocketConsumer):
     conversation_id = None
+    # L'appartenance au groupe vit dans Redis et y EXPIRE (channels_redis : `group_expiry`, 24 h par défaut) ; elle est aussi perdue si Redis
+    # redémarre. Une connexion longue sans ce rafraîchissement resterait ouverte mais ne recevrait plus rien : on la renouvelle régulièrement.
+    keepalive_seconds = 120
+    _keepalive_task = None
 
     async def connect(self):
         self.group = None
@@ -28,7 +37,16 @@ class InboxConsumer(AsyncJsonWebsocketConsumer):
         self.group = inbox.group_name(user_id)
         await self.channel_layer.group_add(self.group, self.channel_name)
         await self.accept()
+        self._keepalive_task = asyncio.ensure_future(self._keepalive())
         await self.send_json({"type": "ready", "unread_total": await self._unread(user_id)})
+
+    async def _keepalive(self):
+        while True:
+            await asyncio.sleep(self.keepalive_seconds)
+            try:
+                await self.channel_layer.group_add(self.group, self.channel_name)
+            except Exception:       # Redis momentanément indisponible : nouvel essai au prochain tour, la connexion n'est pas coupée
+                logger.warning("Renouvellement de l'abonnement temps réel impossible", exc_info=True)
 
     @database_sync_to_async
     def _participates(self, user_id, conversation_id):
@@ -50,6 +68,10 @@ class InboxConsumer(AsyncJsonWebsocketConsumer):
             return
         kind = content.get("type")
         if kind == "ping":
+            try:
+                await self.channel_layer.group_add(self.group, self.channel_name)      # un ping renouvelle aussi l'abonnement
+            except Exception:
+                logger.warning("Renouvellement de l'abonnement temps réel impossible", exc_info=True)
             await self.send_json({"type": "pong"})
         elif kind == "ack" and isinstance(content.get("ids"), list):
             try:
@@ -67,6 +89,8 @@ class InboxConsumer(AsyncJsonWebsocketConsumer):
         await self.send_json(payload)
 
     async def disconnect(self, code):
+        if self._keepalive_task is not None:
+            self._keepalive_task.cancel()
         if getattr(self, "group", None):
             await self.channel_layer.group_discard(self.group, self.channel_name)
 

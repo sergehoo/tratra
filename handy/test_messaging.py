@@ -457,3 +457,90 @@ def test_a_members_support_thread_is_invisible_to_other_members():
     assert api(u2).get(f"/handy/me/conversations/{t1.pk}/messages/").status_code == 404
     assert [c["counterpart"] for c in api(u2).get("/handy/me/conversations/").json()["results"]] == ["Équipe Tratra"]
     assert api(u2).post(f"/handy/me/conversations/{t1.pk}/send/", {"content": "x"}, format="json").status_code == 404
+
+
+# --------------------------------------------------------------- reconnexion, messages manqués, compteurs, absence de doublons
+
+def _deaf_scenario(monkeypatch, keepalive, renew):
+    """Abonnement perdu (équivalent d'un redémarrage de Redis ou de l'expiration de 24 h) : sans renouvellement, la connexion reste ouverte
+    mais ne reçoit plus rien ; `renew(ws)` déclenche le renouvellement attendu et le message suivant doit alors arriver."""
+    from channels.layers import get_channel_layer
+
+    from handy.consumers import InboxConsumer
+
+    monkeypatch.setattr(InboxConsumer, "keepalive_seconds", keepalive)
+    pro, cli = artisan(f"ka_pro{keepalive}"), _client(f"ka_cli{keepalive}")
+    link(pro, cli)
+    conv = open_direct(cli, pro)
+
+    async def scenario():
+        ws, ok, _ = await _connect(f"/ws/inbox/?ticket={quote(inbox.make_ticket(pro.id), safe='')}")
+        assert ok and (await ws.receive_json_from())["type"] == "ready"
+        get_channel_layer().groups.pop(inbox.group_name(pro.id), None)
+        if keepalive > 10:                                                  # sans renouvellement possible : le message est bien perdu
+            await sync_to_async(send)(cli, conv, "perdu")
+            assert await ws.receive_nothing(timeout=0.05)
+        await renew(ws)
+        await sync_to_async(send)(cli, conv, "retrouvé")
+        got = await ws.receive_json_from(timeout=2)
+        assert got["type"] == "message" and got["message"]["content"] == "retrouvé"
+        await ws.disconnect()
+
+    async_to_sync(scenario)()
+
+
+@pytest.mark.django_db(transaction=True)
+def test_a_ping_renews_a_lost_group_subscription(monkeypatch):
+    async def renew(ws):
+        await ws.send_json_to({"type": "ping"})
+        assert (await ws.receive_json_from())["type"] == "pong"
+
+    _deaf_scenario(monkeypatch, 1000, renew)
+
+
+@pytest.mark.django_db(transaction=True)
+def test_the_server_renews_the_subscription_by_itself_without_any_client_message(monkeypatch):
+    async def renew(ws):
+        await asyncio.sleep(0.3)
+
+    import asyncio
+
+    _deaf_scenario(monkeypatch, 0.05, renew)
+
+
+@pytest.mark.django_db(transaction=True)
+def test_reconnection_after_missed_messages_restores_counters_and_never_duplicates():
+    """Coupure : les messages arrivés hors connexion sont comptés à la reconnexion (`ready`), rattrapés une seule fois par `sync`, et un renvoi
+    avec le même `client_id` (réseau instable) ne crée ni second message, ni second non-lu, ni second évènement."""
+    pro, cli = artisan("rc_pro"), _client("rc_cli")
+    link(pro, cli)
+    conv = open_direct(cli, pro)
+    first = send(cli, conv, "avant la coupure").json()["message"]["id"]
+
+    async def scenario():
+        ws, ok, _ = await _connect(f"/ws/inbox/?ticket={quote(inbox.make_ticket(pro.id), safe='')}")
+        assert ok
+        ready = await ws.receive_json_from()
+        assert ready == {"type": "ready", "unread_total": 1}
+        await ws.disconnect()                                              # coupure réseau côté appareil
+        await sync_to_async(send)(cli, conv, "pendant la coupure 1", client_id="3f2504e0-4f89-41d3-9a0c-0305e82c3301")
+        await sync_to_async(send)(cli, conv, "pendant la coupure 2")
+        retry = await sync_to_async(send)(cli, conv, "pendant la coupure 1", client_id="3f2504e0-4f89-41d3-9a0c-0305e82c3301")
+        assert retry.status_code == 200 and retry.json()["created"] is False       # renvoi : même message, aucune création
+        # reconnexion : le compteur reflète exactement ce qui est non lu, sans doublon
+        ws2, ok2, _ = await _connect(f"/ws/inbox/?ticket={quote(inbox.make_ticket(pro.id), safe='')}")
+        assert ok2
+        assert await ws2.receive_json_from() == {"type": "ready", "unread_total": 3}
+        assert await ws2.receive_nothing(timeout=0.2)                      # le renvoi n'a produit aucun évènement fantôme
+        data = (await sync_to_async(lambda: api(pro).get(f"/handy/me/messages/sync/?after={first}").json())())
+        assert [m["content"] for m in data["messages"]] == ["pendant la coupure 1", "pendant la coupure 2"]
+        assert data["unread_total"] == 3 and len({m["id"] for m in data["messages"]}) == 2
+        again = (await sync_to_async(lambda: api(pro).get(f"/handy/me/messages/sync/?after={data['last_id']}").json())())
+        assert again["messages"] == []                                     # un second rattrapage ne renvoie rien
+        # lecture : les compteurs retombent à zéro et ne remontent pas au prochain rattrapage
+        await sync_to_async(lambda: api(pro).post(f"/handy/me/conversations/{conv}/read/"))()
+        assert (await sync_to_async(lambda: api(pro).get("/handy/me/messages/unread/").json())())["total"] == 0
+        await ws2.disconnect()
+
+    async_to_sync(scenario)()
+    assert Message.objects.filter(conversation_id=conv).count() == 3

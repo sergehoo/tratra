@@ -5,6 +5,8 @@
      routée par le reverse proxy (un 404/500/502 révèle un problème de routage Traefik ou d'import ASGI).
   2. AVEC billet (--booking et TRATRA_TOKEN) : POST /bookings/<id>/live/ticket/ → connexion → premier message « state »
      → ping applicatif → « pong ».
+  3. MESSAGERIE (--inbox et TRATRA_TOKEN) : POST /me/realtime/ticket/ → connexion à /ws/inbox/ → message « ready » (avec le compteur de
+     non-lus) → ping applicatif → « pong ».
 
 Le jeton d'accès se passe par la variable d'environnement TRATRA_TOKEN (jamais en argument : historique du shell) et n'est
 jamais affiché.
@@ -12,6 +14,7 @@ jamais affiché.
 Exemples :
   python3 ws_check.py --api https://api-staging.example.com/handy
   TRATRA_TOKEN=... python3 ws_check.py --api https://api-staging.example.com/handy --booking 42
+  TRATRA_TOKEN=... python3 ws_check.py --api https://api-staging.example.com/handy --inbox
 Code de sortie : 0 = tout est conforme, 1 = anomalie.
 """
 import argparse
@@ -133,6 +136,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--api", required=True, help="base de l'API, ex. https://api-staging.example.com/handy")
     ap.add_argument("--booking", type=int, help="identifiant d'une réservation dont le jeton (TRATRA_TOKEN) est participant")
+    ap.add_argument("--inbox", action="store_true", help="vérifie aussi la WebSocket de messagerie /ws/inbox/ (TRATRA_TOKEN requis)")
     ap.add_argument("--insecure", action="store_true", help="n'authentifie pas le certificat TLS (répétition locale UNIQUEMENT)")
     args = ap.parse_args()
     global INSECURE
@@ -145,7 +149,7 @@ def main():
     failures = []
 
     # 1) Refus sans billet (la pile WebSocket répond, c'est le consommateur qui refuse)
-    for path in ("/ws/live/1/", "/ws/chat/1/"):
+    for path in ("/ws/live/1/", "/ws/chat/1/", "/ws/inbox/"):
         status, sock, _ = handshake(f"{ws_base}{path}")
         if sock:
             sock.close()
@@ -185,6 +189,39 @@ def main():
             print(f"[{'OK ' if ok else 'ERR'}] ping applicatif -> {pong.get('type')}")
             if not ok:
                 failures.append("pong")
+        finally:
+            sock.close()
+
+    # 3) Messagerie : billet signé → /ws/inbox/ → « ready » → ping/pong
+    if args.inbox:
+        token = os.environ.get("TRATRA_TOKEN", "")
+        if not token:
+            print("[ERR] TRATRA_TOKEN absent : impossible de tester la messagerie")
+            return 1
+        req = urllib.request.Request(f"{base}/me/realtime/ticket/", data=b"{}", method="POST",
+                                     headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=15, context=_context() if req.full_url.startswith('https') else None) as r:
+                ticket = json.load(r)
+        except urllib.error.HTTPError as e:
+            print(f"[ERR] billet de messagerie refusé : HTTP {e.code}")
+            return 1
+        status, sock, _ = handshake(f"{ws_base}{ticket['path']}?ticket={urllib.request.quote(ticket['ticket'], safe='')}")
+        if status != 101 or not sock:
+            print(f"[ERR] messagerie : poignée de main avec billet -> HTTP {status} (attendu 101)")
+            return 1
+        try:
+            first = json.loads(read_text(sock))
+            ok = first.get("type") == "ready" and isinstance(first.get("unread_total"), int)
+            print(f"[{'OK ' if ok else 'ERR'}] messagerie : 101 puis « {first.get('type')} » (non lus : {first.get('unread_total')})")
+            if not ok:
+                failures.append("inbox-ready")
+            send_text(sock, json.dumps({"type": "ping"}))
+            pong = json.loads(read_text(sock))
+            ok = pong.get("type") == "pong"
+            print(f"[{'OK ' if ok else 'ERR'}] messagerie : ping applicatif -> {pong.get('type')}")
+            if not ok:
+                failures.append("inbox-pong")
         finally:
             sock.close()
 

@@ -224,3 +224,40 @@ def test_member_replies_reach_the_staff_inbox_and_staff_can_answer():
 def test_modules_menu_lists_messaging_only_for_authorised_roles():
     assert "messages" in [m["id"] for m in api(staff("sm_m1", "support")).get(f"{BO}/me/").json()["modules"]]
     assert "messages" not in [m["id"] for m in api(staff("sm_m2", "analyst")).get(f"{BO}/me/").json()["modules"]]
+
+
+def test_members_communication_preferences_are_respected_while_the_private_message_stays_readable(django_capture_on_commit_callbacks):
+    from handy.models import NotificationPreference
+
+    admin = staff("sm_pref", "ops")
+    quiet, normal = person("sm_pref_quiet"), person("sm_pref_normal")
+    NotificationPreference.objects.create(user=quiet, category="message", push_enabled=False)
+    with django_capture_on_commit_callbacks(execute=True):                        # le push est planifié après validation de la transaction
+        out = send(admin, [quiet.id, normal.id], body="Information importante").json()
+    assert out["results"]["sent"] == 2
+    nq = Notification.objects.get(user=quiet, notification_type="message_received")
+    nn = Notification.objects.get(user=normal, notification_type="message_received")
+    assert nq.push_status == "disabled" and nn.push_status != "disabled"       # pas de push pour celui qui l'a refusé…
+    assert member_api(quiet).get("/handy/me/conversations/").json()["results"][0]["unread"] == 1      # …mais le message est bien là
+
+
+def test_each_send_is_audited_per_agent_with_counts_and_never_the_message_text():
+    support, ops = staff("sm_aud_s", "support"), staff("sm_aud_o", "ops")
+    users = [person(f"sm_aud_u{i}") for i in range(3)]
+    send(support, [users[0].id], body="Texte confidentiel pour un seul membre")
+    send(ops, [u.id for u in users], body="Texte confidentiel pour trois membres")
+    events = list(audited("message.batch_created").order_by("id"))
+    assert [(e.actor_id, e.data["recipients"], e.data["bulk"]) for e in events] == [(support.id, 1, False), (ops.id, 3, False)]
+    assert all("confidentiel" not in str(e.data) for e in events)
+    assert StaffMessageBatch.objects.count() == 2 and StaffMessageDelivery.objects.count() == 4
+
+
+def test_a_member_never_learns_who_else_received_the_same_message():
+    admin = staff("sm_priv", "ops")
+    a, b = person("sm_priv_a", first_name="Alpha"), person("sm_priv_b", first_name="Bravo")
+    send(admin, [a.id, b.id], body="Même texte pour deux membres")
+    conv_a = Conversation.objects.get(kind="support", participants=a)
+    payload = str(member_api(a).get("/handy/me/conversations/").json()) + str(member_api(a).get(f"/handy/me/conversations/{conv_a.pk}/messages/").json())
+    assert "Bravo" not in payload and "sm_priv_b" not in payload                       # ni nom, ni identifiant d'un autre destinataire
+    assert Conversation.objects.filter(kind="support").count() == 2 and conv_a.participants.count() == 1
+    assert [m["content"] for m in member_api(a).get(f"/handy/me/conversations/{conv_a.pk}/messages/").json()["results"]] == ["Même texte pour deux membres"]
