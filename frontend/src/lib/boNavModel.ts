@@ -44,7 +44,7 @@ export const SUBS: Record<string, readonly SubDef[]> = {
   services: [{ tab: "services", label: "Services" }, { tab: "categories", label: "Catégories et métiers", keywords: "tarifs métiers" }],
   bookings: [{ tab: "bookings", label: "Réservations" }, { tab: "disputes", label: "Litiges", keywords: "médiation réclamation" }],
   kyc: [{ tab: "files", label: "Dossiers" }, { tab: "risks", label: "Risques et fraudes", keywords: "doublons fraude documents incohérents expirés identité" }],
-  reviews: [{ tab: "reviews", label: "Avis" }, { tab: "reports", label: "Signalements", keywords: "modération abus" }, { tab: "watch", label: "Surveillance", keywords: "évaluations réputation fraude contestation recours bannissement" }],
+  reviews: [{ tab: "reviews", label: "Avis" }, { tab: "reports", label: "Signalements", keywords: "modération abus" }, { tab: "statuses", label: "Statuts signalés", keywords: "statuts éphémères modération contenu signalé retrait" }, { tab: "watch", label: "Surveillance", keywords: "évaluations réputation fraude contestation recours bannissement" }],
   business: [
     { tab: "organizations", label: "Organisations", keywords: "entreprises sites équipements" },
     { tab: "requests", label: "Demandes d’intervention" },

@@ -1,6 +1,7 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
 import { CalendarCheck, CheckCheck, Eye, EyeOff, Undo2 } from "lucide-react";
+import { StatusesTab } from "./StatusesTab";
 import { WatchTab } from "./WatchTab";
 import { Alert, Badge, Button, Modal, PageHeader, Tabs } from "@/components/ds";
 import { bo, boError } from "@/lib/bo";
@@ -176,7 +177,7 @@ function ReportsTab({ onOpen, version }: { onOpen: (id: number) => void; version
 }
 
 export default function ReviewsPage() {
-  const [tab, setTab] = useTabParam(["reviews", "reports", "watch"] as const, "reviews");
+  const [tab, setTab] = useTabParam(["reviews", "reports", "statuses", "watch"] as const, "reviews");
   const [open, setOpen] = useState<number | null>(null);
   const [version, setVersion] = useState(0);
   const bump = () => setVersion((v) => v + 1);
@@ -184,8 +185,8 @@ export default function ReviewsPage() {
   return (
     <>
       <PageHeader title="Avis et signalements" description="Modération : on masque, on ne réécrit jamais. Chaque décision est motivée et journalisée." />
-      <Tabs ariaLabel="Sections" value={tab} onChange={setTab} className="mb-4" items={[{ id: "reviews", label: "Avis" }, { id: "reports", label: "Signalements" }, { id: "watch", label: "Surveillance" }]} />
-      {tab === "reviews" ? <ReviewsTab key={version} onOpen={setOpen} onChanged={bump} version={version} /> : tab === "reports" ? <ReportsTab key={version} onOpen={setOpen} version={version} /> : <WatchTab />}
+      <Tabs ariaLabel="Sections" value={tab} onChange={setTab} className="mb-4" items={[{ id: "reviews", label: "Avis" }, { id: "reports", label: "Signalements" }, { id: "statuses", label: "Statuts signalés" }, { id: "watch", label: "Surveillance" }]} />
+      {tab === "reviews" ? <ReviewsTab key={version} onOpen={setOpen} onChanged={bump} version={version} /> : tab === "reports" ? <ReportsTab key={version} onOpen={setOpen} version={version} /> : tab === "statuses" ? <StatusesTab /> : <WatchTab />}
       <ReviewPanel id={open} onClose={() => setOpen(null)} onChanged={bump} />
     </>
   );
