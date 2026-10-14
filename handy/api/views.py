@@ -1329,7 +1329,7 @@ class ReviewViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
 
 class ConversationViewSet(OwnerScopedQuerysetMixin, viewsets.ReadOnlyModelViewSet):
     """Lecture seule : une conversation ne se crée ni ne se modifie par ce point d'accès (isolation des fils). Création : `POST /me/conversations/`."""
-    queryset = Conversation.objects.select_related("booking").prefetch_related("participants").all()
+    queryset = Conversation.objects.select_related("booking").prefetch_related("participants").order_by("-updated_at", "-id")
     serializer_class = ConversationSerializer
     permission_classes = [permissions.IsAuthenticated]
     owner_lookups = ("participants",)
@@ -1341,7 +1341,7 @@ class ConversationViewSet(OwnerScopedQuerysetMixin, viewsets.ReadOnlyModelViewSe
 class MessageViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
     """Lecture et envoi seulement (ni modification ni suppression d'un message). L'envoi passe par `handy.messaging.send` : participation,
     blocages, longueur, idempotence (`client_id`) et diffusion temps réel sont vérifiés côté serveur."""
-    queryset = Message.objects.select_related("conversation", "sender").all()
+    queryset = Message.objects.select_related("conversation", "sender").order_by("-created_at", "-id")
     serializer_class = MessageSerializer
     permission_classes = [permissions.IsAuthenticated]
     owner_lookups = ("conversation__participants",)
