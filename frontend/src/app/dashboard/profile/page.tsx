@@ -4,6 +4,7 @@ import { BadgeCheck, CircleCheck, Circle, FileCheck2, Smartphone } from "lucide-
 import { apiErrorMessage, patch } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { AddressesCard } from "@/components/address/AddressesCard";
+import { DeleteAccountCard } from "@/components/account/DeleteAccountCard";
 import { useDashboard } from "@/lib/dashboard";
 import { useData } from "@/lib/useData";
 import { patchForm } from "@/lib/uploadPatch";
@@ -271,6 +272,7 @@ export default function ProfilePage() {
                 <ButtonLink href="/dashboard/provide" className="mt-4">Proposer mes services</ButtonLink>
               </Card>
             )}
+            <DeleteAccountCard />
           </div>
 
           <div className="min-w-0 space-y-6">
