@@ -46,7 +46,15 @@ Aucun nouveau système de relations : deux membres sont en contact s'ils ont une
 - Web : en-tête (statuts, messages, notifications avec compteurs temps réel), barre des statuts sous l'en-tête de l'accueil, visionneuse plein écran (progression, pause, précédent/suivant, réponse, signalement, vues et lecteurs pour l'auteur), publication avec aperçu et progression d'envoi, page Statuts (Découvrir / Mes statuts / Confidentialité), messagerie temps réel, page Back-Office « Messagerie ».
 - Flutter : mêmes écrans (`lib/messaging`, `lib/statuses`), WebSocket avec reprise et rattrapage, envoi idempotent avec « Renvoyer ».
 
-## 5. Limites connues
+## 5. Vérifications Docker (14 oct. 2026)
+Pile jetable et isolée (projet Compose `tratra-wsverify` : PostGIS, Redis, API Daphne, worker Celery sur l'image construite par le `Dockerfile` du dépôt), supprimée ensuite. Constats :
+- les migrations (`handy` 0046-0048, `statuses`, `backoffice` 0004) s'appliquent sur une base vierge ; la pile WebSocket est bien attachée à ASGI ; `ws/inbox/` refuse sans billet (403) et accepte avec un billet signé (101 puis `ready` avec le compteur de non-lus) ;
+- diffusion temps réel entre PROCESSUS : un message envoyé depuis un shell Django séparé, puis depuis le worker Celery (envoi d'équipe à deux membres, deux fils distincts), arrive sur la WebSocket ouverte dans Daphne via Redis ;
+- redémarrage de Redis : la connexion est fermée proprement, le client reconnecte, `ready` donne le bon compteur ; redémarrage de Daphne : fermeture détectée, reconnexion, rattrapage `sync` sans doublon, renvoi avec le même `client_id` sans second message ;
+- l'abonnement au groupe Redis expire (24 h) ou se perd : la connexion le renouvelle toute seule (toutes les 2 minutes et à chaque `ping`), couverte par des tests.
+Contrôle de routage en environnement réel : `scripts/staging/ws_check.py --api <url> [--inbox]` (billet de messagerie avec `TRATRA_TOKEN`).
+
+## 6. Limites connues
 - Pas de transcodage vidéo côté serveur (pas de ffmpeg dans l'image) : seules les vidéos MP4/MOV de moins de `STATUS_VIDEO_MAX_SECONDS` sont acceptées.
 - Les notifications push de messages ne sont opérationnelles qu'avec Firebase configuré ; non testées en réel ici.
 - Le sens « lu » d'un message d'équipe n'est visible que de l'équipe.
