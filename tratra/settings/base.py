@@ -210,7 +210,12 @@ ACCOUNT_LOGIN_METHODS = {"username", "email"}
 ACCOUNT_SIGNUP_FIELDS = ["email*", "password1*", "password2*"]
 ACCOUNT_UNIQUE_EMAIL = True  # Empêche les doublons
 
+# Reverse proxies de confiance devant l'application (production : Traefik = 1 ; développement / accès direct : 0). Détermine l'IP du client
+# pour la limitation de débit (DRF), Axes et la liste noire (voir handy/security.py). À mettre à 0 si l'application est exposée sans proxy.
+TRUSTED_PROXY_COUNT = int(config('TRUSTED_PROXY_COUNT', default='1' if os.getenv('DJANGO_ENV') == 'prod' else '0'))
+
 REST_FRAMEWORK = {
+    'NUM_PROXIES': TRUSTED_PROXY_COUNT,  # IP du client = entrée posée par notre dernier proxy (jamais celle écrite par le client)
     'DEFAULT_AUTHENTICATION_CLASSES': (
         'backoffice.mfa.MFAJWTAuthentication',  # JWT + preuve de double authentification du personnel (✅ plus de SessionAuthentication)
     ),
@@ -685,6 +690,8 @@ AXES_LOCK_OUT_AT_FAILURE = True
 AXES_ENABLE_ADMIN = True
 AXES_VERBOSE = True
 AXES_LOCKOUT_TEMPLATE = '403.html'  # Utilise un template custom si bloqué
+# IP réelle du client : sans cela, derrière Traefik, toutes les personnes partageaient UN compteur d'échecs (voir handy/security.py).
+AXES_CLIENT_IP_CALLABLE = 'handy.security.client_ip'
 
 # ENABLE_SSL_HARDENING = os.getenv("ENABLE_SSL_HARDENING", "true").lower() in ("1","true","yes")
 #

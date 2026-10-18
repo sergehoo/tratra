@@ -1,6 +1,7 @@
 from django.http import HttpResponseForbidden
 
 from handy.models import IPBlacklist
+from handy.security import client_ip
 
 
 class IPBlacklistMiddleware:
@@ -14,9 +15,5 @@ class IPBlacklistMiddleware:
         return self.get_response(request)
 
     def get_client_ip(self, request):
-        x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
-        if x_forwarded_for:
-            ip = x_forwarded_for.split(',')[0].strip()
-        else:
-            ip = request.META.get('REMOTE_ADDR')
-        return ip
+        # Jamais l'entrée la plus à gauche de X-Forwarded-For : elle est écrite par le client (contournement de la liste noire).
+        return client_ip(request)
