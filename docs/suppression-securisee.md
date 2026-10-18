@@ -22,10 +22,10 @@ docker compose exec tratraweb python manage.py cleanup_demo_data --dry-run --sel
 docker compose exec tratraweb cat /tmp/demo_selection.json          # 2. relire ; retirer toute ligne douteuse (éditer puis recopier dans le conteneur)
 
 # 3. Sauvegarde de la base (l'utilisateur et la base sont lus DANS le conteneur de la base), puis copie dans le conteneur de l'application
-mkdir -p /home/ubuntu/sauvegardes
-docker compose exec -T tratradb sh -c 'pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB"' > /home/ubuntu/sauvegardes/tratra_avant_nettoyage.sql
-ls -la /home/ubuntu/sauvegardes/tratra_avant_nettoyage.sql           # doit être non vide
-docker compose cp /home/ubuntu/sauvegardes/tratra_avant_nettoyage.sql tratraweb:/tmp/backup.sql
+mkdir -p $HOME/sauvegardes
+docker compose exec -T tratradb sh -c 'pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB"' > $HOME/sauvegardes/tratra_avant_nettoyage.sql
+ls -la $HOME/sauvegardes/tratra_avant_nettoyage.sql           # doit être non vide
+docker compose cp $HOME/sauvegardes/tratra_avant_nettoyage.sql tratraweb:/tmp/backup.sql
 
 # 4. Exécution : UNIQUEMENT après les étapes 1 à 3 (sélection relue + sauvegarde de moins de 48 h + mot de confirmation)
 docker compose exec tratraweb python manage.py cleanup_demo_data --execute --selection /tmp/demo_selection.json \
