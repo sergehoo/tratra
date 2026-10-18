@@ -58,7 +58,7 @@ def check(env: dict):
         err("SECRET_KEY", "trop courte (50 caractères minimum)")
 
     api, front = get("tratraweb_HOST"), get("FRONTEND_HOST")
-    for var in ("tratraweb_HOST", "FRONTEND_HOST", "MINIO_API_HOST", "MINIO_CONSOLE_HOST"):
+    for var in ("tratraweb_HOST", "FRONTEND_HOST", "MINIO_API_HOST"):
         if not get(var):
             err(var, "absente (utilisée par les routeurs Traefik du compose)")
     hosts = [h.strip() for h in get("ALLOWED_HOSTS").split(",") if h.strip()]

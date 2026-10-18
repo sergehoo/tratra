@@ -60,13 +60,9 @@ services:
       - traefik.http.routers.minio-api.service=minio-api
       - traefik.http.services.minio-api.loadbalancer.server.port=9000
 
-      # === Console ===
-      - traefik.http.routers.minio-console.rule=Host(`${MINIO_CONSOLE_HOST}`)
-      - traefik.http.routers.minio-console.entrypoints=websecure
-      - traefik.http.routers.minio-console.tls.certresolver=lets
-      - traefik.http.routers.minio-console.service=minio-console
-      - traefik.http.services.minio-console.loadbalancer.server.port=9001
-#      - traefik.http.middlewares.minio-compress.compress=true
+      # === Console MinIO (:9001) : JAMAIS exposée publiquement ===
+      # Seule l'API S3 (signatures temporaires) passe par Traefik. La console reste joignable depuis le réseau interne uniquement
+      # (docker exec / tunnel SSH : `docker compose exec minio mc ...` ou `ssh -L 9001:<ip conteneur>:9001 serveur`).
 
   # Creates the public-media and private-KYC buckets before Django starts.
   # No anonymous policy is granted: application code produces short-lived
@@ -246,33 +242,16 @@ services:
     networks: [web]
     restart: unless-stopped
 
+  # --- Adminer : OUTIL D'EXPLOITATION, jamais routé par Traefik ni démarré par défaut (profil « tools »). -----------------------
+  # Aucun port publié : démarrage ponctuel, lié à 127.0.0.1 de l'hôte (jamais à Internet), puis tunnel SSH depuis ton poste :
+  #   serveur : docker compose --profile tools run --rm -p 127.0.0.1:18080:8080 adminer      (Ctrl-C ou fermeture = arrêt et suppression)
+  #   poste   : ssh -L 18080:127.0.0.1:18080 utilisateur@serveur   →   http://localhost:18080
+  # (le port 8080 de l'hôte appartient à un autre site : on utilise 18080.)
   adminer:
+    profiles: ["tools"]
     image: adminer:4
     environment:
-      # Connexion par défaut à tratradb (service DB dans le même réseau 'web')
-      ADMINER_DEFAULT_SERVER: tratradb
-      # Thème optionnel :
-      # ADMINER_DESIGN: pepa-linha
-    # ports:
-    #   - "8080:8080"   # facultatif si exposé par Traefik
+      ADMINER_DEFAULT_SERVER: tratradb      # service DB du réseau interne « web »
     networks:
       - web
-      - proxy
-    restart: unless-stopped
-    labels:
-      - traefik.enable=true
-      - traefik.docker.network=proxy
-
-      - traefik.http.routers.adminer.rule=Host(`${ADMINER_HOST}`)
-      - traefik.http.routers.adminer.entrypoints=websecure
-      - traefik.http.routers.adminer.tls.certresolver=lets
-      - traefik.http.services.adminer-svc.loadbalancer.server.port=8080
-
-      # Compression + (optionnel) BasicAuth
-      - traefik.http.routers.adminer.middlewares=adminer-compress@docker${ADMINER_AUTH_SUFFIX}
-      - traefik.http.middlewares.adminer-compress.compress=true
-
-      # Active la basic auth en définissant BASIC_AUTH_USERS (format htpasswd) dans .env,
-      # et ADMINER_AUTH_SUFFIX=",adminer-auth@docker" pour brancher le middleware.
-      # ⚠️ Ne pas exposer Adminer en prod sans auth (idéalement + IP allowlist).
-      - traefik.http.middlewares.adminer-auth.basicauth.users=${BASIC_AUTH_USERS:-}
+    restart: "no"

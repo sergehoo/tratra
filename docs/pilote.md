@@ -21,7 +21,7 @@ scripts/staging/rehearsal.sh down          # supprime tout (conteneurs, volumes,
 ## 2. Serveur de staging — pré-requis 👤
 
 ```bash
-# DNS : 4 enregistrements A/AAAA vers le serveur (adminer facultatif)
+# DNS : 3 enregistrements A/AAAA vers le serveur (api, app, minio) — console MinIO et Adminer ne sont jamais exposés
 #   api-staging.<domaine>   app-staging.<domaine>   minio-staging.<domaine>   minio-console-staging.<domaine>
 docker network ls | grep -w proxy                  # réseau de VOTRE Traefik (Dokploy : dokploy-network). Ne pas le recréer.
 docker compose version                             # Compose v2

@@ -64,7 +64,6 @@ fixed = {
     "MINIO_ROOT_USER": "rehearsal_minio", "AWS_ACCESS_KEY_ID": "rehearsal_minio",
     "SMS_BACKEND": "twilio", "TWILIO_ACCOUNT_SID": "AC" + "0" * 32, "TWILIO_AUTH_TOKEN": rand(32), "TWILIO_MESSAGING_SERVICE_SID": "MG" + "0" * 32,   # FICTIFS : aucun SMS
     "EMAIL_HOST": "localhost", "EMAIL_HOST_USER": "rehearsal", "EMAIL_HOST_PASSWORD": rand(16),
-    "BASIC_AUTH_USERS": "admin:{SHA}" + base64.b64encode(hashlib.sha1(rand(16).encode()).digest()).decode(),
 }
 minio_pw = rand(32)
 fixed["MINIO_ROOT_PASSWORD"], fixed["AWS_SECRET_ACCESS_KEY"] = minio_pw, minio_pw

@@ -87,11 +87,7 @@ services:
       - traefik.http.routers.tratra-stg-minio-api.tls.certresolver=${TRAEFIK_CERTRESOLVER:-lets}
       - traefik.http.routers.tratra-stg-minio-api.service=tratra-stg-minio-api
       - traefik.http.services.tratra-stg-minio-api.loadbalancer.server.port=9000
-      - traefik.http.routers.tratra-stg-minio-console.rule=Host(`${MINIO_CONSOLE_HOST}`)
-      - traefik.http.routers.tratra-stg-minio-console.entrypoints=websecure
-      - traefik.http.routers.tratra-stg-minio-console.tls.certresolver=${TRAEFIK_CERTRESOLVER:-lets}
-      - traefik.http.routers.tratra-stg-minio-console.service=tratra-stg-minio-console
-      - traefik.http.services.tratra-stg-minio-console.loadbalancer.server.port=9001
+      # Console MinIO (:9001) : JAMAIS exposée publiquement (réseau interne / tunnel SSH uniquement).
 
   # Crée les buckets média et KYC privé (aucune politique anonyme : URL signées uniquement).
   minio-init:
@@ -228,24 +224,12 @@ services:
         condition: service_healthy
     networks: [web]
 
-  # --- Adminer : UNIQUEMENT à la demande (docker compose --profile tools up -d adminer-stg), jamais exposé sans auth --
+  # --- Adminer : UNIQUEMENT à la demande (docker compose --profile tools up -d adminer-stg), jamais routé par Traefik ----------------
+  # Aucun port publié : `docker compose --profile tools run --rm -p 127.0.0.1:18081:8080 adminer-stg`, puis tunnel SSH vers 127.0.0.1:18081.
   adminer-stg:
     profiles: ["tools"]
     image: adminer:4
     environment:
       ADMINER_DEFAULT_SERVER: tratradb
-    networks:
-      web:
-      proxy:
-        aliases: [adminer-stg]
-    restart: unless-stopped
-    labels:
-      - traefik.enable=true
-      - traefik.docker.network=${PROXY_NETWORK:-proxy}
-      - traefik.http.routers.tratra-stg-adminer.rule=Host(`${ADMINER_HOST}`)
-      - traefik.http.routers.tratra-stg-adminer.entrypoints=websecure
-      - traefik.http.routers.tratra-stg-adminer.tls.certresolver=${TRAEFIK_CERTRESOLVER:-lets}
-      - traefik.http.routers.tratra-stg-adminer.middlewares=tratra-stg-adminer-auth@docker,tratra-stg-noindex@docker
-      - traefik.http.routers.tratra-stg-adminer.service=tratra-stg-adminer-svc
-      - traefik.http.services.tratra-stg-adminer-svc.loadbalancer.server.port=8080
-      - traefik.http.middlewares.tratra-stg-adminer-auth.basicauth.users=${BASIC_AUTH_USERS}
+    networks: [web]
+    restart: "no"

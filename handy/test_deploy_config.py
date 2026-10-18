@@ -278,7 +278,6 @@ SECRET_KEY=Zk3-longue-cle-aleatoire-Zk3-longue-cle-aleatoire-Zk3-longue-cle-alea
 tratraweb_HOST=api.tratra.test
 FRONTEND_HOST=app.tratra.test
 MINIO_API_HOST=minio.tratra.test
-MINIO_CONSOLE_HOST=minio-console.tratra.test
 ALLOWED_HOSTS=api.tratra.test,tratraweb
 CORS_ALLOWED_ORIGINS=https://app.tratra.test
 CSRF_TRUSTED_ORIGINS=https://app.tratra.test,https://api.tratra.test

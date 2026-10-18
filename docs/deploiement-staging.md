@@ -45,7 +45,7 @@ décrit pas un hôte de staging.
 ## 1. Pré-requis serveur (une fois)
 
 ```bash
-# DNS : 5 enregistrements A/AAAA vers le serveur de staging (api, app, minio, minio-console, adminer)
+# DNS : 3 enregistrements A/AAAA vers le serveur de staging (api, app, minio) — console MinIO et Adminer ne sont jamais exposés
 docker network ls | grep -w proxy        # DOIT exister (réseau de votre Traefik). Ne pas le recréer.
 docker compose version                    # Compose v2
 # Traefik : entrypoint « websecure » et résolveur « lets » (comme en production) ; Traefik gère les WebSocket nativement.

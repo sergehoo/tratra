@@ -1,5 +1,6 @@
 """IP réelle du client derrière Traefik : verrouillage de connexion PAR CLIENT (et non pour tout le monde), liste noire non contournable."""
 import pytest
+from django.conf import settings as dj_settings
 from django.core.cache import cache
 from django.test import RequestFactory, override_settings
 from rest_framework.test import APIClient
@@ -82,3 +83,15 @@ def test_liste_noire_non_contournable_par_en_tete_forge():
     assert forged_innocent.status_code == 403                                   # écrire une autre adresse à gauche n'efface pas la vraie
     framed = c.get("/handy/public/stats/", REMOTE_ADDR=PROXY, HTTP_X_FORWARDED_FOR="9.9.9.9, 1.1.1.1")
     assert framed.status_code != 403                                            # et on ne peut pas faire bloquer un tiers en écrivant son IP à gauche
+
+
+@override_settings(TRUSTED_PROXY_COUNT=1, REST_FRAMEWORK={**dj_settings.REST_FRAMEWORK, "NUM_PROXIES": 1})
+def test_la_limitation_de_debit_voit_la_meme_adresse_que_axes_et_la_liste_noire():
+    """Une seule définition de « l'adresse du client » pour DRF (throttles), Axes et la liste noire : celle posée par Traefik."""
+    from rest_framework.request import Request
+    from rest_framework.throttling import AnonRateThrottle
+    request = Request(_req("6.6.6.6, 198.51.100.7"))
+    assert AnonRateThrottle().get_ident(request) == client_ip(request._request) == "198.51.100.7"
+    forged_a = Request(_req("1.1.1.1, 198.51.100.7"))
+    forged_b = Request(_req("2.2.2.2, 198.51.100.7"))
+    assert AnonRateThrottle().get_ident(forged_a) == AnonRateThrottle().get_ident(forged_b)   # changer l'en-tête ne change pas le seau de limitation
