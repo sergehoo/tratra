@@ -54,7 +54,9 @@ def _login(staff=False, superuser=True):
 
 
 def _delete_user(client, user):
-    return client.post("/admin/handy/user/", {"action": "delete_selected", "_selected_action": [user.pk], "post": "yes"})
+    """Suppression sécurisée (aperçu puis confirmation) : les comptes d'artisans de test n'ont ni connexion ni conditions acceptées, donc fictifs."""
+    return client.post("/admin/handy/user/", {"action": "safe_delete_selected", "_selected_action": [user.pk], "safe_delete_apply": "1",
+                                              "confirm_word": "SUPPRIMER", "confirm_fictive": "1"})
 
 
 def test_a_superuser_can_delete_an_erroneous_account_that_has_badge_history():
@@ -65,11 +67,10 @@ def test_a_superuser_can_delete_an_erroneous_account_that_has_badge_history():
     pro = artisan("del_badge")
     assert BadgeAward.objects.filter(profile__user=pro).exists()
     admin = _login()
-    blocked = _delete_user(admin, pro)
-    assert blocked.status_code == 200 and User.objects.filter(pk=pro.pk).exists()      # les pièces KYC restent PROTÉGÉES (conservation) : à supprimer d'abord
-    assert "autorisé à supprimer" not in blocked.content.decode().lower()                  # plus de refus de DROIT sur l'historique des badges (seul reste la protection des pièces)
-    HandymanDocument.objects.filter(handyman__user=pro).delete()
-    resp = _delete_user(admin, pro)
+    preview = admin.post("/admin/handy/user/", {"action": "safe_delete_selected", "_selected_action": [pro.pk]})
+    assert preview.status_code == 200 and User.objects.filter(pk=pro.pk).exists()           # l'aperçu ne supprime rien
+    assert "autorisé à supprimer" not in preview.content.decode().lower()
+    resp = _delete_user(admin, pro)                                                         # les pièces KYC protégées sont supprimées avec le compte fictif
     assert resp.status_code == 302 and not User.objects.filter(pk=pro.pk).exists()
     assert not BadgeAward.objects.filter(profile__user_id=pro.pk).exists()
 

@@ -68,7 +68,7 @@ def test_a_superuser_deletes_an_account_that_has_addresses_and_surveillance_reco
     WatchDecision.objects.create(watch=watch, decision="investigate", reason="Vérification en cours")
     case = RiskCase.objects.create(subject=user, kind="abnormal_activity", explanation="x")
     RiskDecision.objects.create(case=case, decision="investigate", reason="Vérification en cours")
-    r = root.post("/admin/handy/user/", {"action": "delete_selected", "_selected_action": [user.pk], "post": "yes"})
+    r = root.post("/admin/handy/user/", {"action": "safe_delete_selected", "_selected_action": [user.pk], "safe_delete_apply": "1", "confirm_word": "SUPPRIMER"})
     assert r.status_code == 302 and not User.objects.filter(pk=user.pk).exists()
     assert not UserAddress.objects.exists() and not EvaluationWatch.objects.exists() and not RiskCase.objects.exists()
 

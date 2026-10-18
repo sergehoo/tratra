@@ -1,0 +1,55 @@
+{% extends "admin/base_site.html" %}
+{% load i18n admin_urls %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+  <a href="{% url 'admin:index' %}">Accueil</a> &rsaquo;
+  <a href="{{ changelist_url }}">{{ opts.verbose_name_plural|capfirst }}</a> &rsaquo; Suppression sécurisée
+</div>
+{% endblock %}
+
+{% block content %}
+<p>Rien n'est encore modifié : ce qui suit est l'<strong>aperçu exact</strong> (la suppression est exécutée puis annulée).
+Les paiements réels ne sont jamais effacés : les comptes concernés sont <strong>anonymisés</strong>, les réservations concernées sont <strong>conservées</strong>.</p>
+
+<table>
+  <thead><tr><th>Élément</th><th>Décision</th><th>Détail</th></tr></thead>
+  <tbody>
+  {% for o in outcomes %}
+    <tr>
+      <td>{{ o.label }}</td>
+      <td>
+        {% if o.action == "delete" %}<strong style="color:#b00020">Suppression définitive</strong>{% if o.demo %} (donnée fictive reconnue){% endif %}
+        {% elif o.action == "anonymize" %}<strong style="color:#8a5a00">Anonymisation</strong>
+        {% else %}<strong>Conservé</strong>{% endif %}
+      </td>
+      <td>{% for r in o.reasons %}{{ r }}{% if not forloop.last %}<br>{% endif %}{% endfor %}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+
+{% if counts %}
+<h2>Objets qui seraient supprimés avec la sélection</h2>
+<ul>{% for label, n in counts %}<li>{{ label }} : {{ n }}</li>{% endfor %}</ul>
+{% endif %}
+{% if report.refused %}
+<h2>Conservés ou impossibles à supprimer</h2>
+<ul>{% for label, reasons in report.refused %}<li>{{ label }} — {{ reasons|join:" ; " }}</li>{% endfor %}</ul>
+{% endif %}
+
+{% if can_apply %}
+<form method="post" action="{{ request.get_full_path }}">
+  {% csrf_token %}
+  {% if not single %}<input type="hidden" name="action" value="safe_delete_selected">{% for id in ids %}<input type="hidden" name="_selected_action" value="{{ id }}">{% endfor %}{% endif %}
+  <input type="hidden" name="safe_delete_apply" value="1">
+  <p><label><input type="checkbox" name="confirm_fictive" value="1" {% if confirm_fictive %}checked{% endif %}>
+     Je confirme que les comptes ou réservations qui <em>ne ressemblent pas</em> à des données fictives sont bien des essais à supprimer vraiment
+     (sans cela ils sont anonymisés ou conservés). Cela ne permet <strong>jamais</strong> d'effacer de l'argent réel.</label></p>
+  <p><label>Tapez <strong>{{ confirm_word }}</strong> pour confirmer : <input type="text" name="confirm_word" autocomplete="off"></label></p>
+  <p><input type="submit" class="default" value="Confirmer l'opération"> <a href="{{ changelist_url }}" class="button cancel-link">Annuler</a></p>
+</form>
+{% else %}
+<p>Aucun élément ne peut être supprimé ni anonymisé. <a href="{{ changelist_url }}">Retour à la liste</a></p>
+{% endif %}
+{% endblock %}

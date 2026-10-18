@@ -1,4 +1,5 @@
 from .admin_utils import ReadOnlyHistoryAdmin
+from handy.admin_safe_delete import SafeDeleteAdminMixin
 from .models import (
     HandymanDocument, ServiceImage, Report, PaymentLog, Device, IPBlacklist, ServiceCategory, Service, Booking,
     Notification, Message, DepositTransaction, HeroSlide, Review, UserAddress,
@@ -15,8 +16,9 @@ admin.site.site_url = 'http://tratra.ci/'
 admin.site.index_title = 'TRATRA'
 admin.empty_value_display = '**Empty**'
 
-class CustomUserAdmin(UserAdmin):
+class CustomUserAdmin(SafeDeleteAdminMixin, UserAdmin):
     model = User
+    safe_delete_kind = "users"
     # Pas de coordonnées dans la liste : données privées (elles restent dans la fiche, réservée aux superutilisateurs côté Back-Office).
     list_display = ('username', 'first_name', 'last_name', 'phone', 'email', 'is_active', 'is_verified', 'is_staff', 'date_joined', 'last_login')
     list_filter = ('is_active', 'is_verified', 'is_staff', 'is_superuser', 'user_type')
@@ -273,7 +275,8 @@ class ServiceAdmin(admin.ModelAdmin):
 
 
 @admin.register(Booking)
-class BookingAdmin(admin.ModelAdmin):
+class BookingAdmin(SafeDeleteAdminMixin, admin.ModelAdmin):
+    safe_delete_kind = "bookings"
     list_display = ('id', 'client', 'handyman', 'service', 'booking_date', 'status', 'transport_fee', 'short_address')
     list_filter = ('status', 'city', 'booking_date')
     search_fields = ('client__username', 'handyman__username', 'address', 'city', 'postal_code')
