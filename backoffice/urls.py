@@ -2,7 +2,7 @@ from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
 from announcements.api import AnnouncementAdminViewSet
-from backoffice import api_core, api_engagements, api_mfa, api_money, api_ops, api_people, api_system, api_transport, api_reputation, api_intelligence, api_biometrics, api_messaging, api_statuses
+from backoffice import api_core, api_engagements, api_mfa, api_money, api_ops, api_people, api_system, api_transport, api_reputation, api_intelligence, api_biometrics, api_messaging, api_statuses, api_assistant
 
 router = DefaultRouter()
 router.register("announcements", AnnouncementAdminViewSet, basename="bo-announcements")
@@ -43,9 +43,17 @@ urlpatterns = [
     path("messages/batches/", api_messaging.BatchList.as_view(), name="bo-message-batches"),
     path("messages/batches/<int:pk>/", api_messaging.BatchDetail.as_view(), name="bo-message-batch"),
     path("messages/threads/", api_messaging.ThreadList.as_view(), name="bo-message-threads"),
+    path("messages/unread/", api_messaging.Unread.as_view(), name="bo-message-unread"),
     path("messages/threads/<int:pk>/", api_messaging.ThreadDetail.as_view(), name="bo-message-thread"),
     path("messages/threads/<int:pk>/reply/", api_messaging.ThreadReply.as_view(), name="bo-message-reply"),
     path("messages/threads/<int:pk>/read/", api_messaging.ThreadRead.as_view(), name="bo-message-read"),
+    # Tratra AI : conversations privées, dialogue (SSE), synthèses de gestion ; rédaction assistée des messages
+    path("assistant/status/", api_assistant.AssistantStatus.as_view(), name="bo-assistant-status"),
+    path("assistant/conversations/", api_assistant.ConversationList.as_view(), name="bo-assistant-conversations"),
+    path("assistant/conversations/<int:pk>/", api_assistant.ConversationDetail.as_view(), name="bo-assistant-conversation"),
+    path("assistant/chat/", api_assistant.AssistantChat.as_view(), name="bo-assistant-chat"),
+    path("assistant/insights/", api_assistant.AssistantInsights.as_view(), name="bo-assistant-insights"),
+    path("messages/ai-draft/", api_assistant.MessageDraft.as_view(), name="bo-message-ai-draft"),
     # Modération des statuts signalés
     path("statuses/reports/", api_statuses.StatusReportList.as_view(), name="bo-status-reports"),
     path("statuses/reports/<int:pk>/dismiss/", api_statuses.StatusReportDismiss.as_view(), name="bo-status-report-dismiss"),

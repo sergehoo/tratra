@@ -462,6 +462,16 @@ AI_DEEPSEEK_MODEL = config('AI_DEEPSEEK_MODEL', default='deepseek-chat')
 AI_ANTHROPIC_API_KEY = config('AI_ANTHROPIC_API_KEY', default='')     # secret : jamais journalisé ni renvoyé
 AI_ANTHROPIC_MODEL = config('AI_ANTHROPIC_MODEL', default='claude-sonnet-5-5')
 AI_TIMEOUT = config('AI_TIMEOUT', default=30, cast=int)
+# Assistant du Back-Office (Tratra AI) : mêmes clés que ci-dessus (DeepSeek en priorité, Anthropic en repli), exclusivement côté serveur.
+# Sans clé : « IA non configurée ». Limites par administrateur, comptées en base.
+AI_ASSISTANT_ENABLED = config('AI_ASSISTANT_ENABLED', default=True, cast=bool)             # interrupteur général
+AI_ASSISTANT_PER_HOUR = config('AI_ASSISTANT_PER_HOUR', default=30, cast=int)              # questions par heure et par administrateur
+AI_ASSISTANT_PER_DAY = config('AI_ASSISTANT_PER_DAY', default=150, cast=int)               # questions par jour et par administrateur
+AI_ASSISTANT_DAILY_TOKENS = config('AI_ASSISTANT_DAILY_TOKENS', default=150000, cast=int)  # budget de jetons par 24 h et par administrateur
+AI_ASSISTANT_MAX_TOKENS = config('AI_ASSISTANT_MAX_TOKENS', default=1024, cast=int)        # longueur maximale d'une réponse du modèle
+AI_ASSISTANT_DEADLINE = config('AI_ASSISTANT_DEADLINE', default=90, cast=int)              # secondes : échéance globale d'un tour (outils compris)
+AI_ASSISTANT_RETENTION_DAYS = config('AI_ASSISTANT_RETENTION_DAYS', default=90, cast=int)  # conservation de l'historique des conversations
+AI_DRAFT_PER_HOUR = config('AI_DRAFT_PER_HOUR', default=30, cast=int)                      # rédactions assistées de messages par heure et par administrateur
 AI_KYC_EXTERNAL_ENABLED = config('AI_KYC_EXTERNAL_ENABLED', default=False, cast=bool)
 AI_KYC_LEGAL_BASIS = config('AI_KYC_LEGAL_BASIS', default='')         # ex. « consentement explicite du titulaire, DPA signé avec le fournisseur »
 KYC_FINGERPRINT_PEPPER = config('KYC_FINGERPRINT_PEPPER', default='')  # secret : sel de l'empreinte des numéros de documents (défaut : SECRET_KEY)
@@ -554,6 +564,11 @@ CELERY_BEAT_SCHEDULE = {
     'intelligence-risk-scan': {
         'task': 'intelligence.tasks.scan',
         'schedule': 21600.0,
+    },
+    # Tratra AI : purge de l'historique des conversations de l'assistant après la durée de conservation.
+    'assistant-history-purge': {
+        'task': 'backoffice.tasks.purge_assistant_history',
+        'schedule': 86400.0,
     },
     # Biométrie KYC : expiration des sessions et suppression des captures arrivées au terme de la conservation.
     'biometrics-tick': {

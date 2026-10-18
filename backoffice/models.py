@@ -70,3 +70,44 @@ class StaffMessageDelivery(models.Model):
     class Meta:
         constraints = [models.UniqueConstraint(fields=["batch", "user"], name="uniq_staff_delivery")]
         indexes = [models.Index(fields=["batch", "status"])]
+
+
+class AssistantConversation(models.Model):
+    """Conversation d'UN administrateur avec Tratra AI. Privée : jamais lisible par un autre compte, même super-administrateur.
+    La suppression est logique (`deleted_at`) puis purgée après la durée de conservation (`purge_assistant_history`)."""
+    owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="ai_conversations")
+    title = models.CharField(max_length=80, default="Nouvelle conversation")
+    client_id = models.UUIDField(null=True, blank=True)                 # idempotence : un double clic ne crée jamais deux conversations
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True, db_index=True)
+    deleted_at = models.DateTimeField(null=True, blank=True, db_index=True)
+
+    class Meta:
+        ordering = ["-updated_at", "-id"]
+        constraints = [models.UniqueConstraint(fields=["owner", "client_id"], condition=models.Q(client_id__isnull=False), name="uniq_ai_conversation_client")]
+        indexes = [models.Index(fields=["owner", "-updated_at"], name="ai_conv_owner_idx")]
+
+    def __str__(self):
+        return f"Conversation IA #{self.pk}"
+
+
+class AssistantMessage(models.Model):
+    """Un échange. `sources` ne garde que le NOM des outils consultés (jamais leurs données) : l'interface montre d'où vient la réponse."""
+    USER, ASSISTANT = "user", "assistant"
+    ROLES = [(USER, "Administrateur"), (ASSISTANT, "Tratra AI")]
+
+    conversation = models.ForeignKey(AssistantConversation, on_delete=models.CASCADE, related_name="messages")
+    role = models.CharField(max_length=10, choices=ROLES)
+    content = models.TextField(blank=True, default="")
+    client_id = models.UUIDField(null=True, blank=True)
+    sources = models.JSONField(default=list, blank=True)                 # [{"tool": "bookings_overview", "label": "Réservations", "ok": true}]
+    provider = models.CharField(max_length=20, blank=True, default="")
+    tokens_in = models.PositiveIntegerField(default=0)
+    tokens_out = models.PositiveIntegerField(default=0)
+    error_code = models.CharField(max_length=40, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ["id"]
+        constraints = [models.UniqueConstraint(fields=["conversation", "client_id"], condition=models.Q(client_id__isnull=False), name="uniq_ai_message_client")]
+        indexes = [models.Index(fields=["conversation", "-id"], name="ai_msg_conv_idx")]

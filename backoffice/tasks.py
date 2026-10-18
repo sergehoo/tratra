@@ -7,3 +7,11 @@ def deliver_batch(self, batch_id: int) -> dict:
     from backoffice import staff_messaging
 
     return staff_messaging.deliver(batch_id)
+
+
+@shared_task(name="backoffice.tasks.purge_assistant_history")
+def purge_assistant_history() -> dict:
+    """Supprime les conversations de l'assistant inactives depuis plus que la durée de conservation (`AI_ASSISTANT_RETENTION_DAYS`)."""
+    from backoffice.assistant.retention import purge
+
+    return purge()

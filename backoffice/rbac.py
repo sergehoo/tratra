@@ -31,18 +31,19 @@ PERMISSIONS = {
     "analytics.view": "Statistiques, filtres et exports",
     "settings.manage": "Règles métier et intégrations",
     "security.manage": "Rôles du personnel, sessions et journal d'audit",
+    "assistant.use": "Tratra AI : poser des questions et obtenir des synthèses ; chaque outil de l'assistant exige en plus le droit du module consulté (lecture seule)",
 }
 
 ROLES = {
     "super_admin": set(PERMISSIONS),
-    "ops": {"messages.send", "messages.bulk", "dashboard.view", "users.view", "kyc.review", "trust.manage", "tratra_id.manage", "services.moderate", "bookings.view",
+    "ops": {"assistant.use", "messages.send", "messages.bulk", "dashboard.view", "users.view", "kyc.review", "trust.manage", "tratra_id.manage", "services.moderate", "bookings.view",
             "bookings.manage", "live.view", "reviews.moderate", "business.manage", "continuity.view", "analytics.view",
             "notifications.view", "engagements.view", "engagements.manage"},
-    "support": {"messages.send", "dashboard.view", "users.view", "bookings.view", "bookings.manage", "reviews.moderate", "support.manage",
+    "support": {"assistant.use", "messages.send", "dashboard.view", "users.view", "bookings.view", "bookings.manage", "reviews.moderate", "support.manage",
                 "notifications.view", "continuity.view", "engagements.view", "engagements.manage"},
-    "finance": {"dashboard.view", "bookings.view", "finance.view", "finance.manage", "analytics.view", "business.manage", "engagements.view"},
-    "marketing": {"dashboard.view", "announcements.manage", "notifications.view", "analytics.view"},
-    "analyst": {"dashboard.view", "analytics.view"},
+    "finance": {"assistant.use", "dashboard.view", "bookings.view", "finance.view", "finance.manage", "analytics.view", "business.manage", "engagements.view"},
+    "marketing": {"assistant.use", "dashboard.view", "announcements.manage", "notifications.view", "analytics.view"},
+    "analyst": {"assistant.use", "dashboard.view", "analytics.view"},
 }
 GROUP_PREFIX = "bo_"
 
