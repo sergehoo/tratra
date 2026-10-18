@@ -13,14 +13,24 @@ Argent réel (jamais effacé) : paiement vérifié auprès d'un prestataire ou a
 Donnée fictive (signaux structurels, jamais le nom ou l'e-mail) : jamais connecté, conditions jamais acceptées, aucune session, aucun OTP, aucun appareil, hors administration.
 
 ## Nettoyage en masse : `cleanup_demo_data`
+**Avant tout** : le serveur doit avoir ce code (`git fetch && git checkout <branche> && git pull`, puis `docker compose up -d --build tratraweb worker beat`) ;
+vérification : `docker compose exec tratraweb python manage.py cleanup_demo_data --help`.
+
 ```bash
-# 1. Simulation (rien n'est modifié) + fichier de sélection à RELIRE
+# 1. Simulation (rien n'est modifié) + fichier de sélection (dans le conteneur) à RELIRE
 docker compose exec tratraweb python manage.py cleanup_demo_data --dry-run --selection-out /tmp/demo_selection.json
-# 2. Relire le fichier (retirer toute ligne douteuse), faire une sauvegarde de la base de moins de 48 h
-docker compose exec tratradb pg_dump -U "$DB_USER" "$DB_NAME" > /sauvegardes/tratra_avant_nettoyage.sql
-# 3. Exécution : sélection relue + sauvegarde + mot de confirmation
+docker compose exec tratraweb cat /tmp/demo_selection.json          # 2. relire ; retirer toute ligne douteuse (éditer puis recopier dans le conteneur)
+
+# 3. Sauvegarde de la base (l'utilisateur et la base sont lus DANS le conteneur de la base), puis copie dans le conteneur de l'application
+mkdir -p /home/ubuntu/sauvegardes
+docker compose exec -T tratradb sh -c 'pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB"' > /home/ubuntu/sauvegardes/tratra_avant_nettoyage.sql
+ls -la /home/ubuntu/sauvegardes/tratra_avant_nettoyage.sql           # doit être non vide
+docker compose cp /home/ubuntu/sauvegardes/tratra_avant_nettoyage.sql tratraweb:/tmp/backup.sql
+
+# 4. Exécution : UNIQUEMENT après les étapes 1 à 3 (sélection relue + sauvegarde de moins de 48 h + mot de confirmation)
 docker compose exec tratraweb python manage.py cleanup_demo_data --execute --selection /tmp/demo_selection.json \
-    --backup /sauvegardes/tratra_avant_nettoyage.sql --confirm SUPPRIMER-DONNEES-DEMO
+    --backup /tmp/backup.sql --confirm SUPPRIMER-DONNEES-DEMO
 ```
+La commande lit `--selection` et `--backup` DANS le conteneur `tratraweb` (un chemin de l'hôte n'y est pas visible : d'où `docker compose cp`).
 Chaque compte de la sélection est revérifié avant l'exécution : un seul qui a changé (connexion, argent réel…) arrête tout, rien n'est supprimé.
 Pour quelques comptes précis choisis à la main : `python manage.py purge_accounts --ids 12,13` (simulation par défaut, `--apply` pour supprimer).
