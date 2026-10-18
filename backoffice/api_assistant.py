@@ -14,7 +14,7 @@ from rest_framework.negotiation import DefaultContentNegotiation
 from rest_framework.response import Response
 
 from backoffice import rbac
-from backoffice.assistant import agent, insights, limits, prompts, safety, stream
+from backoffice.assistant import agent, insights, limits, prompts, retention, safety, stream
 from backoffice.assistant import tools as tools_mod
 from backoffice.common import BOView, audit_op, bad_request, paginate
 from backoffice.models import AssistantConversation, AssistantMessage
@@ -73,6 +73,7 @@ class AssistantStatus(BOView):
             "tools": [{"name": t.name, "label": t.label.rstrip("…").strip()} for t in tools_mod.allowed(perms)],
             "scopes": {scope: perm in perms for scope, perm in insights.SCOPES.items()},
             "limits": {**limits.usage_today(request.user), "max_input_chars": limits.INPUT_MAX},
+            "retention_days": retention.retention_days(),
         })
 
 

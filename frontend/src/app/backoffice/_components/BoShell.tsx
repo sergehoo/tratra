@@ -9,6 +9,7 @@ import { breadcrumb, buildNav, activeModule } from "@/lib/boNavModel";
 import type { BoMe } from "@/lib/bo";
 import { BoSidebar } from "./BoSidebar";
 import { GlobalSearch } from "./GlobalSearch";
+import { TratraAI } from "./assistant/TratraAI";
 import { ROLE_LABEL } from "./boIcons";
 import { BoCrumbProvider, useCrumbLabel } from "./crumbs";
 
@@ -289,6 +290,8 @@ export function BoShell({ me, children }: { me: BoMe; children: ReactNode }) {
         </div>
 
         <GlobalSearch open={searching} onClose={() => setSearching(false)} nav={nav} />
+        {/* Tratra AI : bouton flottant + panneau persistant ; absent sans le droit « assistant.use » (chaque outil est de toute façon filtré par le serveur). */}
+        {me.permissions.includes("assistant.use") ? <TratraAI /> : null}
       </div>
     </BoCrumbProvider>
   );

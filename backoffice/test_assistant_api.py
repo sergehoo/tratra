@@ -121,6 +121,7 @@ def test_status_lists_only_the_tools_of_the_account_and_never_a_key(settings):
     names = {t["name"] for t in s["tools"]}
     assert "security_events" not in names and "kyc_overview" not in names and "search_users" in names
     assert "test-deepseek" not in json.dumps(s) and "test-anthropic" not in json.dumps(s)
+    assert s["retention_days"] == 90
 
 
 def test_the_kill_switch_disables_the_assistant(settings):

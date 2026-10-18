@@ -1,14 +1,19 @@
 "use client";
-import { Suspense, useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { Eye, Inbox, Search, Send, Users } from "lucide-react";
+import { Eye, FileText, Film, Inbox, Paperclip, Search, Send, Users, X } from "lucide-react";
 import { Alert, Badge, Button, Card, EmptyState, PageHeader, Select, SkeletonList, Tabs, TextareaField, cx } from "@/components/ds";
+import { upload } from "@/lib/api";
+import { newId } from "@/lib/assistant";
 import { bo, boError, type Page } from "@/lib/bo";
 import { useBo } from "@/lib/BoProvider";
 import { dt } from "../_components/ui";
+import { AiDraftBar } from "./AiDraftBar";
 
-interface Thread { id: number; member: { id: number; name: string; phone: string | null } | null; last_message: string; last_at: string; unread: number }
-interface ThreadMsg { id: number; from_member: boolean; staff: string | null; content: string; created_at: string; state: string }
+interface Attachment { url: string | null; kind: "image" | "video" | "file"; mime: string; size: number; name: string; width?: number; height?: number; duration?: number }
+interface Thread { id: number; member: { id: number; name: string; phone: string | null } | null; last_message: string; last_at: string; unread: number; awaiting_reply: boolean }
+interface ThreadMsg { id: number; from_member: boolean; staff: string | null; content: string; created_at: string; state: string; kind: string; attachment: Attachment | null }
+interface ThreadPage { results: ThreadMsg[]; has_more: boolean; next_before: number | null }
 interface Results { pending: number; sent: number; skipped_consent: number; skipped_unreachable: number; failed: number }
 interface Batch { id: number; created_at: string; status: string; purpose: string; sender: string | null; body: string; recipient_count: number; selection: string; results: Results }
 interface Delivery { user: number; name: string; phone: string | null; status: string; error: string; state: string | null }
@@ -19,85 +24,226 @@ const TABS = [{ id: "inbox", label: "Boîte de réception" }, { id: "compose", l
 type TabId = (typeof TABS)[number]["id"];
 const DELIVERY_FR: Record<string, string> = { pending: "En attente", sent: "Envoyé", skipped_consent: "Ignoré : pas de consentement marketing", skipped_unreachable: "Ignoré : compte inactif", failed: "Échec" };
 const STATE_FR: Record<string, string> = { sent: "Envoyé", delivered: "Distribué", read: "Lu" };
+const POLL_MS = 10_000;
+const ACCEPT = "image/jpeg,image/png,image/webp,video/mp4,video/quicktime,application/pdf";
+const MAX_BYTES = { image: 10 * 1024 * 1024, video: 25 * 1024 * 1024, file: 10 * 1024 * 1024 };
 
-function Inbox_() {
+const size = (n: number) => (n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1).replace(".", ",")} Mo` : `${Math.max(1, Math.round(n / 1024))} Ko`);
+const safeUrl = (u: string | null | undefined) => (u && /^(https?:\/\/|\/)/i.test(u) && !u.startsWith("//") ? u : null);
+
+function fileProblem(f: File): string | null {
+  const kind = f.type.startsWith("image/") ? "image" : f.type.startsWith("video/") ? "video" : f.type === "application/pdf" ? "file" : null;
+  if (!kind || !ACCEPT.split(",").includes(f.type)) return "Format non accepté : photo JPEG, PNG ou WebP, vidéo MP4 ou MOV, document PDF.";
+  return f.size > MAX_BYTES[kind] ? `Fichier trop volumineux : ${size(MAX_BYTES[kind])} au maximum.` : null;
+}
+
+/** Actualisation périodique tant que l'onglet est visible (la messagerie reste vivante sans WebSocket côté équipe). */
+function usePolling(callback: () => void, ms: number) {
+  const saved = useRef(callback);
+  useEffect(() => { saved.current = callback; }, [callback]);
+  useEffect(() => {
+    const t = setInterval(() => { if (document.visibilityState === "visible") saved.current(); }, ms);
+    return () => clearInterval(t);
+  }, [ms]);
+}
+
+function AttachmentView({ a, mine }: { a: Attachment; mine: boolean }) {
+  const url = safeUrl(a.url);
+  if (!url) return <p className="text-xs opacity-80">Pièce jointe indisponible.</p>;
+  if (a.kind === "image") {
+    return (
+      <a href={url} target="_blank" rel="noopener noreferrer" className="mb-1 block" aria-label="Ouvrir la photo en grand">
+        {/* eslint-disable-next-line @next/next/no-img-element -- média de la messagerie servi par l'API, taille déjà bornée côté serveur */}
+        <img src={url} alt="Photo jointe au message" loading="lazy" width={a.width} height={a.height} className="max-h-56 w-auto max-w-full rounded-lg object-cover" />
+      </a>
+    );
+  }
+  const Icon = a.kind === "video" ? Film : FileText;
+  const label = a.kind === "video" ? `Vidéo${a.duration ? ` · ${Math.round(a.duration)} s` : ""}` : "Document PDF";
+  return (
+    <a href={url} target="_blank" rel="noopener noreferrer" className={cx("mb-1 flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-semibold underline-offset-2 hover:underline", mine ? "border-white/40" : "border-line")}>
+      <Icon aria-hidden className="h-4 w-4 shrink-0" /><span className="min-w-0 truncate">{label}{a.name ? ` — ${a.name}` : ""} ({size(a.size)})</span>
+    </a>
+  );
+}
+
+function Inbox_({ onActivity }: { onActivity: () => void }) {
   const [threads, setThreads] = useState<Thread[] | null>(null);
   const [error, setError] = useState("");
   const [unreadOnly, setUnreadOnly] = useState(false);
   const [q, setQ] = useState("");
   const [open, setOpen] = useState<Thread | null>(null);
   const [msgs, setMsgs] = useState<ThreadMsg[]>([]);
+  const [more, setMore] = useState<{ has: boolean; before: number | null }>({ has: false, before: null });
   const [reply, setReply] = useState("");
+  const [file, setFile] = useState<File | null>(null);
+  const [aiAssisted, setAiAssisted] = useState(false);
+  const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const list = useRef<HTMLDivElement>(null);
+  const end = useRef<HTMLDivElement>(null);
+  const stick = useRef(true);
+  const picker = useRef<HTMLInputElement>(null);
+  const attemptId = useRef(newId());                       // même identifiant tant que l'envoi n'a pas abouti : un rejeu ne crée jamais de doublon
+  const openRef = useRef<Thread | null>(null);
+  openRef.current = open;
+  const msgsRef = useRef<ThreadMsg[]>([]);
+  msgsRef.current = msgs;
 
-  const load = useCallback(async () => {
+  const loadThreads = useCallback(async () => {
     try {
       const r = await bo.get<Page<Thread>>(`/messages/threads/?${unreadOnly ? "unread=true&" : ""}${q ? `q=${encodeURIComponent(q)}` : ""}`);
       setThreads(r.results);
       setError("");
     } catch (e) { setError(boError(e, "La boîte de réception n’a pas pu être chargée.")); }
   }, [unreadOnly, q]);
-  useEffect(() => { const t = setTimeout(() => void load(), q ? 250 : 0); return () => clearTimeout(t); }, [load, q]);
+  useEffect(() => { const t = setTimeout(() => void loadThreads(), q ? 250 : 0); return () => clearTimeout(t); }, [loadThreads, q]);
+
+  useEffect(() => { if (stick.current) end.current?.scrollIntoView({ block: "end" }); }, [msgs]);
+
+  async function markRead(id: number) {
+    try { await bo.post(`/messages/threads/${id}/read/`); onActivity(); void loadThreads(); } catch { /* le compteur se corrigera à l'actualisation suivante */ }
+  }
 
   async function openThread(t: Thread) {
-    setOpen(t);
+    setOpen(t); setReply(""); setFile(null); setAiAssisted(false); setConfirming(false); setError("");
+    attemptId.current = newId();
+    stick.current = true;
     try {
-      const r = await bo.get<{ results: ThreadMsg[] }>(`/messages/threads/${t.id}/`);
+      const r = await bo.get<ThreadPage>(`/messages/threads/${t.id}/`);
       setMsgs(r.results);
-      if (t.unread) { await bo.post(`/messages/threads/${t.id}/read/`); void load(); }
+      setMore({ has: r.has_more, before: r.next_before });
+      if (t.unread) void markRead(t.id);
     } catch (e) { setError(boError(e, "La conversation n’a pas pu être chargée.")); }
   }
+
+  const refreshOpen = useCallback(async () => {
+    const t = openRef.current;
+    if (!t) return;
+    const after = msgsRef.current[msgsRef.current.length - 1]?.id ?? 0;
+    try {
+      const r = await bo.get<ThreadPage>(`/messages/threads/${t.id}/?after=${after}`);
+      if (!r.results.length || openRef.current?.id !== t.id) return;
+      const el = list.current;
+      stick.current = !el || el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+      setMsgs((m) => [...m, ...r.results.filter((n) => !m.some((x) => x.id === n.id))]);
+      if (r.results.some((m) => m.from_member)) void markRead(t.id);
+    } catch { /* coupure passagère : la prochaine actualisation rattrape */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- markRead ne dépend que de setters stables
+  }, []);
+  usePolling(() => { void loadThreads(); void refreshOpen(); onActivity(); }, POLL_MS);
+
+  async function loadOlder() {
+    if (!open || !more.before) return;
+    setLoadingOlder(true);
+    const el = list.current;
+    const previousHeight = el?.scrollHeight ?? 0;
+    try {
+      const r = await bo.get<ThreadPage>(`/messages/threads/${open.id}/?before=${more.before}`);
+      stick.current = false;
+      setMsgs((m) => [...r.results, ...m]);
+      setMore({ has: r.has_more, before: r.next_before });
+      requestAnimationFrame(() => { if (el) el.scrollTop = el.scrollHeight - previousHeight; });
+    } catch (e) { setError(boError(e, "Les messages précédents n’ont pas pu être chargés.")); } finally { setLoadingOlder(false); }
+  }
+
+  function pick(f: File | null) {
+    if (!f) return;
+    const problem = fileProblem(f);
+    if (problem) { setError(problem); return; }
+    setError("");
+    setFile(f);
+  }
+
   async function sendReply() {
-    if (!open || !reply.trim()) return;
+    if (!open || (!reply.trim() && !file)) return;
     setBusy(true);
     try {
-      await bo.post(`/messages/threads/${open.id}/reply/`, { content: reply });
-      setReply("");
-      await openThread({ ...open, unread: 0 });
-      void load();
-    } catch (e) { setError(boError(e, "La réponse n’a pas pu être envoyée.")); } finally { setBusy(false); }
+      if (file) {
+        const form = new FormData();
+        form.append("content", reply.trim());
+        form.append("file", file);
+        form.append("client_id", attemptId.current);
+        await upload(`/backoffice/messages/threads/${open.id}/reply/`, form);
+      } else {
+        await bo.post(`/messages/threads/${open.id}/reply/`, { content: reply.trim(), client_id: attemptId.current });
+      }
+      attemptId.current = newId();
+      setReply(""); setFile(null); setAiAssisted(false); setConfirming(false);
+      stick.current = true;
+      await refreshOpen();
+      void loadThreads();
+    } catch (e) { setError(boError(e, "La réponse n’a pas pu être envoyée.")); setConfirming(false); } finally { setBusy(false); }
+  }
+  function submit() {
+    if (aiAssisted && !confirming) { setConfirming(true); return; }   // texte rédigé avec l'IA : confirmation humaine explicite avant tout envoi
+    void sendReply();
   }
 
   return (
-    <div className="grid gap-4 lg:grid-cols-[22rem_1fr]">
-      <div className="space-y-3">
+    <div className="grid gap-4 lg:grid-cols-[22rem_minmax(0,1fr)]">
+      <div className="min-w-0 space-y-3">
         <div className="flex gap-2">
-          <div className="relative flex-1"><Search aria-hidden className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ash" /><label htmlFor="bo-thread-q" className="sr-only">Rechercher un membre</label><input id="bo-thread-q" type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Rechercher un membre…" className="min-h-11 w-full rounded-xl border border-line bg-white pl-9 pr-3 text-sm focus:border-primary focus:outline-none" /></div>
+          <div className="relative min-w-0 flex-1"><Search aria-hidden className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ash" /><label htmlFor="bo-thread-q" className="sr-only">Rechercher un membre ou un mot dans les messages</label><input id="bo-thread-q" type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Membre ou mot du message…" className="min-h-11 w-full rounded-xl border border-line bg-white pl-9 pr-3 text-sm focus:border-primary focus:outline-none" /></div>
           <Button variant={unreadOnly ? "primary" : "outline"} onClick={() => setUnreadOnly((v) => !v)} aria-pressed={unreadOnly}>Non lus</Button>
         </div>
-        {error ? <Alert tone="danger">{error}</Alert> : null}
-        {threads === null ? <SkeletonList count={4} /> : threads.length === 0 ? <EmptyState icon={<Inbox />} title="Aucune conversation" description="Les conversations « Équipe Tratra » apparaissent après un premier envoi à un membre." /> : (
+        {error && !open ? <Alert tone="danger">{error}</Alert> : null}
+        {threads === null ? <SkeletonList count={4} /> : threads.length === 0 ? <EmptyState icon={<Inbox />} title={q || unreadOnly ? "Aucune conversation ne correspond" : "Aucune conversation"} description={q || unreadOnly ? "Modifiez la recherche ou retirez le filtre « Non lus »." : "Les conversations « Équipe Tratra » apparaissent après un premier envoi à un membre."} /> : (
           <ul className="space-y-2">
             {threads.map((t) => (
               <li key={t.id}>
                 <button type="button" onClick={() => void openThread(t)} aria-current={open?.id === t.id ? "true" : undefined} className={cx("w-full rounded-2xl border p-3 text-left", open?.id === t.id ? "border-primary/40 bg-primarySoft/50" : "border-line bg-white hover:border-primary/30")}>
                   <span className="flex items-center justify-between gap-2"><span className="truncate text-sm font-bold text-ink">{t.member?.name ?? "Membre"}</span><span className="shrink-0 text-[11px] text-ash">{dt(t.last_at)}</span></span>
-                  <span className="flex items-center justify-between gap-2"><span className="truncate text-xs text-ash">{t.last_message}</span>{t.unread ? <span className="grid h-5 min-w-5 place-items-center rounded-full bg-primary px-1 text-[11px] font-bold text-white">{t.unread}</span> : null}</span>
+                  <span className="flex items-center justify-between gap-2"><span className="truncate text-xs text-ash">{t.last_message}</span>
+                    <span className="flex shrink-0 items-center gap-1.5">{t.awaiting_reply && !t.unread ? <Badge tone="warning">À répondre</Badge> : null}{t.unread ? <span aria-label={`${t.unread} non lu${t.unread > 1 ? "s" : ""}`} className="grid h-5 min-w-5 place-items-center rounded-full bg-primary px-1 text-[11px] font-bold text-white">{t.unread}</span> : null}</span>
+                  </span>
                 </button>
               </li>
             ))}
           </ul>
         )}
       </div>
-      <Card padding="none" className="flex min-h-[24rem] flex-col overflow-hidden">
+      <Card padding="none" className="flex min-h-[24rem] min-w-0 flex-col overflow-hidden">
         {!open ? <div className="grid flex-1 place-items-center p-8 text-sm text-ash">Sélectionnez une conversation.</div> : (
           <>
-            <div className="border-b border-line px-4 py-3"><p className="font-display font-bold text-ink">{open.member?.name}</p><p className="text-xs text-ash">{open.member?.phone ?? ""}</p></div>
-            <div className="flex-1 space-y-2 overflow-y-auto bg-surface p-4">
+            <div className="border-b border-line px-4 py-3"><p className="font-display font-bold text-ink">{open.member?.name}</p><p className="text-xs text-ash">{open.member?.phone ?? ""} · Les messages se mettent à jour automatiquement.</p></div>
+            <div ref={list} className="max-h-[32rem] min-h-[16rem] flex-1 space-y-2 overflow-y-auto bg-surface p-4" aria-live="polite" aria-label="Messages de la conversation">
+              {more.has ? <div className="text-center"><Button size="sm" variant="outline" loading={loadingOlder} onClick={() => void loadOlder()}>Messages précédents</Button></div> : null}
               {msgs.map((m) => (
                 <div key={m.id} className={cx("flex", m.from_member ? "justify-start" : "justify-end")}>
-                  <div className={cx("max-w-[80%] rounded-2xl px-3.5 py-2 text-sm", m.from_member ? "border border-line bg-white text-ink" : "bg-primary text-white")}>
+                  <div className={cx("max-w-[80%] rounded-2xl px-3.5 py-2 text-sm", m.from_member ? "border border-line bg-white text-ink" : "bg-primaryDark text-white")}>
                     {m.staff ? <p className="mb-0.5 text-[10px] font-bold opacity-80">{m.staff}</p> : null}
-                    <p className="whitespace-pre-wrap break-words">{m.content}</p>
+                    {m.attachment ? <AttachmentView a={m.attachment} mine={!m.from_member} /> : null}
+                    {m.content ? <p className="whitespace-pre-wrap break-words">{m.content}</p> : null}
                     <p className="mt-1 text-[10px] opacity-70">{dt(m.created_at)}{!m.from_member ? ` · ${STATE_FR[m.state] ?? m.state}` : ""}</p>
                   </div>
                 </div>
               ))}
+              <div ref={end} />
             </div>
-            <form className="flex items-end gap-2 border-t border-line p-3" onSubmit={(e) => { e.preventDefault(); void sendReply(); }}>
-              <label htmlFor="bo-reply" className="sr-only">Votre réponse</label>
-              <textarea id="bo-reply" rows={2} value={reply} maxLength={2000} onChange={(e) => setReply(e.target.value)} placeholder="Répondre au nom de l’équipe Tratra…" className="min-h-11 flex-1 resize-none rounded-xl border border-line px-3 py-2 text-sm focus:border-primary focus:outline-none" />
-              <Button type="submit" loading={busy} disabled={!reply.trim()} leftIcon={<Send aria-hidden className="h-4 w-4" />}>Répondre</Button>
+            <form className="space-y-2 border-t border-line p-3" onSubmit={(e) => { e.preventDefault(); submit(); }}>
+              {error ? <Alert tone="danger" onDismiss={() => setError("")}>{error}</Alert> : null}
+              {file ? (
+                <p className="flex items-center gap-2 rounded-xl bg-primarySoft px-3 py-2 text-xs font-semibold text-primaryDark"><Paperclip aria-hidden className="h-4 w-4" /><span className="min-w-0 flex-1 truncate">{file.name} ({size(file.size)})</span>
+                  <button type="button" aria-label="Retirer la pièce jointe" onClick={() => setFile(null)} className="grid h-7 w-7 place-items-center rounded-full hover:bg-white"><X aria-hidden className="h-4 w-4" /></button></p>
+              ) : null}
+              <div className="flex items-end gap-2">
+                <input ref={picker} type="file" accept={ACCEPT} className="sr-only" tabIndex={-1} aria-hidden onChange={(e) => { pick(e.target.files?.[0] ?? null); e.target.value = ""; }} />
+                <button type="button" onClick={() => picker.current?.click()} aria-label="Joindre une photo, une vidéo ou un PDF" title="Photo JPEG/PNG/WebP, vidéo MP4/MOV, PDF" className="grid h-11 w-11 shrink-0 place-items-center rounded-full border border-line text-ash hover:border-primary/50 hover:text-primaryDark focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"><Paperclip aria-hidden className="h-5 w-5" /></button>
+                <label htmlFor="bo-reply" className="sr-only">Votre réponse</label>
+                <textarea id="bo-reply" rows={2} value={reply} maxLength={2000} onChange={(e) => { setReply(e.target.value); setConfirming(false); }} placeholder="Répondre au nom de l’équipe Tratra…" className="min-h-11 flex-1 resize-none rounded-xl border border-line px-3 py-2 text-sm focus:border-primary focus:outline-none" />
+                <Button type="submit" loading={busy} disabled={!reply.trim() && !file} leftIcon={<Send aria-hidden className="h-4 w-4" />}>Répondre</Button>
+              </div>
+              <AiDraftBar text={reply} thread={open.id} onUse={(d) => { setReply(d.slice(0, 2000)); setAiAssisted(true); setConfirming(false); }} />
+              {confirming ? (
+                <div role="alertdialog" aria-label="Confirmer l’envoi" className="space-y-2 rounded-2xl border border-warning/50 bg-warningSoft p-3 text-sm">
+                  <p className="font-semibold text-warningInk">Texte rédigé avec l’IA : relisez-le avant l’envoi.</p>
+                  <blockquote className="whitespace-pre-wrap rounded-lg bg-white p-3 text-ink">{reply}</blockquote>
+                  <p className="text-xs text-inkSoft">Il sera envoyé à {open.member?.name ?? "ce membre"} au nom de l’équipe Tratra{file ? `, avec « ${file.name} »` : ""}.</p>
+                  <div className="flex flex-wrap gap-2"><Button type="button" size="sm" loading={busy} onClick={() => void sendReply()}>Confirmer et envoyer</Button><Button type="button" size="sm" variant="outline" onClick={() => setConfirming(false)}>Modifier</Button></div>
+                </div>
+              ) : null}
             </form>
           </>
         )}
@@ -118,6 +264,7 @@ function Compose({ onSent }: { onSent: () => void }) {
   const [body, setBody] = useState("");
   const [purpose, setPurpose] = useState("service");
   const [preview, setPreview] = useState<Preview | null>(null);
+  const [aiAssisted, setAiAssisted] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState<Batch | null>(null);
@@ -144,7 +291,7 @@ function Compose({ onSent }: { onSent: () => void }) {
   }
   async function doSend() {
     setBusy(true); setError("");
-    try { setDone(await bo.post<Batch>("/messages/send/", { ...selection(), body, purpose })); setPreview(null); setBody(""); setPicked([]); onSent(); } catch (e) { setError(boError(e, "L’envoi n’a pas pu être effectué.")); } finally { setBusy(false); }
+    try { setDone(await bo.post<Batch>("/messages/send/", { ...selection(), body, purpose })); setPreview(null); setBody(""); setPicked([]); setAiAssisted(false); onSent(); } catch (e) { setError(boError(e, "L’envoi n’a pas pu être effectué.")); } finally { setBusy(false); }
   }
 
   return (
@@ -160,7 +307,7 @@ function Compose({ onSent }: { onSent: () => void }) {
             <div className="relative"><Search aria-hidden className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ash" /><label htmlFor="bo-user-q" className="sr-only">Rechercher un membre</label><input id="bo-user-q" type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Nom, téléphone ou e-mail…" className="min-h-11 w-full rounded-xl border border-line pl-9 pr-3 text-sm focus:border-primary focus:outline-none" /></div>
             {found.length ? <ul className="divide-y divide-lineSoft rounded-xl border border-line">{found.filter((u) => !picked.some((p) => p.id === u.id)).map((u) => <li key={u.id}><button type="button" onClick={() => { setPicked([...picked, u]); setQ(""); setFound([]); setPreview(null); }} className="flex min-h-11 w-full items-center justify-between px-3 text-left text-sm hover:bg-canvas"><span className="font-semibold text-ink">{u.name}</span><span className="text-xs text-ash">{u.phone ?? ""}</span></button></li>)}</ul> : null}
             <ul className="flex flex-wrap gap-2" aria-label="Destinataires choisis">{picked.map((p) => <li key={p.id}><button type="button" onClick={() => { setPicked(picked.filter((x) => x.id !== p.id)); setPreview(null); }} aria-label={`Retirer ${p.name}`} className="inline-flex min-h-9 items-center gap-2 rounded-full bg-primarySoft px-3 text-sm font-semibold text-primaryDark">{p.name}<span aria-hidden>×</span></button></li>)}</ul>
-            <p className="text-xs text-ash">{bulk ? "Jusqu’à 20 membres ici ; au-delà, utilisez « Par critères »." : "Jusqu’à 20 membres."}</p>
+            <p className="text-xs text-ash">{bulk ? "Jusqu’à 20 membres ici ; au-delà, utilisez « Par critères »." : "Jusqu’à 20 membres."} Un membre qui a déjà une conversation reçoit le message dans la même conversation.</p>
           </div>
         ) : (
           <div className="grid gap-3 sm:grid-cols-2">
@@ -171,6 +318,7 @@ function Compose({ onSent }: { onSent: () => void }) {
           </div>
         )}
         <TextareaField label="Message" value={body} maxLength={2000} rows={5} onChange={(e) => { setBody(e.target.value); setPreview(null); }} hint="Chaque destinataire reçoit ce message dans sa propre conversation « Équipe Tratra »." />
+        <AiDraftBar text={body} purpose={purpose} onUse={(d) => { setBody(d.slice(0, 2000)); setAiAssisted(true); setPreview(null); }} />
         <label className="block text-sm font-semibold text-ink">Nature du message
           <Select value={purpose} onChange={(e) => { setPurpose(e.target.value); setPreview(null); }}><option value="service">Information de service</option><option value="promotion">Promotionnelle (consentement marketing requis)</option></Select>
         </label>
@@ -182,6 +330,7 @@ function Compose({ onSent }: { onSent: () => void }) {
           <h2 className="flex items-center gap-2 font-display text-base font-bold text-ink"><Users aria-hidden className="h-4 w-4 text-primary" />Aperçu avant envoi</h2>
           <p className="text-sm text-ink"><strong>{preview.recipient_count}</strong> destinataire{preview.recipient_count > 1 ? "s" : ""}{preview.sample.length ? ` — par exemple : ${preview.sample.join(", ")}` : ""}.</p>
           {preview.skipped.no_consent || preview.skipped.inactive ? <Alert tone="warning">{preview.skipped.no_consent ? `${preview.skipped.no_consent} membre(s) sans consentement marketing seront ignorés. ` : ""}{preview.skipped.inactive ? `${preview.skipped.inactive} compte(s) inactif(s) seront ignorés.` : ""}</Alert> : null}
+          {aiAssisted ? <p className="rounded-xl bg-primarySoft px-3 py-2 text-xs font-semibold text-primaryDark">Texte rédigé avec l’aide de l’IA : relisez-le ci-dessous. Il ne part qu’après votre clic sur « Envoyer ».</p> : null}
           <blockquote className="whitespace-pre-wrap rounded-xl bg-surface p-3 text-sm text-ink">{preview.body}</blockquote>
           <p className="text-xs text-ash">{preview.note}</p>
           <Button leftIcon={<Send aria-hidden className="h-4 w-4" />} loading={busy} disabled={preview.recipient_count === 0} onClick={() => void doSend()}>Envoyer à {preview.recipient_count} membre{preview.recipient_count > 1 ? "s" : ""}</Button>
@@ -205,7 +354,7 @@ function Batches({ refreshKey }: { refreshKey: number }) {
   if (!batches) return <SkeletonList count={3} />;
   if (!batches.length) return <EmptyState icon={<Send />} title="Aucun envoi" description="Les messages envoyés par l’équipe apparaissent ici avec leur résultat par destinataire." />;
   return (
-    <div className="grid gap-4 lg:grid-cols-[24rem_1fr]">
+    <div className="grid gap-4 lg:grid-cols-[24rem_minmax(0,1fr)]">
       <ul className="space-y-2">
         {batches.map((b) => (
           <li key={b.id}><button type="button" onClick={() => void show(b)} className={cx("w-full rounded-2xl border p-3 text-left", open?.id === b.id ? "border-primary/40 bg-primarySoft/50" : "border-line bg-white hover:border-primary/30")}>
@@ -234,12 +383,17 @@ function MessagesContent() {
   const params = useSearchParams();
   const [tab, setTab] = useState<TabId>((TABS.find((t) => t.id === params.get("tab"))?.id) ?? "inbox");
   const [bump, setBump] = useState(0);
+  const [unread, setUnread] = useState(0);
+  const refreshUnread = useCallback(async () => {
+    try { setUnread((await bo.get<{ threads: number; messages: number }>("/messages/unread/")).threads); } catch { /* le badge se corrigera à l'actualisation suivante */ }
+  }, []);
+  useEffect(() => { void refreshUnread(); }, [refreshUnread]);
   return (
     <>
       <PageHeader title="Messagerie" description="Écrivez à un membre ou à plusieurs : chacun reçoit son message dans sa propre conversation « Équipe Tratra »." />
-      <Tabs ariaLabel="Messagerie" value={tab} onChange={setTab} items={TABS.map((t) => ({ id: t.id, label: t.label }))} />
+      <Tabs ariaLabel="Messagerie" value={tab} onChange={setTab} items={TABS.map((t) => ({ id: t.id, label: t.label, count: t.id === "inbox" && unread > 0 ? unread : undefined }))} />
       <div className="mt-5">
-        {tab === "inbox" ? <Inbox_ /> : tab === "compose" ? <Compose onSent={() => setBump((b) => b + 1)} /> : <Batches refreshKey={bump} />}
+        {tab === "inbox" ? <Inbox_ onActivity={() => void refreshUnread()} /> : tab === "compose" ? <Compose onSent={() => setBump((b) => b + 1)} /> : <Batches refreshKey={bump} />}
       </div>
     </>
   );
