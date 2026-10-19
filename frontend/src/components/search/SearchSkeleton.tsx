@@ -51,7 +51,7 @@ export function SearchIntro() {
         Trouver un artisan <span className="text-accent">près de chez vous</span>
       </h1>
       <p className="mt-3 hidden max-w-2xl text-base leading-relaxed text-white/80 sm:block sm:text-lg">
-        Plomberie, électricité, climatisation, ménage… Comparez les prestations publiées, leurs tarifs et les
+        Plomberie, électricité, climatisation, ménage… Comparez les offres publiées, leurs tarifs et les
         profils des artisans, puis réservez en quelques minutes.
       </p>
     </div>

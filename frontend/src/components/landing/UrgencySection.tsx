@@ -7,7 +7,7 @@ import { useLanding, useTrades } from "./LandingData";
 import { CONTAINER, CtaLink, Eyebrow, SECTION_Y } from "./kit";
 import { Reveal, RevealGroup, RevealItem } from "./Reveal";
 
-/** Situations d'urgence courantes, adossées aux familles réelles. */
+/** Situations d'urgence courantes, adossées aux métiers du catalogue (affichées seulement si le métier existe). */
 const URGENT: { key: string; situation: string }[] = [
   { key: "plomberie", situation: "Fuite d’eau, canalisation ou WC bouché" },
   { key: "electricite", situation: "Panne de courant, disjoncteur qui saute" },

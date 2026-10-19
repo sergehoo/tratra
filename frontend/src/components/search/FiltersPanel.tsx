@@ -141,7 +141,7 @@ export default function FiltersPanel({
       <FilterSection title="Métier" titleId={ids.category}>
         <div>
           <label htmlFor={`${ids.category}-select`} className="sr-only">
-            Catégorie de prestation
+            Métier ou prestation
           </label>
           <Select
             id={`${ids.category}-select`}
@@ -261,7 +261,7 @@ export default function FiltersPanel({
       <FilterSection
         title="Budget"
         titleId={ids.budget}
-        hint={quoteOnly ? "Les prestations sur devis n'affichent pas de prix." : "Montants en FCFA."}
+        hint={quoteOnly ? "Les offres sur devis n'affichent pas de prix." : "Montants en FCFA."}
       >
         <div className="grid grid-cols-2 gap-2">
           <PriceInput

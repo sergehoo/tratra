@@ -23,7 +23,7 @@ export default function ServiceCard({ service }: { service: Service }) {
   const href = bookingHref(service.id, user);
   const image = serviceImage(service);
   const img = useImageFallback(image);
-  const Icon = iconForCategory(service.category_detail?.slug);
+  const Icon = iconForCategory(service.category_detail);
   const artisan = service.artisan;
   const name = artisanDisplayName(service) ?? "Artisan";
   const duration = formatDuration(service.duration);

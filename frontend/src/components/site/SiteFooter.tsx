@@ -12,18 +12,10 @@ export interface FooterLink {
 }
 
 /**
- * Métiers par défaut : uniquement des slugs de catégories existants côté
- * backend (aucun lien mort). La landing transmet les familles réellement
- * résolues via la prop `trades`.
+ * Métiers du pied de page : ceux que la landing transmet (prop `trades`, issus du catalogue unique). Sans données (autres pages), un seul lien
+ * vers le catalogue complet — aucun métier n'est écrit en dur ici.
  */
-const DEFAULT_TRADES: FooterLink[] = [
-  { label: "Plomberie", href: "/search?metier=plomberie" },
-  { label: "Électricité", href: "/search?metier=electricite" },
-  { label: "Climatisation", href: "/search?metier=climatisation" },
-  { label: "Serrurerie", href: "/search?metier=serrurerie" },
-  { label: "Peinture", href: "/search?metier=peinture" },
-  { label: "Ménage", href: "/search?metier=menage" },
-];
+const DEFAULT_TRADES: FooterLink[] = [{ label: "Tous les métiers", href: "/metiers" }];
 
 const PLATFORM: FooterLink[] = [
   { label: "Rechercher un professionnel", href: "/search" },

@@ -61,7 +61,7 @@ export default function SearchResults({
           <div className="w-full max-w-xs text-center">
             <p className="text-sm text-ash">
               <strong className="font-semibold text-ink">{formatCount(items.length)}</strong> sur{" "}
-              {formatCount(total)} prestation{total > 1 ? "s" : ""}
+              {formatCount(total)} offre{total > 1 ? "s" : ""}
             </p>
             <div aria-hidden className="mt-2 h-1.5 overflow-hidden rounded-full bg-line">
               <div

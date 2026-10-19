@@ -65,7 +65,7 @@ function TradeChip({
         >
           <span className="sr-only">, </span>
           {count}
-          <span className="sr-only"> prestation{count > 1 ? "s" : ""}</span>
+          <span className="sr-only"> offre{count > 1 ? "s" : ""}</span>
         </span>
       ) : null}
       {pressed === "mixed" ? <span className="sr-only"> (en partie sélectionné)</span> : null}
@@ -172,7 +172,7 @@ export default function SearchHero({
 
         <form
           role="search"
-          aria-label="Rechercher une prestation"
+          aria-label="Rechercher un service ou un métier"
           onSubmit={submit}
           className={SEARCH_CARD}
         >

@@ -59,7 +59,8 @@ const FILTER_DEFAULTS: Partial<SearchState> = {
   radius: DEFAULT_RADIUS,
 };
 
-const CATEGORIES_PATH = `/categories/${qs({ page_size: 100, ordering: "name" })}`;
+// Catalogue unique des métiers (même source que la landing et l'application) : métiers, prestations, ordre et visibilité viennent de l'administration.
+const CATEGORIES_PATH = "/catalog/";
 
 function joinFr(parts: string[]): string {
   if (parts.length <= 1) return parts.join("");
@@ -210,8 +211,8 @@ export default function SearchClient() {
       : pending && search.count === null
         ? "Recherche en cours…"
         : total === 0
-          ? "Aucune prestation"
-          : `${formatCount(total)} prestation${total > 1 ? "s" : ""}`;
+          ? "Aucune offre"
+          : `${formatCount(total)} offre${total > 1 ? "s" : ""}`;
   const where: string[] = [];
   if (state.q && listMode) where.push(`pour « ${state.q} »`);
   if (located) where.push(`dans un rayon de ${state.radius} km autour de vous`);
@@ -220,16 +221,16 @@ export default function SearchClient() {
     state.handyman && search.status === "ready" ? (search.items.find((s) => s.artisan)?.artisan ?? null) : null;
 
   const subline = where.length
-    ? `Prestations ${where.join(" ")}`
+    ? `Offres ${where.join(" ")}`
     : state.handyman && listMode
-      ? `Prestations publiées par ${handymanArtisan?.display_name ?? "cet artisan"}`
+      ? `Offres publiées par ${handymanArtisan?.display_name ?? "cet artisan"}`
       : filterCount > 0
-        ? "Prestations correspondant à vos filtres"
-        : "Toutes les prestations publiées sur Tratra";
+        ? "Offres correspondant à vos filtres"
+        : "Toutes les offres publiées sur Tratra";
 
   const applyLabel =
     search.status === "ready" && total > 0
-      ? `Afficher ${formatCount(total)} prestation${total > 1 ? "s" : ""}`
+      ? `Afficher ${formatCount(total)} offre${total > 1 ? "s" : ""}`
       : "Voir les résultats";
 
   // ---- États vides honnêtes (actions réelles) ----
@@ -241,8 +242,8 @@ export default function SearchClient() {
     emptyState = (
       <EmptyState
         icon={<Sparkles aria-hidden className="h-7 w-7" />}
-        title="Les premières prestations arrivent"
-        description="Les artisans Tratra publient actuellement leurs prestations. Revenez très vite : elles apparaîtront ici dès leur mise en ligne."
+        title="Les premières offres arrivent"
+        description="Les artisans Tratra publient actuellement leurs offres. Revenez très vite : elles apparaîtront ici dès leur mise en ligne."
         actions={
           <>
             <ButtonLink
@@ -264,8 +265,8 @@ export default function SearchClient() {
     emptyState = (
       <EmptyState
         icon={<UserRound aria-hidden className="h-7 w-7" />}
-        title="Aucune prestation de cet artisan pour ces critères"
-        description="Cet artisan n'a pas de prestation publiée correspondant à votre recherche."
+        title="Aucune offre de cet artisan pour ces critères"
+        description="Cet artisan n'a pas d'offre publiée correspondant à votre recherche."
         actions={
           <Button type="button" size="lg" onClick={() => update({ handyman: "" })}>
             Voir tous les artisans
@@ -295,7 +296,7 @@ export default function SearchClient() {
     emptyState = (
       <EmptyState
         icon={<MapPinOff aria-hidden className="h-7 w-7" />}
-        title={`Aucune prestation dans un rayon de ${state.radius} km`}
+        title={`Aucune offre dans un rayon de ${state.radius} km`}
         description="Élargissez la zone de recherche ou recherchez sans localisation."
         actions={
           <>
@@ -329,11 +330,11 @@ export default function SearchClient() {
         description={
           state.q ? (
             <span className="[overflow-wrap:anywhere]">
-              Aucune prestation ne correspond à « {state.q} » avec ces critères. Essayez un autre mot-clé ou retirez
+              Aucune offre ne correspond à « {state.q} » avec ces critères. Essayez un autre mot-clé ou retirez
               des filtres.
             </span>
           ) : (
-            "Aucune prestation ne correspond à ces critères pour le moment."
+            "Aucune offre ne correspond à ces critères pour le moment."
           )
         }
         actions={
@@ -353,7 +354,7 @@ export default function SearchClient() {
   const errorState = (
     <EmptyState
       icon={<WifiOff aria-hidden className="h-7 w-7" />}
-      title="Impossible de charger les prestations"
+      title="Impossible de charger les offres"
       description="Le service n'a pas pu répondre à cette recherche. Vérifiez votre connexion puis réessayez."
       actions={
         <>
@@ -441,7 +442,7 @@ export default function SearchClient() {
                   </span>
                 )}
                 <div className="relative min-w-0 flex-1">
-                  <p className="text-eyebrow uppercase text-accent">Prestations d&apos;un artisan</p>
+                  <p className="text-eyebrow uppercase text-accent">Offres d&apos;un artisan</p>
                   <p className="mt-0.5 truncate font-display text-lg font-bold">
                     {handymanArtisan?.display_name ?? "Artisan sélectionné"}
                   </p>

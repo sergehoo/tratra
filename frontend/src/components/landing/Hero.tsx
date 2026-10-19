@@ -318,7 +318,7 @@ export default function Hero() {
             {statusMessage}
           </p>
 
-          {/* Accès rapide : familles réelles, triées par nombre de prestations */}
+          {/* Accès rapide : métiers du catalogue, triés par nombre d'offres */}
           {tradesLoading || quick.length ? (
             <div
               className="tt-rise mt-3 sm:flex sm:flex-wrap sm:items-center sm:gap-2"
@@ -406,7 +406,7 @@ export default function Hero() {
                 </span>
                 <div>
                   <p className="font-display text-2xl font-extrabold leading-none text-ink">{trades.length}</p>
-                  <p className="mt-1 text-xs font-medium text-ash">familles de métiers</p>
+                  <p className="mt-1 text-xs font-medium text-ash">{trades.length > 1 ? "métiers" : "métier"}</p>
                 </div>
               </div>
             </Float>

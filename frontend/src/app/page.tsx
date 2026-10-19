@@ -14,7 +14,7 @@ import SiteFooter from "@/components/site/SiteFooter";
 import SiteHeader from "@/components/site/SiteHeader";
 import { SHARE } from "@/lib/config";
 import { publicGet, resultsOf } from "@/lib/public";
-import { resolveTrades } from "@/lib/trades";
+import { featuredTrades, resolveTrades } from "@/lib/trades";
 import type {
   Category,
   FeaturedArtisansResponse,
@@ -52,7 +52,8 @@ const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL || "https://tratra.net").repl
 /** Endpoints publics (sans authentification) consommés par la landing. */
 const ENDPOINTS: LandingEndpoints = {
   stats: "/public/stats/",
-  categories: "/categories/?page_size=100&ordering=name",
+  // Catalogue unique des métiers (métier → prestations, icônes, nombre d'offres) : la même réponse alimente le site et l'application.
+  categories: "/catalog/",
   featured: "/handymen/featured/?limit=8",
   reviews: "/reviews/public/?limit=6",
   services: "/services/?is_active=true&page_size=6&sort=recent",
@@ -100,9 +101,9 @@ export default async function HomePage() {
     publicGet<Paginated<SubscriptionPlan> | SubscriptionPlan[]>(ENDPOINTS.plans, opts),
   ]);
 
-  // Liens « Métiers » du pied de page : familles réellement présentes
+  // Liens « Métiers » du pied de page : métiers mis en avant du catalogue
   // (sinon le pied de page utilise ses slugs existants par défaut).
-  const footerTrades = resolveTrades(resultsOf(categories))
+  const footerTrades = featuredTrades(resolveTrades(resultsOf(categories)), 6)
     .slice(0, 6)
     .map(({ label, href }) => ({ label, href }));
 
@@ -130,7 +131,7 @@ export default async function HomePage() {
           <BusinessSection />
           <FinalCta />
         </main>
-        <SiteFooter trades={footerTrades.length ? footerTrades : undefined} />
+        <SiteFooter trades={footerTrades.length ? [...footerTrades, { label: "Tous les métiers", href: "/metiers" }] : undefined} />
       </LandingDataProvider>
     </>
   );

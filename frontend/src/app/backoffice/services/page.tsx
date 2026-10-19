@@ -1,25 +1,25 @@
 "use client";
 import { useEffect, useState } from "react";
 import { EyeOff, Pencil, Plus, Power, Undo2, UserRound } from "lucide-react";
-import { Alert, Badge, Button, ConfirmDialog, Modal, PageHeader, Tabs, TextField, TextareaField } from "@/components/ds";
+import { Alert, Badge, Button, Checkbox, ConfirmDialog, Modal, PageHeader, Tabs, TextField, TextareaField } from "@/components/ds";
 import { bo, boError, fieldErrors, moneyLabel } from "@/lib/bo";
 import { useBo } from "@/lib/BoProvider";
 import { useBoList, useCounts, useManagedList } from "@/lib/useBoList";
 import { FilterBar, FilterSelect, ListView, ReasonModal, SearchBox, StatusChips, dd, postTo, useNotice, useTabParam, type BoColumn, type BulkAction, type RowAction } from "../_components/ui";
 
 interface Service { id: number; title: string; category: string | null; price_type: string; price: string | null; is_active: boolean; artisan: string; artisan_id: number; created_at: string; published: boolean; bookings: number }
-interface Category { id: number; name: string; slug: string; description: string; icon: string; is_active: boolean; parent: number | null; services: number; artisans: number }
+interface Category { id: number; name: string; slug: string; description: string; icon: string; icon_key: string | null; icon_known: boolean; is_active: boolean; parent: number | null; kind: "trade" | "service"; position: number; is_featured: boolean; services: number; artisans: number }
 
 const PRICE_FR: Record<string, string> = { hourly: "/ h", fixed: "", quote: "Sur devis" };
 
 function CategoryForm({ open, category, parents, onClose, onSaved }: { open: boolean; category: Category | null; parents: Category[]; onClose: () => void; onSaved: () => void }) {
-  const [form, setForm] = useState({ name: "", slug: "", description: "", icon: "", parent: "" });
+  const [form, setForm] = useState({ name: "", slug: "", description: "", icon: "", parent: "", position: "100", is_featured: false });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [failure, setFailure] = useState("");
   const [busy, setBusy] = useState(false);
   useEffect(() => {
     if (open) {
-      setForm({ name: category?.name ?? "", slug: category?.slug ?? "", description: category?.description ?? "", icon: category?.icon ?? "", parent: category?.parent ? String(category.parent) : "" });
+      setForm({ name: category?.name ?? "", slug: category?.slug ?? "", description: category?.description ?? "", icon: category?.icon ?? "", parent: category?.parent ? String(category.parent) : "", position: String(category?.position ?? 100), is_featured: category?.is_featured ?? false });
       setErrors({});
       setFailure("");
     }
@@ -30,7 +30,7 @@ function CategoryForm({ open, category, parents, onClose, onSaved }: { open: boo
     setErrors({});
     setFailure("");
     try {
-      if (category) await bo.patch(`/services/categories/${category.id}/`, { name: form.name, description: form.description, icon: form.icon });
+      if (category) await bo.patch(`/services/categories/${category.id}/`, { name: form.name, description: form.description, icon: form.icon, position: form.position, is_featured: form.is_featured });
       else await bo.post("/services/categories/", { ...form, parent: form.parent || null });
       onSaved();
     } catch (e) {
@@ -47,7 +47,9 @@ function CategoryForm({ open, category, parents, onClose, onSaved }: { open: boo
         <TextField label="Nom" required value={form.name} error={errors.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
         {!category ? <TextField label="Identifiant (URL)" required hint="Lettres, chiffres et tirets : ne changera plus." value={form.slug} error={errors.slug} onChange={(e) => setForm({ ...form, slug: e.target.value })} /> : null}
         <TextareaField label="Description" optional value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
-        <TextField label="Icône" optional hint="Nom d’icône utilisé par les applications." value={form.icon} onChange={(e) => setForm({ ...form, icon: e.target.value })} />
+        <TextField label="Icône" optional hint="Nom Font Awesome, par exemple « fa-solid fa-utensils » : le même nom donne la même icône sur le site et dans l’application." value={form.icon} onChange={(e) => setForm({ ...form, icon: e.target.value })} />
+        <TextField label="Ordre d’affichage" type="number" min={0} max={9999} hint="Le plus petit d’abord (à égalité, ordre alphabétique)." value={form.position} error={errors.position} onChange={(e) => setForm({ ...form, position: e.target.value })} />
+        <Checkbox label="Mettre ce métier en avant sur la page d’accueil" checked={form.is_featured} onChange={(e) => setForm({ ...form, is_featured: e.target.checked })} />
         {!category ? (
           <label className="block text-sm font-semibold text-ink">Catégorie parente <span className="text-xs font-normal text-ash">(facultatif)</span>
             <select className="mt-1.5 min-h-[48px] w-full rounded-control border border-line bg-white px-4 text-[15px]" value={form.parent} onChange={(e) => setForm({ ...form, parent: e.target.value })}>
@@ -135,6 +137,9 @@ export default function ServicesPage() {
 
   const cColumns: BoColumn<Category>[] = [
     { key: "name", header: "Catégorie", primary: true, cell: (r) => <span className="font-semibold text-ink">{r.parent ? "↳ " : ""}{r.name} <span className="font-normal text-ash">({r.slug})</span></span> },
+    { key: "kind", header: "Niveau", hideOnMobile: true, cell: (r) => <span className="inline-flex flex-wrap items-center gap-1.5"><Badge tone={r.kind === "trade" ? "primary" : "gray"}>{r.kind === "trade" ? "Métier" : "Prestation"}</Badge>{r.is_featured ? <Badge tone="accent">En avant</Badge> : null}</span> },
+    { key: "pos", header: "Ordre", align: "right", hideOnMobile: true, cell: (r) => r.position },
+    { key: "icon", header: "Icône", hideOnMobile: true, cell: (r) => r.icon_known ? <code className="text-xs">{r.icon_key}</code> : <span className="text-xs text-warningInk">{r.icon_key ? `« ${r.icon_key} » non reconnue` : "par défaut"}</span> },
     { key: "svc", header: "Services", align: "right", cell: (r) => r.services },
     { key: "art", header: "Artisans", align: "right", hideOnMobile: true, cell: (r) => r.artisans },
     { key: "status", header: "Statut", cell: (r) => <Badge tone={r.is_active ? "success" : "gray"}>{r.is_active ? "Active" : "Désactivée"}</Badge> },

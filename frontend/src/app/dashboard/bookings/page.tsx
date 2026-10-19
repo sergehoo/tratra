@@ -90,7 +90,7 @@ export default function ClientHome() {
             const title = b.service_detail?.title ?? `Réservation n° ${b.id}`;
             const when = formatDateTimeShort(b.booking_date);
             const artisan = b.handyman_detail?.first_name;
-            const Icon = iconForCategory(b.service_detail?.category_detail?.slug);
+            const Icon = iconForCategory(b.service_detail?.category_detail);
             return (
               <li key={b.id} className="animate-rise" style={{ animationDelay: `${Math.min(index, 6) * STAGGER}s` }}>
                 <Link

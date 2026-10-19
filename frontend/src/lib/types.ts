@@ -18,10 +18,26 @@ export interface Category {
   name: string;
   slug: string;
   description?: string | null;
+  /** Icône saisie dans l'administration (« fa-solid fa-utensils »). */
   icon?: string | null;
+  /** Icône normalisée (« utensils ») : même vocabulaire sur le site et dans l'application. */
+  icon_key?: string | null;
   is_active?: boolean;
   parent?: number | null;
-  /** Nombre de services actifs — présent uniquement sur la liste /categories/. */
+  /** « trade » = métier (catégorie racine) · « service » = prestation (sous-catégorie). */
+  kind?: "trade" | "service";
+  /** Métier (identifiant de la racine) auquel appartient la catégorie. */
+  trade?: number;
+  position?: number;
+  /** Rang dans l'arbre du catalogue (métier puis ses prestations) : l'ordre d'affichage commun à tous les clients. */
+  order?: number;
+  is_featured?: boolean;
+  /** Offres publiées directement dans cette catégorie (catalogue public). */
+  offers_count?: number | null;
+  /** Offres publiées dans la catégorie ET ses prestations (catalogue public). */
+  offers_total?: number | null;
+  prestations_count?: number;
+  /** Alias historique : offres publiées (avec les prestations dans le catalogue public). */
   services_count?: number | null;
 }
 

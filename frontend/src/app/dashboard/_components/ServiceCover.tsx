@@ -25,7 +25,7 @@ export function ServiceCover({
 }) {
   const url = serviceImageUrl(service);
   const image = useImageFallback(url);
-  const Icon = iconForCategory(service.category_detail?.slug);
+  const Icon = iconForCategory(service.category_detail);
 
   return (
     <div className={cx("relative overflow-hidden bg-gradient-to-br from-primarySoft via-white to-accentSoft", className)}>

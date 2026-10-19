@@ -281,7 +281,7 @@ function Discovery() {
           {categories.length ? (
             <ul className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
               {categories.map((c) => {
-                const Icon = iconForCategory(c.slug);
+                const Icon = iconForCategory(c);
                 return (
                   <li key={c.id}>
                     <Link
