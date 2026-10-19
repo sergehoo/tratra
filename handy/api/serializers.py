@@ -57,16 +57,31 @@ class UserMiniSerializer(serializers.ModelSerializer):
 
 
 class ServiceCategorySerializer(serializers.ModelSerializer):
+    """Catégorie (liste `/categories/`, détail d'un service). Le catalogue public complet est `GET /handy/catalog/` (handy/catalog.py)."""
     # Renseigné uniquement quand le queryset est annoté (liste des catégories).
     services_count = serializers.SerializerMethodField()
+    icon_key = serializers.SerializerMethodField()
+    kind = serializers.SerializerMethodField()
 
     class Meta:
         model = ServiceCategory
-        fields = ["id", "name", "slug", "description", "icon", "is_active", "parent", "services_count"]
+        fields = ["id", "name", "slug", "description", "icon", "icon_key", "is_active", "parent", "kind", "position", "is_featured", "services_count"]
+        read_only_fields = ["icon_key", "kind"]
 
     @extend_schema_field(OpenApiTypes.INT)
     def get_services_count(self, obj):
         return getattr(obj, "services_count", None)
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_icon_key(self, obj):
+        from handy.catalog import icon_key
+
+        return icon_key(obj.icon, obj.slug)
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_kind(self, obj):
+        """« trade » (métier : catégorie racine) ou « service » (prestation : sous-catégorie)."""
+        return "trade" if obj.parent_id is None else "service"
 
 
 # ========= PUBLIC (landing / recherche anonyme) =========

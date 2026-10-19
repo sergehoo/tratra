@@ -243,6 +243,7 @@ REST_FRAMEWORK = {
         'messaging': config('THROTTLE_MESSAGING', default='60/min'),  # envoi de messages (texte et médias)
         'statuses': config('THROTTLE_STATUSES', default='30/min'),  # publication et vues de statuts
         'geo': config('THROTTLE_GEO', default='30/min'),  # recherche d'adresse (appels au fournisseur cartographique)
+        'catalog': config('THROTTLE_CATALOG', default='240/min'),  # catalogue public des métiers (landing, application mobile)
         'verify': config('THROTTLE_VERIFY', default='60/min'),  # vérification publique d'un QR Tratra ID
         'mfa': config('THROTTLE_MFA', default='20/min'),  # codes de double authentification du personnel
         'payment_refresh': config('THROTTLE_PAYMENT_REFRESH', default='30/min'),  # vérifications de paiement auprès du prestataire

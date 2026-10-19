@@ -4,7 +4,9 @@ from .models import (
     HandymanDocument, ServiceImage, Report, PaymentLog, Device, IPBlacklist, ServiceCategory, Service, Booking,
     Notification, Message, DepositTransaction, HeroSlide, Review, UserAddress,
 )
+from django import forms
 from django.contrib import admin
+from django.db.models import Count, Q
 from django.contrib.auth.admin import UserAdmin
 from django.urls import reverse
 from .models import User, HandymanProfile, HandymanDocument
@@ -233,18 +235,136 @@ class IPBlacklistAdmin(admin.ModelAdmin):
     search_fields = ('ip_address', 'reason')
 
 
+class CategoryKindFilter(admin.SimpleListFilter):
+    title = "Niveau"
+    parameter_name = "kind"
+
+    def lookups(self, request, model_admin):
+        return [("trade", "Métiers (catégories racines)"), ("service", "Prestations (sous-catégories)")]
+
+    def queryset(self, request, queryset):
+        if self.value() == "trade":
+            return queryset.filter(parent__isnull=True)
+        if self.value() == "service":
+            return queryset.filter(parent__isnull=False)
+        return queryset
+
+
+class TradeFilter(admin.SimpleListFilter):
+    """Un métier et toutes ses prestations (la liste n'affiche que les métiers, pas toutes les catégories comme le filtre « parent » par défaut)."""
+    title = "Métier"
+    parameter_name = "trade"
+
+    def lookups(self, request, model_admin):
+        return [(c.pk, c.name) for c in ServiceCategory.objects.filter(parent__isnull=True).order_by("position", "name")]
+
+    def queryset(self, request, queryset):
+        if self.value() and self.value().isdigit():
+            return queryset.filter(Q(pk=self.value()) | Q(parent_id=self.value()) | Q(parent__parent_id=self.value()))
+        return queryset
+
+
+class ServiceCategoryAdminForm(forms.ModelForm):
+    class Meta:
+        model = ServiceCategory
+        fields = "__all__"
+
+    def clean_icon(self):
+        icon = (self.cleaned_data.get("icon") or "").strip()
+        if icon and "icon" in self.changed_data:
+            from handy import catalog
+
+            key = catalog.icon_key(icon, "")
+            if not catalog.icon_known(key):
+                raise forms.ValidationError(f"Icône « {key or icon} » non reconnue : le site et l'application afficheraient l'icône par défaut. "
+                                            "Utilisez un nom Font Awesome de la liste (ex. « fa-solid fa-utensils », « fa-solid fa-baby »).")
+        return icon or None
+
+    def clean_parent(self):
+        parent = self.cleaned_data.get("parent")
+        if parent and self.instance.pk:
+            node = parent
+            while node is not None:                # une catégorie ne peut pas devenir sa propre prestation (cycle)
+                if node.pk == self.instance.pk:
+                    raise forms.ValidationError("Une catégorie ne peut pas être placée sous elle-même ni sous l'une de ses prestations.")
+                node = node.parent
+        return parent
+
+
 @admin.register(ServiceCategory)
 class ServiceCategoryAdmin(admin.ModelAdmin):
-    list_display = ('name', 'slug', 'parent', 'is_active', 'display_icon')
-    list_filter = ('is_active', 'parent')
-    search_fields = ('name', 'description')
+    """Catalogue unique : MÉTIER (catégorie racine), PRESTATION (sous-catégorie), OFFRE (service publié par un professionnel).
+    Visibilité, ordre et mise en avant se règlent ici et se retrouvent à l'identique sur le site et dans l'application (`GET /handy/catalog/`)."""
+    form = ServiceCategoryAdminForm
+    list_display = ('name', 'level', 'trade_name', 'slug', 'position', 'is_featured', 'is_active', 'offers', 'display_icon')
+    list_editable = ('position', 'is_featured', 'is_active')
+    list_filter = (CategoryKindFilter, TradeFilter, 'is_active', 'is_featured')
+    search_fields = ('name', 'slug', 'description')
     prepopulated_fields = {'slug': ('name',)}
     readonly_fields = ('display_icon',)
+    ordering = ('position', 'name')
+    list_per_page = 100
+    actions = ('feature', 'unfeature', 'show', 'hide')
+    fieldsets = (
+        ('Identité', {'fields': ('name', 'slug', 'parent', 'description'),
+                      'description': "Sans parent : c'est un MÉTIER. Avec un parent : c'est une PRESTATION de ce métier. Les offres des professionnels se rattachent à une catégorie."}),
+        ('Affichage', {'fields': ('is_active', 'is_featured', 'position'),
+                       'description': "Actif = visible sur le site et dans l'application (même sans offre). Mise en avant = page d'accueil. Ordre : le plus petit d'abord."}),
+        ('Icône', {'fields': ('icon', 'display_icon'), 'description': "Nom Font Awesome, par exemple « fa-solid fa-utensils ». Le même nom donne la même icône sur le site et dans l'application."}),
+    )
 
+    def get_queryset(self, request):
+        return super().get_queryset(request).select_related('parent').annotate(
+            offers_n=Count('services', filter=Q(services__is_active=True), distinct=True))
+
+    @admin.display(description='Niveau', ordering='parent')
+    def level(self, obj):
+        return 'Métier' if obj.parent_id is None else 'Prestation'
+
+    @admin.display(description='Métier')
+    def trade_name(self, obj):
+        node = obj
+        while node.parent_id is not None:
+            node = node.parent
+        return node.name if node.pk != obj.pk else '—'
+
+    @admin.display(description='Offres actives', ordering='offers_n')
+    def offers(self, obj):
+        return obj.offers_n
+
+    @admin.display(description='Icône')
     def display_icon(self, obj):
-        return format_html(f'<i class="fa fa-{obj.icon}"></i> {obj.icon}') if obj.icon else '-'
+        from handy import catalog
 
-    display_icon.short_description = 'Icon Preview'
+        key = catalog.icon_key(obj.icon, obj.slug)
+        if not key:
+            return format_html('<span style="color:#b45309">Aucune icône : icône par défaut</span>')
+        if not catalog.icon_known(key):
+            return format_html('<code>{}</code> <span style="color:#b91c1c">non reconnue : icône par défaut affichée</span>', key)
+        return format_html('<code>{}</code> ✓', key)
+
+    def _bulk(self, request, queryset, message, **changes):
+        n = queryset.update(**changes)
+        from handy import catalog
+
+        catalog.invalidate()
+        self.message_user(request, message.format(n=n))
+
+    @admin.action(description="Mettre en avant sur la page d'accueil")
+    def feature(self, request, queryset):
+        self._bulk(request, queryset, "{n} catégorie(s) mise(s) en avant.", is_featured=True)
+
+    @admin.action(description="Retirer de la mise en avant")
+    def unfeature(self, request, queryset):
+        self._bulk(request, queryset, "{n} catégorie(s) retirée(s) de la mise en avant.", is_featured=False)
+
+    @admin.action(description="Rendre visible (actif)")
+    def show(self, request, queryset):
+        self._bulk(request, queryset, "{n} catégorie(s) rendue(s) visible(s).", is_active=True)
+
+    @admin.action(description="Masquer (inactif) — les prestations d'un métier masqué le sont aussi")
+    def hide(self, request, queryset):
+        self._bulk(request, queryset, "{n} catégorie(s) masquée(s).", is_active=False)
 
 
 @admin.register(Service)

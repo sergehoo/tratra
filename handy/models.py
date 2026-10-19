@@ -345,12 +345,22 @@ class DepositTransaction(models.Model):
 
 # ---- CATALOGUE ----
 class ServiceCategory(models.Model):
+    """Catalogue unique (web, application mobile, administration), lu via `GET /handy/catalog/`.
+
+    Trois niveaux, jamais mélangés :
+      - MÉTIER = catégorie RACINE (`parent` vide) : Jardinage, Cuisine, Nounou…
+      - PRESTATION = sous-catégorie (`parent` renseigné) : « Entretien de fleurs » sous Jardinage ;
+      - OFFRE = `Service` publié par un professionnel, rattaché à une catégorie.
+    Un métier ACTIF reste visible même sans aucune offre. `is_active` = visibilité, `position` = ordre (petit en premier),
+    `is_featured` = mise en avant sur la page d'accueil. Les identifiants ne changent jamais."""
     name = models.CharField(max_length=100)
     slug = models.SlugField(unique=True)
     description = models.TextField(blank=True, null=True)
     icon = models.CharField(max_length=50, blank=True, null=True)
     is_active = models.BooleanField(default=True, db_index=True)
     parent = models.ForeignKey('self', on_delete=models.CASCADE, blank=True, null=True, related_name='children')
+    position = models.PositiveIntegerField(default=100, db_index=True, help_text="Ordre d'affichage : le plus petit d'abord (à égalité, ordre alphabétique).")
+    is_featured = models.BooleanField(default=False, db_index=True, help_text="Mettre ce métier en avant sur la page d'accueil.")
 
     class Meta:
         verbose_name_plural = "Service Categories"

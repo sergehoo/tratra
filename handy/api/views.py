@@ -25,6 +25,7 @@ from django.db.models.functions import Trim
 from django.http import FileResponse, Http404
 from django.utils import timezone
 
+import django_filters
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import serializers as drf_serializers
 from rest_framework import generics, viewsets, permissions, status, mixins
@@ -53,6 +54,7 @@ from continuity.idempotency import run_idempotent
 from handy.api.errors import CodedAPIException
 from handy.api.staff_access import staff_may
 from handy.media.sanitize import sanitize_image
+from handy import catalog
 from handy.eligibility import (
     can_receive_missions, not_on_timeoff, publishable, publishable_user_ids, published_services,
     restrict_public_services,
@@ -167,7 +169,7 @@ def search_services_nearby_qs(origin_point: Point, category=None, max_km=15):
           .annotate(distance=Distance('handyman__handyman_profile__location', origin_point))
           .filter(distance__lte=max_km * 1000))
     if category:
-        qs = qs.filter(category=category)
+        qs = qs.filter(category_id__in=catalog.with_descendants([category.pk]))    # un métier couvre ses prestations
     # 'id' en dernier : tri total, donc pagination LIMIT/OFFSET stable (sinon les
     # ex aequo — services d'un même artisan — sortent en doublon ou jamais).
     return qs.order_by('distance', '-handyman__handyman_profile__rating',
@@ -309,7 +311,8 @@ def apply_public_service_filters(qs, params, *, restrict=True):
 
     category_ids = _id_list(params.get("categories"))
     if category_ids:
-        qs = qs.filter(category_id__in=category_ids)
+        # Choisir un MÉTIER couvre ses PRESTATIONS (sous-catégories actives) : même arbre que le catalogue public.
+        qs = qs.filter(category_id__in=catalog.with_descendants(category_ids))
 
     commune = _text_param(params.get("commune"))
     if commune:
@@ -332,8 +335,9 @@ def apply_public_service_filters(qs, params, *, restrict=True):
 
     category_name = _text_param(params.get("category__name"))
     if category_name:
-        # Compatibilité app mobile : filtre par nom de catégorie (insensible à la casse).
-        qs = qs.filter(category__name__iexact=category_name)
+        # Compatibilité app mobile : filtre par nom de catégorie (insensible à la casse) ; un métier couvre ses prestations actives.
+        named = ServiceCategory.objects.filter(name__iexact=category_name).values_list("id", flat=True)
+        qs = qs.filter(category_id__in=catalog.with_descendants(named))
 
     if _flag(params, "urgent"):
         # « Urgent » = intervention immédiate possible : artisan en ligne MAINTENANT et hors
@@ -607,6 +611,7 @@ class HandymanProfileViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
         single = _id_list(params.get("category"), max_items=1)
         category_ids = list(dict.fromkeys(single + category_ids))
         if category_ids:
+            category_ids = sorted(catalog.with_descendants(category_ids))      # un métier couvre ses prestations
             # Spécialité déclarée OU service actif dans la catégorie. EXISTS évite
             # les doublons d'une jointure m2m (pas de .distinct() nécessaire).
             has_skill = HandymanProfile.skills.through.objects.filter(
@@ -632,14 +637,21 @@ class HandymanProfileViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
 
 # ---- Catégories ----
 class ServiceCategoryViewSet(viewsets.ModelViewSet):
+    """Lecture publique ; ÉCRITURE réservée au personnel (jusqu'ici tout compte connecté pouvait créer, modifier ou supprimer un métier).
+    Le catalogue public complet (arbre, icônes, nombre d'offres) est `GET /handy/catalog/`."""
     queryset = ServiceCategory.objects.all()
     serializer_class = ServiceCategorySerializer
     permission_classes = [IsAuthenticatedOrReadOnly]
     filter_backends = [SearchFilter, OrderingFilter]
     search_fields = ["name", "slug", "description"]
-    ordering_fields = ["name", "services_count"]
+    ordering_fields = ["name", "services_count", "position"]
     ordering = ["name"]
     pagination_class = DefaultPageNumberPagination
+
+    def get_permissions(self):
+        if self.request.method in permissions.SAFE_METHODS:
+            return super().get_permissions()
+        return [permissions.IsAdminUser()]
 
     def get_queryset(self):
         # services_count = nombre de services PUBLIÉS (actifs, artisan éligible) : chiffre réel
@@ -684,6 +696,18 @@ def handyman_profile_required(user) -> HandymanProfile:
     return profile
 
 
+class ServiceFilterSet(django_filters.FilterSet):
+    """`category` = un métier OU une prestation : choisir un métier couvre ses prestations actives (même arbre que `GET /handy/catalog/`)."""
+    category = django_filters.NumberFilter(method="filter_category")
+
+    class Meta:
+        model = Service
+        fields = ["is_active", "price_type"]
+
+    def filter_category(self, queryset, name, value):
+        return queryset.filter(category_id__in=catalog.with_descendants([int(value)]))
+
+
 @extend_schema_view(
     list=extend_schema(parameters=_PUBLIC_SERVICE_FILTER_PARAMS + [
         OpenApiParameter("sort", OpenApiTypes.STR,
@@ -710,7 +734,7 @@ class ServiceViewSet(viewsets.ModelViewSet):
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     # `handyman` est filtré à part (égalité stricte, cf. strict_id_param) : le filtre
     # django-filter renvoyait 400 pour un id inconnu (oracle d'existence des comptes).
-    filterset_fields = ["category", "is_active", "price_type"]
+    filterset_class = ServiceFilterSet
     # category__* : « plomberie », « ménage » (nom) ou « electricite » (slug sans accent)
     # trouvent le métier. Category est une FK : pas de doublon.
     search_fields = ["title", "description", "category__name", "category__slug",

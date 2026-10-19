@@ -115,8 +115,21 @@ class ServiceRestore(ServiceModeration):
 
 
 def _category_row(c: ServiceCategory) -> dict:
-    return {"id": c.pk, "name": c.name, "slug": c.slug, "description": c.description or "", "icon": c.icon or "", "is_active": c.is_active,
-            "parent": c.parent_id, "services": getattr(c, "n_services", 0), "artisans": getattr(c, "n_artisans", 0)}
+    from handy import catalog
+
+    key = catalog.icon_key(c.icon, c.slug)
+    return {"id": c.pk, "name": c.name, "slug": c.slug, "description": c.description or "", "icon": c.icon or "", "icon_key": key, "icon_known": catalog.icon_known(key),
+            "is_active": c.is_active, "parent": c.parent_id, "kind": catalog.kind_of(c.parent_id), "position": c.position, "is_featured": c.is_featured,
+            "services": getattr(c, "n_services", 0), "artisans": getattr(c, "n_artisans", 0)}
+
+
+def _position(raw):
+    """Ordre d'affichage : entier de 0 à 9999 (None si invalide)."""
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return None
+    return value if 0 <= value <= 9999 else None
 
 
 class CategoryList(BOView):
@@ -124,7 +137,7 @@ class CategoryList(BOView):
     bo_permission = "services.moderate"
 
     def get(self, request):
-        qs = ServiceCategory.objects.annotate(n_services=Count("services", distinct=True), n_artisans=Count("handymen", distinct=True)).order_by("name")
+        qs = ServiceCategory.objects.annotate(n_services=Count("services", distinct=True), n_artisans=Count("handymen", distinct=True)).order_by("position", "name")
         return paginate(request, qs, _category_row, page_size=100)
 
     def post(self, request):
@@ -142,10 +155,16 @@ class CategoryList(BOView):
             parent = ServiceCategory.objects.filter(pk=data["parent"]).first()
             if parent is None:
                 errors["parent"] = "Catégorie parente inconnue."
+        position = 100
+        if "position" in data and data["position"] not in (None, ""):
+            position = _position(data["position"])
+            if position is None:
+                errors["position"] = "L'ordre est un nombre entier de 0 à 9999."
         if errors:
             return Response({"code": "invalid", "detail": "Formulaire invalide.", "fields": errors}, status=400)
         c = ServiceCategory.objects.create(name=name[:100], slug=slug, description=str(data.get("description") or "")[:500] or None,
-                                           icon=str(data.get("icon") or "")[:50] or None, parent=parent)
+                                           icon=str(data.get("icon") or "")[:50] or None, parent=parent, position=position,
+                                           is_featured=bool(data.get("is_featured")))
         audit_op(request, "category.created", c, name=c.name)
         return Response(_category_row(c), status=201)
 
@@ -168,6 +187,15 @@ class CategoryDetail(BOView):
         if "is_active" in request.data:
             c.is_active = bool(request.data["is_active"])
             changed["is_active"] = c.is_active
+        if "is_featured" in request.data:
+            c.is_featured = bool(request.data["is_featured"])
+            changed["is_featured"] = c.is_featured
+        if "position" in request.data:
+            position = _position(request.data["position"])
+            if position is None:
+                return Response({"code": "invalid", "detail": "Formulaire invalide.", "fields": {"position": "L'ordre est un nombre entier de 0 à 9999."}}, status=400)
+            c.position = position
+            changed["position"] = position
         if changed:
             c.save()
             audit_op(request, "category.updated", c, **{k: str(v)[:80] for k, v in changed.items()})

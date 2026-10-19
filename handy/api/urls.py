@@ -2,6 +2,7 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from handy.api import cash as cash_api
+from handy.api.catalog import public_catalog
 from handy.api import messaging as msg_api
 from handy.api.account import me_account_deletion
 from handy.api.addresses import geo_reverse, geo_search, me_address_detail, me_address_set_primary, me_addresses
@@ -69,6 +70,8 @@ urlpatterns = [
     path('companies/me/', company_profile, name='company-profile'),
     # Public (landing) : chiffres réels, sans authentification.
     path('public/stats/', public_stats, name='public-stats'),
+    # Catalogue unique des métiers (public, ETag) : web, application mobile, administration partagent cette source.
+    path('catalog/', public_catalog, name='public-catalog'),
     # Compte unifié : tableau de bord agrégé + création du profil professionnel du compte courant.
     path('me/dashboard/', me_dashboard, name='me-dashboard'),
     path('me/account/deletion/', me_account_deletion, name='me-account-deletion'),
