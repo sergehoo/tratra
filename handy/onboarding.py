@@ -23,8 +23,8 @@ COMMUNES = ["Abobo", "Adjamé", "Anyama", "Attécoubé", "Bingerville", "Cocody"
 
 DAY_LABELS = {"monday": "lundi", "tuesday": "mardi", "wednesday": "mercredi", "thursday": "jeudi", "friday": "vendredi",
               "saturday": "samedi", "sunday": "dimanche"}
-SLOT_LABELS = {"morning": "le matin", "afternoon": "l'après-midi", "evening": "le soir"}
-UNIT_LABELS = {"hour": "de l'heure", "day": "par jour", "month": "par mois", "job": "par intervention"}
+SLOT_LABELS = {"morning": "le matin", "afternoon": "l’après-midi", "evening": "le soir"}
+UNIT_LABELS = {"hour": "de l’heure", "day": "par jour", "month": "par mois", "job": "par intervention"}
 SINGLE_TARGETS = {"experience", "price", "days", "slots"}         # une question de métier remplace la question commune de même cible
 
 # Étapes du parcours (affichage de la progression et « Continuer »).
@@ -84,9 +84,13 @@ def questions_for(trade: Optional[ServiceCategory]) -> List[OnboardingQuestion]:
     return sorted(chosen, key=lambda q: (q.position, q.pk))
 
 
+# Champs publics d'une réponse : libellé, illustration, et de quoi rédiger l'aperçu de l'annonce sur le téléphone (phrase, années, tarif).
+OPTION_FIELDS = ("value", "label", "emoji", "phrase", "years", "amount", "unit")
+
+
 def question_payload(q: OnboardingQuestion) -> Dict:
     return {"key": q.key, "text": q.text, "help": q.help_text, "kind": q.kind, "target": q.target, "required": q.required,
-            "options": [{k: v for k, v in o.items() if k in ("value", "label", "emoji")} for o in (q.options or []) if isinstance(o, dict)]}
+            "options": [{k: v for k, v in o.items() if k in OPTION_FIELDS} for o in (q.options or []) if isinstance(o, dict)]}
 
 
 def config(trade_id) -> Dict:

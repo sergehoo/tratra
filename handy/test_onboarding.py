@@ -61,7 +61,11 @@ def test_public_config_adapts_questions_to_the_trade_and_hides_internal_fields(n
     assert [p["name"] for p in d["prestations"]] == ["Garde de nuit", "Sortie d'école"]
     assert "Cocody" in d["communes"]
     price = next(q for q in d["questions"] if q["key"] == "nanny_price")
-    assert set(price["options"][0]) == {"value", "label", "emoji"}  # montants, phrases : internes au serveur
+    assert set(price["options"][0]) == {"value", "label", "emoji", "amount", "unit"}   # de quoi rédiger l'aperçu hors ligne, rien d'autre
+    OnboardingQuestion.objects.filter(key="nanny_price").update(
+        options=[{"value": "m1", "label": "1 FCFA", "amount": 1, "unit": "month", "note_interne": "à ne pas publier"}])
+    price = next(q for q in api().get(f"/handy/onboarding/config/?trade={nanny.pk}").json()["questions"] if q["key"] == "nanny_price")
+    assert "note_interne" not in price["options"][0]                  # liste blanche : un champ ajouté dans l'admin ne fuit pas
     gardener = trade("Jardinage", "jardinage")
     assert "garden_skills" in [q["key"] for q in api().get(f"/handy/onboarding/config/?trade={gardener.pk}").json()["questions"]]
     plumber = trade("Plomberie", "plomberie-x")
@@ -99,8 +103,8 @@ def test_offer_is_written_from_the_answers_without_ai(nanny):
     offer = d["offer"]
     assert offer["title"] == "Garde de nuit à Cocody"
     assert offer["description"] == (
-        "Je propose mes services de nousnou à Cocody (Riviera 2). Ce que je fais : soins des bébés et accompagnement à l'école. "
-        "Sans hébergement. Disponible du lundi au vendredi le matin et l'après-midi. 4 ans d’expérience environ. "
+        "Je propose mes services de nousnou à Cocody (Riviera 2). Ce que je fais : soins des bébés et accompagnement à l’école. "
+        "Sans hébergement. Disponible du lundi au vendredi le matin et l’après-midi. 4 ans d’expérience environ. "
         "Tarif souhaité : 60 000 FCFA par mois (à discuter).")
     assert offer["price_type"] == "quote" and offer["price"] is None                   # salaire mensuel : à discuter, jamais un faux forfait
 
@@ -228,3 +232,13 @@ def test_kyc_capture_proposes_identity_details_read_on_the_document_without_stor
     assert "KONE" not in str(stored.front_check) and "1990" not in str(stored.front_check)   # proposé, jamais conservé
     assert stored.birth_date is None                                                      # l'utilisateur confirme lui-même
     assert onboarding  # module importé (lint)
+
+
+@pytest.mark.django_db
+def test_seeded_questions_use_typographic_apostrophes():
+    from handy.models import OnboardingQuestion
+    texts = []
+    for q in OnboardingQuestion.objects.all():
+        texts += [q.text, q.help_text] + [str(o.get(k, "")) for o in q.options for k in ("label", "phrase")]
+    assert texts and not [t for t in texts if "'" in t]
+    assert any("Moins d’un an" == str(o.get("label")) for q in OnboardingQuestion.objects.filter(key="experience") for o in q.options)
