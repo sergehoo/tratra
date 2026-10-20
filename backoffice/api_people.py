@@ -280,8 +280,21 @@ class KycDetail(BOView):
             "documents": [_doc_row(d) for d in p.documents.select_related("reviewed_by").order_by("-uploaded_at")],
             "checklist": eligibility.profile_checklist(p), "publishable": eligibility.is_publishable(p),
             "documents_summary": row["documents"], "history": _history("handymanprofile", p.pk),
+            "identity": _identity(p),
         })
         return Response(row)
+
+
+def _identity(profile) -> Optional[dict]:
+    """Identité DÉCLARÉE dans le parcours « Vérifier mon identité », à comparer à la pièce : jamais une preuve, l'examinateur décide."""
+    from handy.models import KycDossier
+
+    d = KycDossier.objects.filter(profile=profile).first()
+    if d is None or not (d.legal_first_name or d.legal_last_name or d.document_kind):
+        return None
+    return {"first_name": d.legal_first_name, "last_name": d.legal_last_name, "birth_date": d.birth_date,
+            "document_kind": d.document_kind or None, "document_label": d.get_document_kind_display() if d.document_kind else None,
+            "attempts": d.attempts, "sent_at": d.sent_at}
 
 
 class KycDocumentFile(BOView):

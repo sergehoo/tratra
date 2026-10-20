@@ -27,6 +27,7 @@ interface Detail {
   documents_summary: { pending: number; approved: number; rejected: number };
   checklist: { key: string; label: string; hint: string; done: boolean }[];
   history: { action: string; at: string; by: string; reason: string }[];
+  identity: { first_name: string; last_name: string; birth_date: string | null; document_label: string | null; attempts: number; sent_at: string | null } | null;
 }
 
 const TONE: Record<string, BadgeTone> = { pending: "warning", approved: "success", rejected: "danger" };
@@ -88,6 +89,12 @@ export default function KycDetailPage() {
   const manage = can("kyc.review");
   const documents = (
     <Section title="Pièces du dossier">
+      {d.identity ? (
+        <div className="mb-3 rounded-xl bg-canvas px-4 py-3 text-sm">
+          <p className="font-semibold text-ink">Identité déclarée : {[d.identity.first_name, d.identity.last_name].filter(Boolean).join(" ") || "—"}{d.identity.birth_date ? `, né(e) le ${new Date(d.identity.birth_date).toLocaleDateString("fr-FR")}` : ""}</p>
+          <p className="text-xs text-ash">{d.identity.document_label ?? "Pièce non choisie"}{d.identity.attempts > 1 ? ` · ${d.identity.attempts}ᵉ envoi` : ""}{d.identity.sent_at ? ` · transmise le ${dt(d.identity.sent_at)}` : ""} — à comparer à la pièce, jamais une preuve.</p>
+        </div>
+      ) : null}
       {d.documents.length === 0 ? <p className="text-sm text-inkSoft">Aucune pièce déposée.</p> : (
         <ul className="divide-y divide-lineSoft">
           {d.documents.map((doc) => (

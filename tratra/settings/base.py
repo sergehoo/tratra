@@ -244,6 +244,7 @@ REST_FRAMEWORK = {
         'statuses': config('THROTTLE_STATUSES', default='30/min'),  # publication et vues de statuts
         'geo': config('THROTTLE_GEO', default='30/min'),  # recherche d'adresse (appels au fournisseur cartographique)
         'catalog': config('THROTTLE_CATALOG', default='240/min'),  # catalogue public des métiers (landing, application mobile)
+        'kyc_flow': config('THROTTLE_KYC_FLOW', default='30/min'),  # photos et transmission du parcours « Vérifier mon identité »
         'verify': config('THROTTLE_VERIFY', default='60/min'),  # vérification publique d'un QR Tratra ID
         'mfa': config('THROTTLE_MFA', default='20/min'),  # codes de double authentification du personnel
         'payment_refresh': config('THROTTLE_PAYMENT_REFRESH', default='30/min'),  # vérifications de paiement auprès du prestataire
@@ -335,6 +336,9 @@ KYC_SIGNED_URL_TTL_SECONDS = int(config('KYC_SIGNED_URL_TTL_SECONDS', default='3
 # du KYC. Les pages publiques sont mises en cache (ISR, revalidate 300 s) : un TTL
 # de 300 s y figerait des URL déjà expirées (403). 604800 s = maximum SigV4.
 MEDIA_SIGNED_URL_TTL_SECONDS = int(config('MEDIA_SIGNED_URL_TTL_SECONDS', default='604800'))
+# Parcours « Vérifier mon identité » : âge minimal pour proposer des services ; lecture automatique (Tesseract local) des photos de pièce.
+KYC_MIN_AGE = int(config('KYC_MIN_AGE', default='18'))
+KYC_FLOW_OCR = config('KYC_FLOW_OCR', default=True, cast=bool)
 if KYC_MAX_UPLOAD_BYTES <= 0:
     raise ImproperlyConfigured('KYC_MAX_UPLOAD_BYTES must be greater than zero.')
 if not KYC_ALLOWED_CONTENT_TYPES:

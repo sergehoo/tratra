@@ -163,8 +163,12 @@ def _parse_iso(value) -> Optional[date]:
         return None
 
 
-def image_quality_check(data: bytes) -> Dict:
-    """Qualité documentaire réelle (résolution, éclairage, netteté) : une pièce illisible ne peut pas être examinée correctement."""
+QUALITY_LABELS = {"unreadable": "image illisible", "low_resolution": "résolution insuffisante", "too_dark": "trop sombre", "overexposed": "surexposée",
+                  "blurry": "floue"}
+
+
+def image_quality_problems(data: bytes) -> List[str]:
+    """Défauts mesurés sur l'image (codes de `QUALITY_LABELS`), dans l'ordre d'affichage ; liste vide = image exploitable."""
     import io
 
     from PIL import Image, ImageFilter, ImageStat
@@ -173,7 +177,7 @@ def image_quality_check(data: bytes) -> Dict:
         img = Image.open(io.BytesIO(data))
         img.load()
     except Exception:  # noqa: BLE001
-        return _check("image_quality", "warn", "Qualité de l'image", "Image illisible.")
+        return ["unreadable"]
     gray = img.convert("L")
     w, h = gray.size
     small = gray.resize((min(w, 800), max(1, int(h * min(w, 800) / w))))
@@ -183,14 +187,23 @@ def image_quality_check(data: bytes) -> Dict:
     bright = ImageStat.Stat(small).mean[0]
     problems = []
     if max(w, h) < 800:
-        problems.append("résolution insuffisante")
+        problems.append("low_resolution")
     if bright < 50:
-        problems.append("trop sombre")
+        problems.append("too_dark")
     elif bright > 225:
-        problems.append("surexposée")
+        problems.append("overexposed")
     if sharp < 40:
-        problems.append("floue")
-    return _check("image_quality", "warn" if problems else "ok", "Qualité de l'image (résolution, éclairage, netteté)", ", ".join(problems).capitalize() + "." if problems else "")
+        problems.append("blurry")
+    return problems
+
+
+def image_quality_check(data: bytes) -> Dict:
+    """Qualité documentaire réelle (résolution, éclairage, netteté) : une pièce illisible ne peut pas être examinée correctement."""
+    problems = image_quality_problems(data)
+    if problems == ["unreadable"]:
+        return _check("image_quality", "warn", "Qualité de l'image", "Image illisible.")
+    detail = ", ".join(QUALITY_LABELS[p] for p in problems).capitalize() + "." if problems else ""
+    return _check("image_quality", "warn" if problems else "ok", "Qualité de l'image (résolution, éclairage, netteté)", detail)
 
 
 def analyze(document: HandymanDocument, by=None) -> DocumentAnalysis:

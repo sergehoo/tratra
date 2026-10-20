@@ -285,6 +285,42 @@ class HandymanDocument(models.Model):
         return self
 
 
+def kyc_dossier_upload_path(instance, filename):
+    """Même règle que les pièces KYC : clé opaque par profil, jamais le nom d'origine du fichier."""
+    return f"kyc/{instance.profile_id or 'unassigned'}/{uuid4().hex}{Path(filename).suffix.lower()}"
+
+
+class KycDossier(models.Model):
+    """Progression du parcours guidé « Vérifier mon identité » : l'artisan reprend là où il s'était arrêté, même après avoir fermé
+    l'application.
+
+    Ce n'est PAS un second système de vérification : la décision reste celle des pièces (`HandymanDocument`, revue humaine
+    « kyc.review ») puis du profil (`HandymanProfile.is_approved`) ; la vérification faciale reste celle du module `biometrics`.
+    Le dossier garde seulement ce qui a été saisi et les photos pas encore transmises (voir `handy.kyc_flow`)."""
+    DOC_KINDS = [("cni", "Carte nationale d'identité"), ("passport", "Passeport")]
+    FACE_CHOICES = [("", "Non choisi"), ("biometric", "Vérification faciale"), ("human", "Vérification par l'équipe")]
+
+    profile = models.OneToOneField('HandymanProfile', on_delete=models.PROTECT, related_name='kyc_dossier')
+    legal_first_name = models.CharField(max_length=150, blank=True, default='')
+    legal_last_name = models.CharField(max_length=150, blank=True, default='')
+    birth_date = models.DateField(null=True, blank=True)
+    document_kind = models.CharField(max_length=10, choices=DOC_KINDS, blank=True, default='')
+    front = models.FileField(upload_to=kyc_dossier_upload_path, storage=KycPrivateStorage(), blank=True, default='')
+    back = models.FileField(upload_to=kyc_dossier_upload_path, storage=KycPrivateStorage(), blank=True, default='')
+    # Résultat du contrôle qualité / lecture de chaque photo : indicateurs seulement, jamais le texte lu ni un numéro.
+    front_check = models.JSONField(default=dict, blank=True)
+    back_check = models.JSONField(default=dict, blank=True)
+    face_choice = models.CharField(max_length=10, choices=FACE_CHOICES, blank=True, default='')
+    sent_at = models.DateTimeField(null=True, blank=True)          # photos transmises : pièces créées « en attente » de revue
+    documents = models.ManyToManyField('HandymanDocument', blank=True, related_name='kyc_dossiers')
+    attempts = models.PositiveSmallIntegerField(default=0)         # transmissions successives (nouvelle pièce après un refus)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Dossier d'identité #{self.profile_id}"
+
+
 # ---- WALLET / CAUTION ----
 class DepositTransaction(models.Model):
     TRANSACTION_TYPES = [('deposit', 'Dépôt'), ('withdrawal', 'Retrait'), ('deduction', 'Déduction mission')]

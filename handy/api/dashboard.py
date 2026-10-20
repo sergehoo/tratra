@@ -21,7 +21,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 
 from handy.api.serializers import absolute_media_url
-from handy.eligibility import is_publishable, profile_checklist
+from handy.eligibility import eligibility_summary, is_publishable, profile_checklist
 from handy import addresses as address_service
 from handy.models import (
     Booking, CompanyProfile, Conversation, HandymanDocument, HandymanProfile, Message, Notification, Review, Service,
@@ -67,23 +67,19 @@ def _item(booking, role: str) -> dict:
 
 
 def _kyc(profile) -> dict:
+    """État d'IDENTITÉ (pièce d'identité seulement, comme le parcours guidé et l'éligibilité) : un justificatif professionnel en attente
+    ne fait plus afficher « vérification en cours » à un artisan dont l'identité est déjà vérifiée."""
+    from handy.kyc_flow import kyc_status
+
     docs = HandymanDocument.objects.filter(handyman=profile)
-    approved = set(docs.filter(status="approved").values_list("document_type", flat=True))
-    required = sorted(HandymanProfile.REQUIRED_KYC_DOCS)
-    if set(required).issubset(approved):
-        state = "approved"
-    elif docs.filter(status="pending").exists():
-        state = "pending"
-    elif docs.filter(status="rejected").exists():
-        state = "rejected"
-    else:
-        state = "none"
-    rejected = docs.filter(status="rejected").order_by("-reviewed_at", "-uploaded_at").first()
+    identity = kyc_status(profile)
+    state = {"draft": "none"}.get(identity["status"], identity["status"])
     return {
         "status": state,
-        "required": required,
+        "label": identity["label"],
+        "required": sorted(HandymanProfile.REQUIRED_KYC_DOCS),
         "documents": {s: docs.filter(status=s).count() for s in ("pending", "approved", "rejected")},
-        "rejection_reason": (rejected.rejection_reason or None) if rejected and state == "rejected" else None,
+        "rejection_reason": identity["reason"] if state == "rejected" else None,
     }
 
 
@@ -116,6 +112,8 @@ def _provider_block(user, profile, now) -> dict:
             "items": checklist,
         },
         "kyc": _kyc(profile),
+        # Profil complet / identité / autorisation de publication / offres : quatre notions distinctes, blocages et actions (source unique).
+        "eligibility": eligibility_summary(profile),
         "services": {
             "active": Service.objects.filter(handyman=user, is_active=True).count(),
             "total": Service.objects.filter(handyman=user).count(),
@@ -281,16 +279,31 @@ def me_become_provider(request):
 @permission_classes([permissions.IsAuthenticated])
 def me_services(request):
     user = request.user
-    publishable = is_publishable(HandymanProfile.objects.filter(user=user).first())
-    services = (Service.objects.filter(handyman=user).select_related("category")
+    profile = HandymanProfile.objects.filter(user=user).first()
+    publishable = is_publishable(profile)
+    services = (Service.objects.filter(handyman=user).select_related("category", "category__parent")
                 .annotate(bookings_count=Count("bookings")).order_by("-created_at", "-id"))
+
+    def publication(s) -> dict:
+        if not s.is_active:
+            return {"state": "inactive", "label": "Désactivée", "hint": "Invisible des clients. Activez-la pour la proposer."}
+        if publishable:
+            return {"state": "published", "label": "Publiée", "hint": "Visible des clients dans le catalogue et la recherche."}
+        return {"state": "waiting", "label": "En attente d'autorisation",
+                "hint": "Elle sera publiée automatiquement dès que votre publication sera autorisée."}
+
     return Response({
         "publishable": publishable,
+        "eligibility": eligibility_summary(profile) if profile is not None else None,
         "results": [{
             "id": s.id, "title": s.title, "category": s.category.name if s.category_id else None,
+            "category_id": s.category_id,
+            "trade": (s.category.parent.name if s.category_id and s.category.parent_id else None),
+            "description": s.description or "",
             "price": str(s.price) if s.price is not None else None, "price_type": s.price_type,
             "duration": s.duration, "is_active": s.is_active,
             "published": bool(s.is_active and publishable),  # visible dans le catalogue public
+            "publication": publication(s),
             "bookings_count": s.bookings_count,
         } for s in services],
     })

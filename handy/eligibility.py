@@ -67,6 +67,83 @@ def profile_checklist(profile) -> list:
     return [{"key": k, "label": label, "hint": hint, "done": done[k]} for k, label, hint in CHECKLIST]
 
 
+PROFILE_KEYS = ("bio", "skills", "experience", "zone", "photo")
+# Action corrective proposée par les clients (web, application) pour chaque blocage : code stable → libellé du bouton.
+ACTIONS = {"edit_profile": "Compléter mon profil", "verify_identity": "Vérifier mon identité", "add_service": "Ajouter une offre",
+           "manage_services": "Gérer mes offres", "contact_support": "Contacter le support"}
+
+
+def _action(code):
+    return {"code": code, "label": ACTIONS[code]} if code else None
+
+
+def eligibility_summary(profile) -> dict:
+    """Les QUATRE notions distinctes de l'espace professionnel, avec les blocages réels et l'action corrective de chacun :
+
+    - profil complet (5 éléments que l'artisan renseigne lui-même) ;
+    - identité (KYC : pièce d'identité revue par l'équipe) ;
+    - autorisation de publication = `is_publishable` (profil complet + identité vérifiée + validation finale de l'équipe + compte actif) ;
+    - offres publiées (services actifs, visibles seulement si la publication est autorisée).
+
+    `publication.authorized` est TOUJOURS égal à `is_publishable(profile)` (vérifié par les tests)."""
+    from handy.kyc_flow import kyc_status
+    from handy.models import Service
+
+    checklist = profile_checklist(profile)
+    items = [i for i in checklist if i["key"] in PROFILE_KEYS]
+    missing = [i for i in items if not i["done"]]
+    kyc = kyc_status(profile)
+    authorized = is_publishable(profile)
+    blockers = []
+    if not profile.user.is_active:
+        blockers.append({"code": "account_inactive", "label": "Compte désactivé", "hint": "Contactez le support Tratra.", "action": _action("contact_support")})
+    if missing:
+        blockers.append({"code": "profile_incomplete", "label": "Profil incomplet : " + ", ".join(i["label"].lower() for i in missing),
+                         "hint": missing[0]["hint"], "action": _action("edit_profile")})
+    kyc_blockers = {
+        "draft": ("Identité non vérifiée", "Faites vérifier votre pièce d'identité : quelques minutes suffisent."),
+        "pending": ("Pièce d'identité en cours de revue", "L'équipe Tratra examine votre pièce : aucune action n'est nécessaire."),
+        "rejected": ("Nouvelle pièce d'identité demandée", kyc["reason"] or "Reprenez des photos nettes et complètes de votre pièce."),
+    }
+    if kyc["status"] in kyc_blockers:
+        label, hint = kyc_blockers[kyc["status"]]
+        blockers.append({"code": f"kyc_{kyc['status']}", "label": label, "hint": hint,
+                         "action": None if kyc["status"] == "pending" else _action("verify_identity")})
+    if not profile.is_approved and kyc["status"] == "approved":
+        blockers.append({"code": "approval_pending", "label": "Validation finale de l'équipe Tratra en attente",
+                         "hint": "Dernière étape, faite par l'équipe après la vérification de votre identité. Aucune action n'est nécessaire.",
+                         "action": None})
+    services = Service.objects.filter(handyman=profile.user)
+    total, active = services.count(), services.filter(is_active=True).count()
+    published = active if authorized else 0
+    if total == 0:
+        offers_label, offers_action = "Aucune offre créée", _action("add_service")
+    elif active == 0:
+        offers_label, offers_action = "Aucune offre active", _action("manage_services")
+    elif not authorized:
+        offers_label, offers_action = f"{active} offre{'s' if active > 1 else ''} en attente de l'autorisation de publication", None
+    else:
+        offers_label, offers_action = f"{published} offre{'s' if published > 1 else ''} publiée{'s' if published > 1 else ''}", None
+    if authorized and total == 0:
+        next_action = _action("add_service")
+    elif authorized and active == 0:
+        next_action = _action("manage_services")
+    else:
+        next_action = next((b["action"] for b in blockers if b["action"]), None)
+    return {
+        "profile": {"complete": not missing, "done": len(items) - len(missing), "total": len(items), "items": items},
+        "kyc": {**kyc, "approved": kyc["status"] == "approved"},
+        "approval": {"approved": bool(profile.is_approved),
+                     "label": "Validé par l'équipe Tratra" if profile.is_approved else "Validation de l'équipe en attente"},
+        "publication": {"authorized": authorized,
+                        "label": "Publication autorisée" if authorized else "Publication non autorisée",
+                        "blockers": [] if authorized else blockers},
+        "offers": {"total": total, "active": active, "published": published, "inactive": total - active, "label": offers_label,
+                   "action": offers_action},
+        "next_action": next_action,
+    }
+
+
 def publishable(profiles=None):
     """Profils publiables / éligibles aux missions."""
     qs = HandymanProfile.objects.all() if profiles is None else profiles
