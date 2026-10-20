@@ -58,7 +58,17 @@ manage.py push_check --user <ID> --send         # push RÉEL « Test Tratra »
 Résultat attendu de `--send` : `{'sent': 1, 'removed': 0, 'failed': 0, 'devices': 1, 'skipped': None}`. Échec fréquent : `skipped: no_access_token` → compte de service invalide ou API FCM v1 non activée ;
 iOS sans notification → clé APNs absente de Firebase ou identifiant de bundle différent.
 
-## 5. Ce qui est vérifié automatiquement (sans Firebase)
+## 5. Écran verrouillé, pastilles, widget et raccourcis
+
+- **Contenu sensible** : messages, paiements, compte (KYC, sécurité) → push à texte NEUTRE (« Nouveau message — Awa K. vous a écrit »,
+  « Mise à jour d'un paiement : ouvrez Tratra… ») et visibilité Android `PRIVATE` ; le détail reste dans l'application. Aperçu du texte des
+  messages activable par l'exploitant : `PUSH_MESSAGE_PREVIEW=True`.
+- **Pastilles** : nombre de notifications non lues envoyé à iOS (`aps.badge`) et à Android (`notification_count`, affiché par les lanceurs
+  qui le gèrent, Samsung notamment ; ailleurs un point).
+- **Widget d'accueil Android** et **raccourcis d'application** (Android, iOS) : voir `lib/services/home_widget_sync.dart` ; mêmes liens
+  profonds que les notifications (`tratra://explore|bookings|messages|pro`). Widget iOS (WidgetKit) : non réalisé (cible d'extension Xcode).
+
+## 6. Ce qui est vérifié automatiquement (sans Firebase)
 
 Charge utile exacte (priorité haute Android, canal, APNs priority 10, badge, `collapse_key`), jeton OAuth mis en cache, jetons morts supprimés, échecs transitoires comptés pour reprise,
 préférences par catégorie, une seule notification par événement (idempotence), cycle de vie d'une mission, annonces planifiées livrées une fois, échéances mensuelles
