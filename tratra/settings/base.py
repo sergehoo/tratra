@@ -336,6 +336,10 @@ KYC_SIGNED_URL_TTL_SECONDS = int(config('KYC_SIGNED_URL_TTL_SECONDS', default='3
 # du KYC. Les pages publiques sont mises en cache (ISR, revalidate 300 s) : un TTL
 # de 300 s y figerait des URL déjà expirées (403). 604800 s = maximum SigV4.
 MEDIA_SIGNED_URL_TTL_SECONDS = int(config('MEDIA_SIGNED_URL_TTL_SECONDS', default='604800'))
+# Téléphone : pays présélectionné à défaut de préférence, de carte SIM ou de région de l'appareil (ISO 3166) ; en-tête de pays posé
+# par le proxy (ex. CF-IPCountry chez Cloudflare), lu seulement s'il est configuré — aucune géolocalisation IP n'est faite par Tratra.
+PHONE_DEFAULT_REGION = config('PHONE_DEFAULT_REGION', default='CI')
+PHONE_IP_COUNTRY_HEADER = config('PHONE_IP_COUNTRY_HEADER', default='')
 # Parcours « Vérifier mon identité » : âge minimal pour proposer des services ; lecture automatique (Tesseract local) des photos de pièce.
 KYC_MIN_AGE = int(config('KYC_MIN_AGE', default='18'))
 KYC_FLOW_OCR = config('KYC_FLOW_OCR', default=True, cast=bool)

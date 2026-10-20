@@ -3,12 +3,13 @@ import Link from "next/link";
 import { Suspense, useEffect, useId, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { ArrowRight, CalendarCheck, LockKeyhole, Mail, Search, TimerReset } from "lucide-react";
-import { Alert, Button, ButtonLink, Field, Input, PasswordInput, Skeleton } from "@/components/ds";
+import { Alert, Button, ButtonLink, Field, Input, PasswordInput, PhoneField, Skeleton } from "@/components/ds";
 import { AuthFrame } from "@/components/auth/AuthFrame";
 import { useAuth } from "@/lib/auth";
 import { ApiError } from "@/lib/api";
 import { isProtectedPath, isSafeInternalPath, registerHref, spaceHref } from "@/lib/links";
 import { formatCountdown, parseLoginLock, secondsLeft } from "@/lib/loginLock";
+import { DEFAULT_COUNTRY, lookupE164, phoneError, type PhoneValue } from "@/lib/phone";
 
 function FormFallback() {
   return (
@@ -50,6 +51,10 @@ function LoginForm() {
   const errorId = `${uid}-error`;
 
   const [username, setUsername] = useState("");
+  // Connexion par téléphone (pays + numéro national) ; « identifiant ou e-mail » reste possible pour les anciens comptes.
+  const [byPhone, setByPhone] = useState(true);
+  const [phone, setPhone] = useState<PhoneValue>({ country: DEFAULT_COUNTRY, national: "" });
+  const [phoneErr, setPhoneErr] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -74,9 +79,19 @@ function LoginForm() {
     e.preventDefault();
     if (locked) return;
     setError("");
+    let identifier = username.trim();
+    if (byPhone) {
+      const found = lookupE164(phone);       // tolérant : un ancien numéro hors norme est retrouvé par le serveur
+      if (!found) {
+        setPhoneErr(phoneError(phone) ?? "Saisissez votre numéro de téléphone.");
+        return;
+      }
+      identifier = found;
+    }
+    setPhoneErr("");
     setBusy(true);
     try {
-      await login(username, password, next);
+      await login(identifier, password, next);
       // Succès : la redirection est en cours, le bouton reste désactivé.
     } catch (err) {
       const blocked = parseLoginLock(err);
@@ -130,26 +145,48 @@ function LoginForm() {
       ) : null}
 
       <form onSubmit={submit} className="space-y-5">
-        <Field label="Téléphone" hint="Avec l’indicatif du pays (+225…). Ancien compte : identifiant ou e-mail.">
-          {(c) => (
-            <Input
-              {...c}
-              name="username"
-              type="text"
-              inputMode="tel"
-              required
-              autoComplete="username"
-              autoCapitalize="none"
-              autoCorrect="off"
-              spellCheck={false}
-              placeholder="+225 07 00 00 00 00"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              aria-invalid={error ? true : undefined}
-              aria-describedby={error ? errorId : undefined}
-            />
-          )}
-        </Field>
+        {byPhone ? (
+          <PhoneField
+            name="username"
+            autoComplete="username"
+            value={phone}
+            onChange={(v) => {
+              setPhone(v);
+              if (phoneErr) setPhoneErr("");
+            }}
+            error={phoneErr || undefined}
+          />
+        ) : (
+          <Field label="Identifiant ou e-mail" required>
+            {(c) => (
+              <Input
+                {...c}
+                name="username"
+                type="text"
+                required
+                autoComplete="username"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                aria-invalid={error ? true : undefined}
+                aria-describedby={error ? errorId : undefined}
+              />
+            )}
+          </Field>
+        )}
+        <button
+          type="button"
+          onClick={() => {
+            setByPhone((v) => !v);
+            setPhoneErr("");
+            setError("");
+          }}
+          className="-mt-3 text-sm font-semibold text-primaryDark underline-offset-2 hover:underline"
+        >
+          {byPhone ? "Ancien compte : se connecter avec un identifiant ou un e-mail" : "Se connecter avec mon numéro de téléphone"}
+        </button>
 
         <Field label="Mot de passe">
           {(c) => (

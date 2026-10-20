@@ -3,18 +3,17 @@ import Link from "next/link";
 import { Suspense, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { ArrowRight, CalendarCheck } from "lucide-react";
-import { Alert, Button, ButtonLink, Checkbox, Field, PasswordInput, Skeleton, TextField } from "@/components/ds";
+import { Alert, Button, ButtonLink, Checkbox, Field, PasswordInput, PhoneField, Skeleton, TextField } from "@/components/ds";
 import { AuthFrame } from "@/components/auth/AuthFrame";
-import { PHONE_INITIAL, PhoneField } from "@/components/auth/PhoneField";
 import { useAuth } from "@/lib/auth";
 import { ApiError } from "@/lib/api";
 import { isSafeInternalPath, loginHref, spaceHref } from "@/lib/links";
-import { normalizePhone } from "@/lib/phone";
+import { DEFAULT_COUNTRY, phoneError, toE164, type PhoneValue } from "@/lib/phone";
 
 const EMPTY_FORM = {
   first_name: "",
   last_name: "",
-  phone: PHONE_INITIAL,
+  phone: { country: DEFAULT_COUNTRY, national: "" } as PhoneValue,
   password: "",
   confirm: "",
   accept_terms: false,
@@ -88,7 +87,8 @@ function validate(f: FormState): FieldErrors {
   const errors: FieldErrors = {};
   if (!f.first_name.trim()) errors.first_name = "Indiquez votre prénom.";
   if (!f.last_name.trim()) errors.last_name = "Indiquez votre nom.";
-  if (!normalizePhone(f.phone)) errors.phone = "Numéro invalide. Exemple : +225 07 00 00 00 00.";
+  const phoneProblem = phoneError(f.phone, "Indiquez votre numéro de téléphone.");
+  if (phoneProblem) errors.phone = phoneProblem;
   if (f.password.length < MIN_PASSWORD) errors.password = `Au moins ${MIN_PASSWORD} caractères.`;
   if (f.confirm !== f.password) errors.confirm = "Les mots de passe ne correspondent pas.";
   if (!f.accept_terms) errors.accept_terms = "Acceptez les conditions et la politique de confidentialité pour continuer.";
@@ -127,7 +127,8 @@ function RegisterForm() {
         {
           first_name: f.first_name.trim(),
           last_name: f.last_name.trim(),
-          phone: normalizePhone(f.phone) as string,
+          phone: toE164(f.phone) as string,
+          phone_country: f.phone.country,
           password: f.password,
           accept_terms: f.accept_terms,
         },

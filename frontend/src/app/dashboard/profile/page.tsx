@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useRouter } from "next/navigation";
 import { BadgeCheck, CircleCheck, Circle, FileCheck2, Smartphone } from "lucide-react";
 import { apiErrorMessage, patch } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -10,8 +11,9 @@ import { useData } from "@/lib/useData";
 import { patchForm } from "@/lib/uploadPatch";
 import type { Category, Paginated } from "@/lib/types";
 import {
-  Alert, Avatar, Badge, Button, ButtonLink, Card, CardHeader, PageHeader, Skeleton, TextField, TextareaField, cx,
+  Alert, Avatar, Badge, Button, ButtonLink, Card, CardHeader, PageHeader, PhoneField, Skeleton, TextField, TextareaField, cx,
 } from "@/components/ds";
+import { displayPhone, flagOf, fromE164, phoneError, toE164, type PhoneValue } from "@/lib/phone";
 
 interface ProProfile {
   id: number;
@@ -144,6 +146,70 @@ function ProForm({ profileId }: { profileId: number }) {
   );
 }
 
+/** Changement de numéro : pays + numéro national ; le nouveau numéro sert à la connexion et doit être confirmé par SMS (OTP inchangé). */
+function PhoneChange() {
+  const { user, refreshUser } = useAuth();
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [value, setValue] = useState<PhoneValue>(fromE164(user?.phone));
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => setValue(fromE164(user?.phone)), [user?.phone]);
+
+  async function save(e: FormEvent) {
+    e.preventDefault();
+    if (!user) return;
+    const problem = phoneError(value);
+    if (problem) {
+      setError(problem);
+      return;
+    }
+    const next = toE164(value);
+    if (next === user.phone) {
+      setOpen(false);
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      await patch(`/users/${user.id}/`, { phone: next, phone_country: value.country });
+      await refreshUser();
+      router.push("/verify-phone?auto=1&next=/dashboard/profile");
+    } catch (err) {
+      setError(apiErrorMessage(err, "Le numéro n’a pas pu être enregistré. Vérifiez-le puis réessayez."));
+      setBusy(false);
+    }
+  }
+
+  if (!open) {
+    return (
+      <Button type="button" variant="ghost" size="sm" className="mt-2" onClick={() => setOpen(true)}>
+        {user?.phone ? "Modifier mon numéro" : "Ajouter un numéro"}
+      </Button>
+    );
+  }
+  return (
+    <form onSubmit={save} className="mt-4 space-y-3" noValidate>
+      <PhoneField
+        label="Nouveau numéro"
+        hint="Il servira à vous connecter et devra être confirmé par un code SMS."
+        autoCountry={!user?.phone}
+        value={value}
+        onChange={(v) => {
+          setValue(v);
+          if (error) setError("");
+        }}
+        error={error || undefined}
+      />
+      <div className="flex flex-wrap gap-2">
+        <Button type="submit" loading={busy}>Enregistrer et vérifier</Button>
+        <Button type="button" variant="ghost" onClick={() => { setOpen(false); setError(""); setValue(fromE164(user?.phone)); }}>Annuler</Button>
+      </div>
+    </form>
+  );
+}
+
 /** E-mail FACULTATIF du compte (la connexion se fait par téléphone) : ajouté ou modifié après connexion. */
 function EmailForm() {
   const { user, refreshUser } = useAuth();
@@ -243,13 +309,13 @@ export default function ProfilePage() {
                 <Avatar name={name} size={64} />
                 <div className="min-w-0">
                   <p className="truncate font-display text-xl font-extrabold text-ink">{name}</p>
-                  {user?.email ? <p className="truncate text-sm text-ash">{user.email}</p> : user?.phone ? <p className="truncate text-sm text-ash">{user.phone}</p> : null}
+                  {user?.email ? <p className="truncate text-sm text-ash">{user.email}</p> : user?.phone ? <p className="truncate text-sm text-ash">{displayPhone(user.phone)}</p> : null}
                 </div>
               </div>
               <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-panel bg-canvas px-4 py-3">
                 <span className="flex items-center gap-2 text-sm font-semibold text-ink">
                   <Smartphone aria-hidden className="h-4 w-4 text-primary" />
-                  {user?.phone ? user.phone : "Aucun numéro enregistré"}
+                  {user?.phone ? <><span aria-hidden>{flagOf(fromE164(user.phone).country)}</span> {displayPhone(user.phone)}</> : "Aucun numéro enregistré"}
                 </span>
                 {user?.phone ? (
                   data.user.is_verified ? (
@@ -259,6 +325,7 @@ export default function ProfilePage() {
                   )
                 ) : null}
               </div>
+              <PhoneChange />
               <EmailForm />
             </Card>
             <AddressesCard />

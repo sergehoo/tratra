@@ -32,7 +32,7 @@ TTL_MINUTES = 10
 RESEND_COOLDOWN_S = 60
 MAX_PER_HOUR = 5
 MAX_FAILURES = 5
-PHONE_INVALID = "Numéro de téléphone invalide. Saisissez-le avec l'indicatif du pays, par exemple +225 07 00 00 00 00."
+PHONE_INVALID = "Numéro de téléphone invalide. Choisissez le pays puis saisissez le numéro national, par exemple 07 00 00 00 00 pour la Côte d’Ivoire."
 CODE_INVALID = "Code invalide ou expiré."
 
 
@@ -44,11 +44,20 @@ def _key(kind: str, phone: str) -> str:
     return f"recovery:{kind}:{hashlib.sha256(phone.encode()).hexdigest()[:24]}"
 
 
-def _phone_or_error(raw):
+def _phone_or_error(request):
+    """Numéro saisi (international, ou national avec `phone_country`) → E.164 ; même règle que l'envoi des SMS."""
     try:
-        return sms.normalize_msisdn(raw), None
+        return sms.normalize_msisdn(request.data.get("phone"), request.data.get("phone_country")), None
     except sms.SMSError:
         return None, _error(PHONE_INVALID, status.HTTP_400_BAD_REQUEST)
+
+
+def _account(request, phone: str):
+    """Compte actif du numéro, y compris enregistré sous sa forme d'avant libphonenumber."""
+    from handy.phone import lookup_candidates
+
+    forms = [phone, *lookup_candidates(request.data.get("phone"), request.data.get("phone_country"))]
+    return User.objects.filter(phone__in=list(dict.fromkeys(forms)), is_active=True).first()
 
 
 def _blacklist_sessions(user):
@@ -67,7 +76,7 @@ def _blacklist_sessions(user):
 @throttle_classes([ScopedRateThrottle])
 def password_reset_request(request):
     """POST {phone} -> envoie un code de récupération par SMS (202, identique que le compte existe ou non)."""
-    phone, bad = _phone_or_error(request.data.get("phone"))
+    phone, bad = _phone_or_error(request)
     if bad:
         return bad
     try:
@@ -90,7 +99,7 @@ def password_reset_request(request):
 
     accepted = Response({"sent": True, "phone": sms.mask(phone), "expires_in": TTL_MINUTES * 60,
                          "resend_in": RESEND_COOLDOWN_S}, status=status.HTTP_202_ACCEPTED)
-    user = User.objects.filter(phone=phone, is_active=True).first()
+    user = _account(request, phone)
     if user is None:
         return accepted
     recent = OTPCode.objects.filter(user=user, purpose="recovery", created_at__gte=timezone.now() - timedelta(hours=1))
@@ -99,7 +108,7 @@ def password_reset_request(request):
     OTPCode.objects.filter(user=user, purpose="recovery", used=False).update(used=True)
     otp = OTPCode.issue(user, purpose="recovery", ttl_minutes=TTL_MINUTES)
     try:
-        sms.send_sms(phone, f"Tratra : code de récupération de votre compte {otp.code}. Valable {TTL_MINUTES} minutes.")
+        sms.send_sms(user.phone, f"Tratra : code de récupération de votre compte {otp.code}. Valable {TTL_MINUTES} minutes.")
     except sms.SMSError as exc:
         otp.used = True
         otp.save(update_fields=["used"])
@@ -115,7 +124,7 @@ def password_reset_request(request):
 @throttle_classes([ScopedRateThrottle])
 def password_reset_confirm(request):
     """POST {phone, code, password} -> définit un nouveau mot de passe si le code est valide."""
-    phone, bad = _phone_or_error(request.data.get("phone"))
+    phone, bad = _phone_or_error(request)
     if bad:
         return bad
     code = str(request.data.get("code") or "").strip()
@@ -124,7 +133,7 @@ def password_reset_confirm(request):
     if (cache.get(fail_key) or 0) >= MAX_FAILURES:
         return _error("Trop d'essais. Demandez un nouveau code.", status.HTTP_429_TOO_MANY_REQUESTS)
 
-    user = User.objects.filter(phone=phone, is_active=True).first()
+    user = _account(request, phone)
     otp = (OTPCode.objects.filter(user=user, purpose="recovery", used=False).order_by("-created_at").first()
            if user else None)
     if not (user and otp and otp.is_valid() and secrets.compare_digest(otp.code, code)):

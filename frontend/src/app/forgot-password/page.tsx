@@ -3,10 +3,10 @@ import { Suspense, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowRight, MessageSquareText } from "lucide-react";
 import { AuthFrame } from "@/components/auth/AuthFrame";
-import { PHONE_INITIAL, PhoneField } from "@/components/auth/PhoneField";
+import { PhoneField } from "@/components/ds";
 import { Alert, Button, ButtonLink, Field, OtpInput, PasswordInput } from "@/components/ds";
 import { apiErrorMessage } from "@/lib/api";
-import { normalizePhone } from "@/lib/phone";
+import { DEFAULT_COUNTRY, lookupE164, phoneError, type PhoneValue } from "@/lib/phone";
 import { confirmPasswordReset, maskPhone, OTP_LENGTH, OTP_RESEND_SECONDS, requestPasswordReset } from "@/lib/otp";
 
 function useCountdown() {
@@ -25,7 +25,7 @@ function useCountdown() {
 
 function ForgotPassword() {
   const router = useRouter();
-  const [phoneInput, setPhoneInput] = useState(PHONE_INITIAL);
+  const [phoneInput, setPhoneInput] = useState<PhoneValue>({ country: DEFAULT_COUNTRY, national: "" });
   const [phone, setPhone] = useState<string | null>(null); // E.164 une fois le code demandé
   const [code, setCode] = useState("");
   const [password, setPassword] = useState("");
@@ -37,9 +37,9 @@ function ForgotPassword() {
 
   async function sendCode(e?: React.FormEvent) {
     e?.preventDefault();
-    const normalized = normalizePhone(phone ?? phoneInput);
+    const normalized = phone ?? lookupE164(phoneInput);
     if (!normalized) {
-      setFieldError("Numéro invalide. Exemple : +225 07 00 00 00 00.");
+      setFieldError(phoneError(phoneInput) ?? "Saisissez votre numéro de téléphone.");
       return;
     }
     setFieldError("");
@@ -86,7 +86,7 @@ function ForgotPassword() {
       <p className="text-sm leading-relaxed text-inkSoft">
         Saisissez le numéro de votre compte : nous vous enverrons un code par SMS pour définir un nouveau mot de passe.
       </p>
-      <PhoneField value={phoneInput} onChange={setPhoneInput} error={fieldError} autoFocus />
+      <PhoneField label="Numéro de votre compte" value={phoneInput} onChange={(v) => { setPhoneInput(v); if (fieldError) setFieldError(""); }} error={fieldError || undefined} autoFocus />
       {error ? <Alert tone="danger">{error}</Alert> : null}
       <Button type="submit" size="lg" block loading={busy} leftIcon={<MessageSquareText aria-hidden className="h-4 w-4" />}>
         Recevoir le code

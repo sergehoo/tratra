@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { m } from "framer-motion";
 import { ArrowRight, BadgeCheck, BadgeDollarSign, Save } from "lucide-react";
 import { ApiError, apiErrorMessage, get, post } from "@/lib/api";
+import { fromE164, phoneError, toE164, type PhoneValue } from "@/lib/phone";
 import { statusView } from "@/lib/status";
 import {
   Alert,
@@ -15,6 +16,7 @@ import {
   Field,
   Input,
   PageHeader,
+  PhoneField,
   Skeleton,
   StatusBadge,
   TextField,
@@ -164,6 +166,7 @@ function SubscriptionPanel({ sub, failed, onRetry }: { sub: Sub | null; failed: 
 
 export default function CompanyHome() {
   const [c, setC] = useState<Company>({});
+  const [phone, setPhone] = useState<PhoneValue>(fromE164(null));
   const [sub, setSub] = useState<Sub | null>(null);
   const [loading, setLoading] = useState(true);
   const [profileError, setProfileError] = useState(false);
@@ -184,6 +187,7 @@ export default function CompanyHome() {
       get<Company>("/companies/me/")
         .then((d) => {
           setC(d || {});
+          setPhone(fromE164(d?.phone));
           setProfileError(false);
         })
         .catch(() => setProfileError(true)),
@@ -209,10 +213,18 @@ export default function CompanyHome() {
     setSaved(false);
     setSaveError(null);
     setFieldErrors({});
+    const hasPhone = phone.national.replace(/\D/g, "").length > 0;
+    const phoneProblem = hasPhone ? phoneError(phone) : null;
+    if (phoneProblem) {
+      setFieldErrors({ phone: phoneProblem });
+      setSaveError("Veuillez corriger les champs indiqués.");
+      return;
+    }
     setSaving(true);
     try {
-      const updated = await post<Company>("/companies/me/", c);
+      const updated = await post<Company>("/companies/me/", { ...c, phone: hasPhone ? toE164(phone) : "", phone_country: phone.country });
       setC(updated);
+      setPhone(fromE164(updated?.phone, phone.country));
       setSaved(true);
     } catch (err) {
       const { fields, message } = readSaveError(err);
@@ -307,14 +319,17 @@ export default function CompanyHome() {
                   error={fieldErrors.contact_person}
                   autoComplete="name"
                 />
-                <TextField
+                <PhoneField
                   label="Téléphone"
-                  type="tel"
-                  inputMode="tel"
-                  value={c.phone ?? ""}
-                  onChange={set("phone")}
+                  hint="Numéro de contact de l’entreprise, sans l’indicatif."
+                  optional
+                  autoCountry={!c.phone}
+                  value={phone}
+                  onChange={(v) => {
+                    setPhone(v);
+                    setFieldErrors((s) => (s.phone ? { ...s, phone: undefined } : s));
+                  }}
                   error={fieldErrors.phone}
-                  autoComplete="tel"
                 />
                 <TextField
                   label="Site web"

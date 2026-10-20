@@ -533,7 +533,7 @@ _PHONES = iter(range(7000000100, 7000009999))
 def _signup(api_client, **extra):
     # Contrat du compte unique : prénom, nom, téléphone, mot de passe et conditions obligatoires.
     payload = {"username": "nouveau", "email": "nouveau@example.test", "password": STRONG_PASSWORD,
-               "first_name": "Ama", "last_name": "Diallo", "phone": f"+225{next(_PHONES):010d}"[:14],
+               "first_name": "Ama", "last_name": "Diallo", "phone": f"+22507{next(_PHONES) % 10**8:08d}",   # mobile ivoirien valide
                "accept_terms": True}
     payload.update(extra)
     return api_client.post(reverse("users-list"), payload, format="json")

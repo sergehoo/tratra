@@ -4,6 +4,7 @@ from rest_framework.routers import DefaultRouter
 from handy.api import cash as cash_api
 from handy.api.catalog import public_catalog
 from handy.api.kyc_flow import me_kyc, me_kyc_capture, me_kyc_restart, me_kyc_send
+from handy.api.phone_api import phone_defaults
 from handy.api import messaging as msg_api
 from handy.api.account import me_account_deletion
 from handy.api.addresses import geo_reverse, geo_search, me_address_detail, me_address_set_primary, me_addresses
@@ -84,6 +85,7 @@ urlpatterns = [
     path('me/handyman-profile/', me_become_provider, name='me-handyman-profile'),
     path('me/services/', me_services, name='me-services'),
     path('me/kyc/', me_kyc, name='me-kyc'),
+    path('phone/defaults/', phone_defaults, name='phone-defaults'),
     path('me/kyc/capture/', me_kyc_capture, name='me-kyc-capture'),
     path('me/kyc/send/', me_kyc_send, name='me-kyc-send'),
     path('me/kyc/restart/', me_kyc_restart, name='me-kyc-restart'),

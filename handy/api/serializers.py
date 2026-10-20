@@ -25,7 +25,7 @@ from handy.api.errors import CodedAPIException, field_error
 from handy.api.staff_access import staff_may
 from handy.auth_lockout import countdown, remaining_lock_seconds
 from handy.media.sanitize import sanitize_image
-from handy.sms import SMSError, normalize_msisdn
+
 from handy.models import (
     User, HandymanProfile, ServiceCategory, ServiceImage, Service, Booking,
     Payment, PaymentLog, Review, Conversation, Message, Notification,
@@ -229,7 +229,7 @@ SIGNUP_UNAVAILABLE_DETAIL = (
     "Inscription impossible avec ces informations. "
     "Si vous avez déjà un compte, connectez-vous ou réinitialisez votre mot de passe."
 )
-PHONE_INVALID_DETAIL = "Numéro de téléphone invalide. Saisissez-le avec l'indicatif du pays, par exemple +225 07 00 00 00 00."
+PHONE_INVALID_DETAIL = "Numéro de téléphone invalide. Choisissez le pays puis saisissez le numéro national, par exemple 07 00 00 00 00 pour la Côte d’Ivoire."
 PASSWORD_CHANGE_ENDPOINT_DETAIL = (
     "Le mot de passe ne se modifie pas ici : utilisez la fonction dédiée."
 )
@@ -241,15 +241,22 @@ def signup_unavailable() -> CodedAPIException:
     return CodedAPIException("signup_unavailable", SIGNUP_UNAVAILABLE_DETAIL, status=400)
 
 
-def normalize_phone(raw) -> Optional[str]:
-    """Numéro au format E.164 (+225… par défaut) ; None si vide ; ValidationError si invalide."""
+def normalize_phone(raw, region=None, current=None) -> Optional[str]:
+    """Numéro VALIDE pour son pays (libphonenumber) au format E.164 ; None si vide ; ValidationError (message clair) sinon.
+    `region` : pays choisi dans l'application (numéro national) ; `current` : numéro déjà enregistré, conservé tel quel s'il est ressaisi
+    (un compte créé avant libphonenumber peut toujours enregistrer son profil)."""
+    from handy import phone
+
     value = (raw or "").strip()
     if not value:
         return None
+    if current and current in phone.lookup_candidates(value, region):
+        return current
     try:
-        return normalize_msisdn(value)
-    except SMSError:
-        raise serializers.ValidationError(PHONE_INVALID_DETAIL)
+        return phone.to_e164(value, region)
+    except phone.PhoneError as exc:
+        # Message avec l'exemple national du pays concerné (« … exemple : 07 00 00 00 00 ») ; à défaut, le message général.
+        raise serializers.ValidationError(PHONE_INVALID_DETAIL if str(exc) == phone.INVALID else str(exc))
 
 
 def generate_username() -> str:
@@ -281,6 +288,8 @@ class UserSerializer(serializers.ModelSerializer):
     """
     password = serializers.CharField(write_only=True, required=False)
     accept_terms = serializers.BooleanField(write_only=True, required=False)
+    # Pays choisi pour le numéro (ISO 3166, ex. « CI ») : le numéro peut alors être saisi au format national.
+    phone_country = serializers.CharField(write_only=True, required=False, allow_blank=True, max_length=2)
     profile_picture = PublicImageField(required=False, allow_null=True)
 
     class Meta:
@@ -290,7 +299,7 @@ class UserSerializer(serializers.ModelSerializer):
             "id", "username", "email", "first_name", "last_name", "user_type",
             "phone", "profile_picture", "address", "city", "postal_code", "country",
             "latitude", "longitude", "is_verified", "date_joined", "last_login", 'password',
-            "accept_terms",
+            "accept_terms", "phone_country",
         ]
         read_only_fields = ['id', "date_joined", "last_login", "is_verified"]
 
@@ -345,7 +354,8 @@ class UserSerializer(serializers.ModelSerializer):
 
     def validate_phone(self, value):
         # E.164 ; '' -> NULL (deux chaînes vides violeraient l'unicité du numéro : erreur 500).
-        return normalize_phone(value)
+        region = self.initial_data.get("phone_country") if isinstance(self.initial_data, Mapping) else None
+        return normalize_phone(value, region, current=getattr(self.instance, "phone", None))
 
     def validate_email(self, value):
         return (value or "").strip().lower() or None
@@ -390,6 +400,7 @@ class UserSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         password = validated_data.pop('password')
         validated_data.pop("accept_terms", None)
+        validated_data.pop("phone_country", None)
         validated_data["username"] = validated_data.get("username") or generate_username()
         validated_data["email"] = validated_data.get("email") or None
         validated_data.setdefault("user_type", "client")
@@ -413,6 +424,7 @@ class UserSerializer(serializers.ModelSerializer):
         validated_data.pop("password", None)
         validated_data.pop("user_type", None)
         validated_data.pop("accept_terms", None)
+        validated_data.pop("phone_country", None)
         if "email" in validated_data:
             validated_data["email"] = validated_data["email"] or None
         if "phone" in validated_data and validated_data["phone"] != instance.phone:
@@ -420,17 +432,16 @@ class UserSerializer(serializers.ModelSerializer):
         return super().update(instance, validated_data)
 
 
-def resolve_login_identifier(raw) -> str:
-    """Identifiant saisi -> nom d'utilisateur. Un numéro de téléphone (E.164, +225 par défaut) est
-    résolu vers son compte ; e-mail et identifiants historiques passent tels quels."""
+def resolve_login_identifier(raw, region=None) -> str:
+    """Identifiant saisi -> nom d'utilisateur. Un numéro de téléphone (international, ou national avec le pays `region`) est
+    résolu vers son compte, y compris sous sa forme enregistrée avant libphonenumber ; e-mail et identifiants historiques passent tels quels."""
     import re
+
+    from handy import phone
 
     value = (raw or "").strip()
     if value and re.fullmatch(r"\+?[\d\s().-]{8,22}", value):
-        try:
-            user = User.objects.filter(phone=normalize_msisdn(value)).only("username").first()
-        except SMSError:
-            user = None
+        user = User.objects.filter(phone__in=phone.lookup_candidates(value, region)).only("username").first()
         if user is not None:
             return user.get_username()
     return value
@@ -444,7 +455,7 @@ class EmailOrUsernameTokenObtainPairSerializer(TokenObtainPairSerializer):
         super().__init__(*args, **kwargs)
         self.fields[self.username_field].required = False
         self.fields[self.username_field].allow_blank = True
-        for name in ("phone", "email"):
+        for name in ("phone", "email", "phone_country"):
             self.fields[name] = serializers.CharField(required=False, allow_blank=True, write_only=True)
 
     def validate(self, attrs):
@@ -455,7 +466,7 @@ class EmailOrUsernameTokenObtainPairSerializer(TokenObtainPairSerializer):
         if not raw or not password:
             raise self.fail("no_active_account")
 
-        identifier = resolve_login_identifier(raw)
+        identifier = resolve_login_identifier(raw, attrs.get("phone_country"))
         locked = remaining_lock_seconds(request, identifier)
         if locked is not None:          # bloquée : réponse claire, SANS tenter l'authentification (aucun nouvel échec, le délai ne repart pas)
             raise CodedAPIException(
@@ -871,11 +882,25 @@ class PayoutSerializer(serializers.ModelSerializer):
 
 
 class CompanyProfileSerializer(serializers.ModelSerializer):
+    phone_country = serializers.CharField(write_only=True, required=False, allow_blank=True, max_length=2)
+
     class Meta:
         model = CompanyProfile
         fields = ["id", "user", "company_name", "registration_number", "industry",
-                  "address", "city", "contact_person", "phone", "website", "verified", "created_at"]
+                  "address", "city", "contact_person", "phone", "website", "verified", "created_at", "phone_country"]
         read_only_fields = ["user", "verified", "created_at"]  # user serveur ; verified par admin
+
+    def validate_phone(self, value):
+        region = self.initial_data.get("phone_country") if isinstance(self.initial_data, Mapping) else None
+        return normalize_phone(value, region, current=getattr(self.instance, "phone", None))
+
+    def create(self, validated_data):
+        validated_data.pop("phone_country", None)
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        validated_data.pop("phone_country", None)
+        return super().update(instance, validated_data)
 
 
 class PayoutAccountSerializer(serializers.ModelSerializer):

@@ -90,19 +90,20 @@ def mask(msisdn: str) -> str:
     return f"{msisdn[:4]}••••{msisdn[-2:]}" if len(msisdn) > 7 else "••••"
 
 
-def normalize_msisdn(raw: Optional[str]) -> str:
+def normalize_msisdn(raw: Optional[str], region: Optional[str] = None) -> str:
     """Numéro au format E.164 (+225…) ; lève SMSError si invalide.
 
-    Un numéro national (sans indicatif) reçoit `SMS_DEFAULT_COUNTRY_CODE` (225 par défaut)."""
-    value = re.sub(r"[\s.\-()]", "", raw or "")
-    if value.startswith("00"):
-        value = "+" + value[2:]
-    if not value.startswith("+"):
-        # 10 chiffres = numéro national (plan ivoirien : le 0 initial fait partie du numéro).
-        value = "+" + (_setting("SMS_DEFAULT_COUNTRY_CODE", "225") if len(value) == 10 else "") + value
-    if not re.fullmatch(r"\+[1-9]\d{7,14}", value):
-        raise SMSError("Numéro de téléphone invalide.")
-    return value
+    libphonenumber d'abord (numéro national interprété dans `region`, Côte d'Ivoire par défaut) ; en repli, l'ancienne règle (10 chiffres
+    → +225, sinon indicatif supposé présent) : tout numéro accepté auparavant l'est encore, avec la même forme E.164."""
+    from handy import phone
+
+    try:
+        return phone.to_e164(raw, region, strict=False)
+    except phone.PhoneError:
+        legacy = phone.legacy_e164(raw)
+        if legacy is None:
+            raise SMSError("Numéro de téléphone invalide.")
+        return legacy
 
 
 class ConsoleBackend:

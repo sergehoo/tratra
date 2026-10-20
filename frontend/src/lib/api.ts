@@ -302,8 +302,10 @@ export const me = () => get<User>("/users/me/");
 export async function register(payload: {
   first_name: string;
   last_name: string;
-  /** E.164 (voir lib/phone.ts). */
+  /** E.164 (voir lib/phone.ts) ; le serveur revalide avec libphonenumber. */
   phone: string;
+  /** Pays choisi pour le numéro (ISO 3166, ex. « CI »). */
+  phone_country?: string;
   password: string;
   accept_terms: boolean;
 }): Promise<User> {
