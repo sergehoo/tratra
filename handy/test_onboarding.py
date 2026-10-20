@@ -60,6 +60,8 @@ def test_public_config_adapts_questions_to_the_trade_and_hides_internal_fields(n
     assert "price_general" not in keys                              # la question de métier remplace la question commune
     assert [p["name"] for p in d["prestations"]] == ["Garde de nuit", "Sortie d'école"]
     assert "Cocody" in d["communes"]
+    journey = [s["key"] for s in api(member("j")).get("/handy/me/onboarding/").json()["steps"]]
+    assert [s["key"] for s in d["journey"]] == journey                       # même progression pour l'application, le site et Django
     price = next(q for q in d["questions"] if q["key"] == "nanny_price")
     assert set(price["options"][0]) == {"value", "label", "emoji", "amount", "unit"}   # de quoi rédiger l'aperçu hors ligne, rien d'autre
     OnboardingQuestion.objects.filter(key="nanny_price").update(
@@ -104,7 +106,7 @@ def test_offer_is_written_from_the_answers_without_ai(nanny):
     assert offer["title"] == "Garde de nuit à Cocody"
     assert offer["description"] == (
         "Je propose mes services de nousnou à Cocody (Riviera 2). Ce que je fais : soins des bébés et accompagnement à l’école. "
-        "Sans hébergement. Disponible du lundi au vendredi le matin et l’après-midi. 4 ans d’expérience environ. "
+        "Sans hébergement. Disponible du lundi au vendredi le matin et l’après-midi. Expérience : 3 à 5 ans. "
         "Tarif souhaité : 60 000 FCFA par mois (à discuter).")
     assert offer["price_type"] == "quote" and offer["price"] is None                   # salaire mensuel : à discuter, jamais un faux forfait
 
@@ -126,7 +128,7 @@ def test_apply_fills_the_existing_profile_and_creates_one_offer_idempotently(nan
     fill(c, nanny)
     d = c.post("/handy/me/onboarding/apply/").json()
     p = HandymanProfile.objects.get(user=u)
-    assert (p.experience_years, p.commune, p.quartier) == (4, "Cocody", "Riviera 2")
+    assert (p.experience_years, p.experience_label, p.commune, p.quartier) == (3, "3 à 5 ans", "Cocody", "Riviera 2")   # borne basse
     assert p.availability == {d: ["morning", "afternoon"] for d in ["monday", "tuesday", "wednesday", "thursday", "friday"]}
     assert p.monthly_rate == 60000 and p.bio.startswith("Nousnou à Cocody (Riviera 2).")
     assert set(p.skills.values_list("slug", flat=True)) == {"nousnou", "garde-de-nuit"}
@@ -211,6 +213,103 @@ def test_journey_steps_and_next_action_for_a_beginner(nanny):
     assert d["next_action"] == {"code": "resume", "label": "Choisir mon métier", "step": "trade"}
     fill(api(u), nanny)
     assert api(u).get("/handy/me/onboarding/").json()["next_action"]["code"] == "verify_phone"     # téléphone pas encore confirmé
+
+
+# ═══ Expérience : déclaration exacte, minimum par métier ═══════════════════════════════════════════════════════════════
+
+def _eligible_except_experience(u):
+    """Tout le reste du dossier est en règle : photo, pièce d'identité validée, validation de l'équipe."""
+    staff = User.objects.get_or_create(username="staff", defaults={"email": "staff@x.test", "is_staff": True})[0]
+    profile = HandymanProfile.objects.get(user=u)
+    profile.photo = "profile_pics/x.jpg"
+    profile.save()
+    HandymanDocument.objects.create(handyman=profile, document_type="id_card", file="kyc/x.jpg", status="approved", reviewed_by=staff)
+    approve_profile(profile, by=staff)
+    return HandymanProfile.objects.get(pk=profile.pk)
+
+
+def test_less_than_a_year_is_kept_exactly_and_never_rounded_up(nanny):
+    from handy.eligibility import profile_checklist, publishable
+
+    u = member(is_verified=True)
+    c = api(u)
+    d = fill(c, nanny, answers={**ANSWERS, "experience": "1"})
+    assert "Expérience : moins d’un an." in d["offer"]["description"]
+    assert d["experience"] == {"declared": "Moins d’un an", "years": 0, "minimum": 0, "trade": "", "ok": True}
+    c.post("/handy/me/onboarding/apply/")
+    p = HandymanProfile.objects.get(user=u)
+    assert (p.experience_years, p.experience_label) == (0, "Moins d’un an")       # déclaration exacte, aucun « 1 an » inventé
+    assert "Expérience : moins d’un an." in p.bio
+    assert {i["key"]: i["done"] for i in profile_checklist(p)}["experience"] is True  # déclarée = renseignée
+    p = _eligible_except_experience(u)
+    assert is_publishable(p) and publishable().filter(pk=p.pk).exists()          # métier sans minimum : débutants acceptés
+    assert c.get("/handy/me/onboarding/").json()["published"] is True
+
+
+def test_trade_minimum_is_configurable_and_blocks_publication_without_touching_the_declaration(nanny):
+    from handy.eligibility import eligibility_summary, publishable
+
+    nanny.min_experience_years = 2
+    nanny.save()
+    assert api().get(f"/handy/onboarding/config/?trade={nanny.pk}").json()["trade"]["min_experience_years"] == 2
+    u = member(is_verified=True)
+    c = api(u)
+    d = fill(c, nanny, answers={**ANSWERS, "experience": "1"})
+    assert d["experience"]["ok"] is False and d["experience"]["minimum"] == 2      # annoncé avant même la création du profil
+    c.post("/handy/me/onboarding/apply/")
+    p = _eligible_except_experience(u)
+    assert not is_publishable(p) and not publishable().filter(pk=p.pk).exists()     # SQL et Python concordent
+    assert not api().get("/handy/services/").json().get("results")
+    blocker = next(b for b in eligibility_summary(p)["publication"]["blockers"] if b["code"] == "experience_minimum")
+    assert blocker["label"] == "Expérience minimale non atteinte : Nousnou demande 2 ans"
+    assert "« Moins d’un an »" in blocker["hint"]
+    state = c.get("/handy/me/onboarding/").json()
+    assert state["next_action"]["code"] == "blocked" and state["published"] is False
+    assert state["steps"][-1]["state"] == "todo"                                   # bloqué par la règle, pas « en attente de l'équipe »
+    p.refresh_from_db()
+    assert (p.experience_years, p.experience_label) == (0, "Moins d’un an")        # jamais modifiée pour passer le seuil
+    nanny.min_experience_years = 0
+    nanny.save()
+    garde = ServiceCategory.objects.get(slug="garde-de-nuit")                     # le minimum d'une prestation compte aussi
+    garde.min_experience_years = 1
+    garde.save()
+    assert not is_publishable(p) and not publishable().filter(pk=p.pk).exists()
+    garde.min_experience_years = 0
+    garde.save()
+    assert is_publishable(p) and publishable().filter(pk=p.pk).exists()
+
+
+def test_classic_form_keeps_the_declaration_unless_the_years_change(nanny):
+    u = member(is_verified=True)
+    c = api(u)
+    fill(c, nanny, answers={**ANSWERS, "experience": "1"})
+    c.post("/handy/me/onboarding/apply/")
+    p = HandymanProfile.objects.get(user=u)
+    r = c.patch(f"/handy/handymen/{p.pk}/", {"bio": "Nounou attentionnée.", "experience_years": 0}, format="json")
+    assert r.status_code == 200 and r.json()["experience_label"] == "Moins d’un an"   # formulaire réenregistré tel quel : gardée
+    r = c.patch(f"/handy/handymen/{p.pk}/", {"experience_years": 2}, format="json")
+    assert (r.json()["experience_years"], r.json()["experience_label"]) == (2, "")      # nouvelle déclaration de l'artisan
+    assert c.patch(f"/handy/handymen/{p.pk}/", {"experience_label": "10 ans"}, format="json").json()["experience_label"] == ""  # lecture seule
+
+
+def test_migration_restores_exact_declarations_made_with_the_old_rule(nanny):
+    from importlib import import_module
+
+    from django.apps import apps as django_apps
+
+    q = OnboardingQuestion.objects.get(key="experience")
+    q.options = [{**o, "years": {"1": 1, "2": 2, "4": 4, "8": 8, "12": 12}[o["value"]]} for o in q.options]   # anciennes années
+    q.save()
+    old, edited = member(is_verified=True), member("bob", is_verified=True)
+    for user, years in ((old, 1), (edited, 7)):
+        fill(api(user), nanny, answers={**ANSWERS, "experience": "1"})
+        HandymanProfile.objects.create(user=user, experience_years=years)
+        ProOnboarding.objects.filter(user=user).update(applied_at="2026-10-20T10:00:00Z")
+    import_module("handy.migrations.0056_experience_exact_declaration").exact(django_apps, None)
+    assert [o["years"] for o in OnboardingQuestion.objects.get(key="experience").options] == [0, 1, 3, 6, 10]
+    p = HandymanProfile.objects.get(user=old)
+    assert (p.experience_years, p.experience_label) == (0, "Moins d’un an")
+    assert HandymanProfile.objects.get(user=edited).experience_years == 7              # valeur saisie par l'artisan : intacte
 
 
 # ═══ KYC simplifié : préremplissage par la lecture de la pièce ════════════════════════════════════════════════════════

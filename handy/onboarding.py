@@ -15,6 +15,7 @@ from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 
+from handy.eligibility import experience_declared
 from handy.models import HandymanProfile, OnboardingQuestion, ProOnboarding, Service, ServiceCategory
 
 # Communes proposées en boutons (Abidjan) ; « Autre » permet de saisir une autre ville.
@@ -101,10 +102,11 @@ def config(trade_id) -> Dict:
     root = _root(trade)
     prestations = ServiceCategory.objects.filter(parent=root, is_active=True).order_by("position", "name")
     return {
-        "trade": {"id": root.pk, "name": root.name},
-        "prestations": [{"id": c.pk, "name": c.name} for c in prestations],
+        "trade": {"id": root.pk, "name": root.name, "min_experience_years": root.min_experience_years},
+        "prestations": [{"id": c.pk, "name": c.name, "min_experience_years": c.min_experience_years} for c in prestations],
         "questions": [question_payload(q) for q in questions_for(root)],
         "communes": COMMUNES,
+        "journey": [{"key": k, "label": label} for k, label in JOURNEY],
     }
 
 
@@ -207,7 +209,7 @@ def profile_values(ob: ProOnboarding) -> Dict:
     v = {"experience": None, "days": [], "slots": [], "strengths": [], "infos": [], "price": None}
     for q, chosen in _options(ob):
         if q.target == "experience":
-            v["experience"] = int(chosen[0].get("years") or chosen[0].get("value") or 0)
+            v["experience"] = declared_experience(chosen[0])
         elif q.target == "days":
             v["days"] = [str(o["value"]) for o in chosen if str(o["value"]) in DAY_LABELS]
         elif q.target == "slots":
@@ -219,6 +221,19 @@ def profile_values(ob: ProOnboarding) -> Dict:
         elif q.target == "price":
             v["price"] = chosen[0]
     return v
+
+
+def declared_experience(option: Dict) -> Dict:
+    """Déclaration EXACTE : libellé choisi (« Moins d’un an ») et années = borne basse de la tranche (jamais arrondies vers le haut)."""
+    years = option.get("years")
+    if years is None:
+        value = str(option.get("value") or "")
+        years = int(value) if value.isdigit() else 0
+    return {"years": max(0, int(years)), "label": str(option.get("label") or "").strip()[:60]}
+
+
+def _experience_sentence(experience: Optional[Dict]) -> str:
+    return f"Expérience : {experience['label'][:1].lower()}{experience['label'][1:]}." if experience and experience["label"] else ""
 
 
 def _place(ob) -> str:
@@ -242,8 +257,8 @@ def offer_draft(ob: ProOnboarding) -> Dict:
     if v["days"] or v["slots"]:
         when = " ".join(x for x in [_days(v["days"]) if v["days"] else "", _join([SLOT_LABELS[s] for s in v["slots"]])] if x)
         lines.append(f"Disponible {when}.")
-    if v["experience"]:
-        lines.append("Je débute dans ce métier." if v["experience"] <= 1 else f"{v['experience']} ans d’expérience environ.")
+    if _experience_sentence(v["experience"]):
+        lines.append(_experience_sentence(v["experience"]))
     price = v["price"] or {}
     unit, amount = price.get("unit"), price.get("amount")
     if unit in ("day", "month") and amount:
@@ -263,8 +278,8 @@ def bio_draft(ob: ProOnboarding, first_name: str = "") -> str:
     v = profile_values(ob)
     trade = ob.trade.name.lower() if ob.trade_id else "services"
     parts = [f"{trade.capitalize()} à {_place(ob)}." if ob.commune else f"{trade.capitalize()}."]
-    if v["experience"]:
-        parts.append("Je débute avec sérieux." if v["experience"] <= 1 else f"{v['experience']} ans d’expérience environ.")
+    if _experience_sentence(v["experience"]):
+        parts.append(_experience_sentence(v["experience"]))
     if v["strengths"]:
         parts.append(f"Je sais faire : {_join(v['strengths'])}.")
     return " ".join(parts)
@@ -285,8 +300,9 @@ def apply(user) -> Dict:
     profile, _ = HandymanProfile.objects.get_or_create(user=user)
     v = profile_values(ob)
     fields = []
-    if not (profile.experience_years or 0) and v["experience"]:
-        profile.experience_years, fields = v["experience"], fields + ["experience_years"]
+    if not experience_declared(profile) and v["experience"] is not None:   # la déclaration exacte, jamais une valeur arrondie
+        profile.experience_years, profile.experience_label = v["experience"]["years"], v["experience"]["label"]
+        fields += ["experience_years", "experience_label"]
     if not (profile.commune or "").strip():
         profile.commune, fields = ob.commune, fields + ["commune"]
     if not (profile.quartier or "").strip() and ob.quartier:
@@ -323,7 +339,7 @@ def apply(user) -> Dict:
 # ═══ Progression : étapes faites, prochaine action, un seul bouton « Continuer » ═══════════════════════════════════════
 
 def state(user) -> Dict:
-    from handy.eligibility import eligibility_summary
+    from handy.eligibility import eligibility_summary, experience_minimum
 
     ob = onboarding_for(user)
     done = _complete(ob)
@@ -337,7 +353,18 @@ def state(user) -> Dict:
         "photo": has_photo, "identity": kyc == "approved",
         "approval": bool(e and e["publication"]["authorized"]),
     }
-    waiting = {"identity": kyc == "pending", "approval": kyc == "approved" and not status["approval"]}
+    # Expérience déclarée sous le minimum d'un métier exercé : la publication est bloquée par la règle, pas en attente de l'équipe.
+    if profile is not None:
+        minimum = experience_minimum(profile)
+    else:                                                                    # avant le profil : le métier choisi (et ses prestations)
+        cats = list(ServiceCategory.objects.filter(pk__in=[ob.trade_id, *ob.prestations], min_experience_years__gt=0)) if ob.trade_id else []
+        top = max(cats, key=lambda c: c.min_experience_years, default=None)
+        minimum = {"years": top.min_experience_years, "trade": top.name} if top else {"years": 0, "trade": ""}
+    v = profile_values(ob) if ob.trade_id else {"experience": None}
+    declared = ({"years": profile.experience_years, "label": profile.experience_label} if profile and experience_declared(profile)
+                else v["experience"])
+    experience_ok = declared is None or declared["years"] >= minimum["years"]
+    waiting = {"identity": kyc == "pending", "approval": kyc == "approved" and not status["approval"] and experience_ok}
     steps = [{"key": k, "label": label, "state": "done" if status[k] else ("waiting" if waiting.get(k) else "todo")} for k, label in JOURNEY]
     actions = {
         "trade": ("resume", "Choisir mon métier"), "zone": ("resume", "Choisir mon quartier"),
@@ -350,6 +377,10 @@ def state(user) -> Dict:
     if nxt is not None:
         code, label = actions[nxt["key"]]
         next_action = {"code": code, "label": label, "step": nxt["key"]}
+    elif not experience_ok:
+        n = minimum["years"]
+        next_action = {"code": "blocked", "step": "approval",
+                       "label": f"{minimum['trade']} demande au moins {n} an{'s' if n > 1 else ''} d’expérience pour publier"}
     elif not status["approval"]:
         pending = next((s for s in steps if s["state"] != "done"), None)
         next_action = {"code": "wait", "label": "Nous vérifions votre dossier", "step": pending["key"] if pending else "approval"}
@@ -366,4 +397,6 @@ def state(user) -> Dict:
         "total": len(steps),
         "next_action": next_action,
         "published": status["approval"],
+        "experience": {"declared": declared["label"] if declared else "", "years": declared["years"] if declared else None,
+                       "minimum": minimum["years"], "trade": minimum["trade"], "ok": experience_ok},
     }

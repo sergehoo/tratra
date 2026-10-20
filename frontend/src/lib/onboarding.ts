@@ -26,10 +26,11 @@ export interface OnbQuestion {
 }
 
 export interface OnbConfig {
-  trade: { id: number; name: string };
-  prestations: { id: number; name: string }[];
+  trade: { id: number; name: string; min_experience_years?: number };
+  prestations: { id: number; name: string; min_experience_years?: number }[];
   questions: OnbQuestion[];
   communes: string[];
+  journey?: { key: string; label: string }[];
 }
 
 export type OnbAnswers = Record<string, string | string[]>;
@@ -65,6 +66,89 @@ export interface OnbState {
   total: number;
   next_action: { code: string; label: string; step: string | null };
   published: boolean;
+  /** Expérience déclarée (exacte) face au minimum des métiers exercés ; `ok: false` = publication bloquée par la règle. */
+  experience?: { declared: string; years: number | null; minimum: number; trade: string; ok: boolean };
+}
+
+/** Les 9 étapes communes à l'application, au site et à Django (handy/onboarding.py JOURNEY) : même progression partout. */
+export const JOURNEY: { key: string; label: string }[] = [
+  { key: "trade", label: "Votre métier" },
+  { key: "zone", label: "Votre quartier" },
+  { key: "questions", label: "Vos réponses" },
+  { key: "account", label: "Votre compte" },
+  { key: "phone", label: "Votre téléphone" },
+  { key: "offer", label: "Votre annonce" },
+  { key: "photo", label: "Votre photo" },
+  { key: "identity", label: "Votre identité" },
+  { key: "approval", label: "Validation par l’équipe Tratra" },
+];
+
+/** Étape commune d'un écran du parcours (même table que l'application : lib/onboarding/onboarding_api.dart `journeyOf`). */
+export function journeyOf(screen: string): string {
+  if (screen.startsWith("q:")) return "questions";
+  const table: Record<string, string> = {
+    intro: "trade", trade: "trade", prestations: "trade", commune: "zone", quartier: "zone", preview: "questions",
+    names: "account", phone: "account", password: "account", verify: "phone", photo: "photo", identity: "identity",
+  };
+  return table[screen] ?? "approval";
+}
+
+/** Libellé et avancement affichés : « Étape 3 sur 9 · Vos réponses (2/5) » et une barre continue. */
+export function progressOf(screens: string[], screen: string): { title: string; ratio: number } {
+  const key = journeyOf(screen);
+  const i = Math.max(0, JOURNEY.findIndex((j) => j.key === key));
+  const group = screens.filter((s) => journeyOf(s) === key);
+  const within = group.length ? Math.max(1, group.indexOf(screen) + 1) / group.length : 1;
+  const questions = screens.filter((s) => s.startsWith("q:"));
+  const count = screen.startsWith("q:") ? ` (${questions.indexOf(screen) + 1}/${questions.length})` : "";
+  return { title: `Étape ${i + 1} sur ${JOURNEY.length} · ${JOURNEY[i].label}${count}`, ratio: Math.min(1, (i + within) / JOURNEY.length) };
+}
+
+/** Minimum d'expérience du métier et des prestations choisies (même règle que handy/eligibility.py) : années et nom concerné. */
+export function minimumFor(config: OnbConfig | null, prestations: number[]): { years: number; name: string } {
+  let best = { years: config?.trade.min_experience_years ?? 0, name: config?.trade.min_experience_years ? config.trade.name : "" };
+  for (const p of config?.prestations ?? []) {
+    if (prestations.includes(p.id) && (p.min_experience_years ?? 0) > best.years) best = { years: p.min_experience_years ?? 0, name: p.name };
+  }
+  return best;
+}
+
+/** Expérience déclarée : libellé EXACT choisi et années = borne basse de la tranche (jamais arrondies vers le haut). */
+export function declaredExperience(config: OnbConfig | null, answers: OnbAnswers): { years: number; label: string } | null {
+  for (const q of config?.questions ?? []) {
+    if (q.target !== "experience") continue;
+    const o = q.options.find((x) => answers[q.key] === x.value);
+    if (o) return { years: o.years ?? (/^\d+$/.test(o.value) ? Number(o.value) : 0), label: o.label };
+  }
+  return null;
+}
+
+// ------------------------------------------------------------------ brouillon gardé sur l'appareil (réseau coupé, session expirée)
+
+/** Coffre local cloisonné par compte (src/lib/localVault.ts : effacé à la déconnexion volontaire, gardé si la session expire). */
+export interface Vault {
+  read: <T>(userId: number | string, name: string) => T | null;
+  write: (userId: number | string, name: string, value: unknown) => void;
+  del: (userId: number | string, name: string) => void;
+}
+
+export const PENDING_NAME = "onboarding";
+export const PENDING_MAX_AGE_MS = 30 * 24 * 3600 * 1000;
+
+/** Réponses non envoyées : rattachées au compte qui les a données, jamais lues par un autre. */
+export function keepPending(vault: Vault, userId: number | string, draft: OnbDraft, now = Date.now()): void {
+  vault.write(userId, PENDING_NAME, { draft, savedAt: now });
+}
+
+/** Réponses gardées pour CE compte (plus récentes que le serveur : elles n'existent que si un envoi a échoué). Périmées → effacées. */
+export function takePending(vault: Vault, userId: number | string, now = Date.now()): OnbDraft | null {
+  const kept = vault.read<{ draft: OnbDraft; savedAt: number }>(userId, PENDING_NAME);
+  if (!kept?.draft || typeof kept.savedAt !== "number") return null;
+  if (now - kept.savedAt > PENDING_MAX_AGE_MS || !kept.draft.trade) {
+    vault.del(userId, PENDING_NAME);
+    return null;
+  }
+  return kept.draft;
 }
 
 export const emptyDraft = (): OnbDraft => ({ trade: null, prestations: [], commune: "", quartier: "", answers: {}, step: "" });
@@ -142,9 +226,10 @@ export function nextActionHref(action: OnbState["next_action"]): string {
     case "verify_phone":
       return `/verify-phone?next=${encodeURIComponent(`${GUIDED_PATH}?step=photo`)}`;
     case "verify_identity":
-      return "/dashboard/profile/kyc";
+      return `${GUIDED_PATH}?step=identity`;          // même vérification guidée que l'application (pièce, photos, lecture, revue)
     case "wait":
     case "done":
+    case "blocked":
       return "/dashboard/provider";
     default:
       return action.step ? `${GUIDED_PATH}?step=${encodeURIComponent(action.step)}` : GUIDED_PATH;

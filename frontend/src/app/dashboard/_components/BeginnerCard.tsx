@@ -1,6 +1,6 @@
 "use client";
 import { CheckCircle2, Circle, Hourglass } from "lucide-react";
-import { ButtonLink, Card, cx } from "@/components/ds";
+import { Alert, ButtonLink, Card, cx } from "@/components/ds";
 import { nextActionHref, type OnbState } from "@/lib/onboarding";
 import { useData } from "@/lib/useData";
 
@@ -11,7 +11,13 @@ import { useData } from "@/lib/useData";
 export function BeginnerCard() {
   const { data } = useData<OnbState>("/me/onboarding/");
   if (!data || !data.trade || data.published) return null;
-  const waiting = data.next_action.code === "wait";
+  const blocked = data.next_action.code === "blocked";
+  const waiting = data.next_action.code === "wait" || blocked;
+  const exp = data.experience;
+  // Expérience déclarée sous le minimum d'un métier exercé : dit dès que c'est vrai (pas seulement à la fin), déclaration jamais modifiée.
+  const below = exp && !exp.ok
+    ? `${exp.trade} demande au moins ${exp.minimum} an${exp.minimum > 1 ? "s" : ""} d’expérience pour publier. Votre déclaration${exp.declared ? ` (« ${exp.declared} »)` : ""} est gardée telle quelle.`
+    : "";
   return (
     <Card aria-labelledby="beginner-title">
       <div className="flex items-baseline gap-3">
@@ -40,9 +46,12 @@ export function BeginnerCard() {
           </li>
         ))}
       </ul>
-      <p className="mt-4 text-sm font-semibold text-ink">
-        {waiting ? "L’équipe Tratra vérifie votre dossier. Vous serez prévenu(e) par notification." : `Prochaine étape : ${data.next_action.label}`}
-      </p>
+      {below ? <Alert tone="warning" className="mt-4">{below}</Alert> : null}
+      {blocked ? null : (
+        <p className="mt-4 text-sm font-semibold text-ink">
+          {waiting ? "L’équipe Tratra vérifie votre dossier. Vous serez prévenu(e) par notification." : `Prochaine étape : ${data.next_action.label}`}
+        </p>
+      )}
       <ButtonLink href={nextActionHref(data.next_action)} size="lg" block className="mt-4 sm:w-auto">
         {waiting ? "Voir mon dossier" : "Continuer"}
       </ButtonLink>

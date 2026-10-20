@@ -5,7 +5,11 @@ et n'est éligible aux missions (réservation, matching) que si TOUT ceci est vr
 
 1. compte actif ;
 2. profil complet — ce que l'artisan peut réellement renseigner : présentation, au moins une
-   spécialité, expérience, zone d'intervention (commune), photo ;
+   spécialité, expérience DÉCLARÉE (un nombre d'années, ou une tranche telle que « Moins d’un an »
+   choisie dans l'inscription accompagnée), zone d'intervention (commune), photo ;
+2 bis. expérience minimale des métiers exercés (spécialités et offres actives) : réglée par métier
+   dans l'administration (`ServiceCategory.min_experience_years`, 0 = débutants acceptés). La
+   déclaration de l'artisan n'est jamais modifiée pour passer ce seuil ;
 3. KYC approuvé : chaque pièce de `HandymanProfile.REQUIRED_KYC_DOCS` (pièce d'identité) a un
    document au statut « approved » ;
 4. profil approuvé par l'équipe Tratra (`HandymanProfile.is_approved`, décision humaine).
@@ -19,13 +23,13 @@ que ce module.
 """
 from django.db.models import Exists, OuterRef, Q
 
-from handy.models import HandymanDocument, HandymanProfile, TimeOff
+from handy.models import HandymanDocument, HandymanProfile, Service, ServiceCategory, TimeOff
 
 # (clé, libellé, aide) — l’ordre est celui de la liste de contrôle affichée à l’utilisateur.
 CHECKLIST = [
     ("bio", "Présentation", "Décrivez votre activité et votre expérience en quelques lignes."),
     ("skills", "Spécialités", "Choisissez au moins un métier que vous exercez."),
-    ("experience", "Expérience", "Indiquez vos années d’expérience."),
+    ("experience", "Expérience", "Indiquez votre expérience (débutant accepté)."),
     ("zone", "Zone d’intervention", "Renseignez votre commune."),
     ("photo", "Photo de profil", "Ajoutez une photo : les clients choisissent des visages."),
     ("kyc", "Pièce d’identité vérifiée", "Déposez votre pièce d’identité ; l’équipe Tratra la vérifie."),
@@ -38,9 +42,20 @@ def _filled(field: str) -> Q:
     return Q(**{f"{field}__isnull": False}) & ~Q(**{field: ""})
 
 
+def experience_declared(profile) -> bool:
+    """Expérience renseignée : un nombre d'années (> 0) ou une tranche déclarée (« Moins d’un an »)."""
+    return (profile.experience_years or 0) > 0 or bool((profile.experience_label or "").strip())
+
+
+def _above(prefix: str, years) -> Q:
+    """Le métier (catégorie, son parent ou son grand-parent) exige plus d'expérience que `years`."""
+    return (Q(**{f"{prefix}min_experience_years__gt": years}) | Q(**{f"{prefix}parent__min_experience_years__gt": years})
+            | Q(**{f"{prefix}parent__parent__min_experience_years__gt": years}))
+
+
 def _profile_conditions() -> tuple:
     """(Q, *Exists) à passer à `.filter(...)` sur un queryset de HandymanProfile."""
-    q = Q(is_approved=True, user__is_active=True, experience_years__gt=0)
+    q = Q(is_approved=True, user__is_active=True) & (Q(experience_years__gt=0) | ~Q(experience_label=""))
     for field in ("bio", "commune", "photo"):
         q &= _filled(field)
 
@@ -50,7 +65,28 @@ def _profile_conditions() -> tuple:
             handyman_id=OuterRef("pk"), document_type=doc_type, status="approved"))
         for doc_type in sorted(HandymanProfile.REQUIRED_KYC_DOCS)
     ]
-    return (q, Exists(has_skill), *kyc)
+    years = OuterRef("experience_years")
+    skill_above = HandymanProfile.skills.through.objects.filter(handymanprofile_id=OuterRef("pk")).filter(_above("servicecategory__", years))
+    offer_above = Service.objects.filter(handyman_id=OuterRef("user_id"), is_active=True).filter(_above("category__", years))
+    return (q, Exists(has_skill), *kyc, ~Exists(skill_above), ~Exists(offer_above))
+
+
+def experience_minimum(profile) -> dict:
+    """Expérience exigée par les métiers exercés (spécialités + offres actives) : {"years": n, "trade": nom du métier le plus exigeant}."""
+    ids = set(profile.skills.values_list("pk", flat=True))
+    ids |= set(Service.objects.filter(handyman_id=profile.user_id, is_active=True).values_list("category_id", flat=True))
+    best = {"years": 0, "trade": ""}
+    for category in ServiceCategory.objects.filter(pk__in=ids).select_related("parent__parent"):
+        node, depth = category, 0
+        while node is not None and depth < 3:
+            if node.min_experience_years > best["years"]:
+                best = {"years": node.min_experience_years, "trade": node.name}
+            node, depth = node.parent, depth + 1
+    return best
+
+
+def meets_experience_minimum(profile) -> bool:
+    return (profile.experience_years or 0) >= experience_minimum(profile)["years"]
 
 
 def profile_checklist(profile) -> list:
@@ -58,7 +94,7 @@ def profile_checklist(profile) -> list:
     done = {
         "bio": bool((profile.bio or "").strip()),
         "skills": profile.skills.exists(),
-        "experience": (profile.experience_years or 0) > 0,
+        "experience": experience_declared(profile),
         "zone": bool((profile.commune or "").strip()),
         "photo": bool(profile.photo),
         "kyc": profile.has_required_kyc(),
@@ -87,7 +123,6 @@ def eligibility_summary(profile) -> dict:
 
     `publication.authorized` est TOUJOURS égal à `is_publishable(profile)` (vérifié par les tests)."""
     from handy.kyc_flow import kyc_status
-    from handy.models import Service
 
     checklist = profile_checklist(profile)
     items = [i for i in checklist if i["key"] in PROFILE_KEYS]
@@ -109,6 +144,15 @@ def eligibility_summary(profile) -> dict:
         label, hint = kyc_blockers[kyc["status"]]
         blockers.append({"code": f"kyc_{kyc['status']}", "label": label, "hint": hint,
                          "action": None if kyc["status"] == "pending" else _action("verify_identity")})
+    minimum = experience_minimum(profile)
+    if (profile.experience_years or 0) < minimum["years"]:
+        n = minimum["years"]
+        declared = (profile.experience_label or "").strip() or f"{profile.experience_years or 0} an{'s' if (profile.experience_years or 0) > 1 else ''}"
+        blockers.append({"code": "experience_minimum",
+                         "label": f"Expérience minimale non atteinte : {minimum['trade']} demande {n} an{'s' if n > 1 else ''}",
+                         "hint": f"Votre déclaration (« {declared} ») est conservée telle quelle. Ce métier pourra être publié quand votre "
+                                 "expérience atteindra le minimum ; vous pouvez aussi le retirer de vos spécialités et de vos offres.",
+                         "action": _action("edit_profile")})
     if not profile.is_approved and kyc["status"] == "approved":
         blockers.append({"code": "approval_pending", "label": "Validation finale de l’équipe Tratra en attente",
                          "hint": "Dernière étape, faite par l’équipe après la vérification de votre identité. Aucune action n’est nécessaire.",
@@ -159,7 +203,7 @@ def is_publishable(profile) -> bool:
     """Même règle que `publishable()`, pour un objet déjà chargé."""
     if profile is None or not profile.is_approved or not profile.user.is_active:
         return False
-    return all(item["done"] for item in profile_checklist(profile))
+    return all(item["done"] for item in profile_checklist(profile)) and meets_experience_minimum(profile)
 
 
 def is_user_publishable(user) -> bool:

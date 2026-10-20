@@ -85,6 +85,9 @@ class HandymanProfile(models.Model):
     bio = models.TextField(blank=True, null=True)
     skills = models.ManyToManyField('ServiceCategory', related_name='handymen', blank=True)  # <- remove null=True
     experience_years = models.PositiveIntegerField(default=0)
+    # Déclaration EXACTE choisie dans l'inscription accompagnée (« Moins d’un an », « 3 à 5 ans ») ; `experience_years` en garde la
+    # borne basse (jamais plus que ce qui a été déclaré). Vide = expérience saisie en nombre (formulaire classique).
+    experience_label = models.CharField(max_length=60, blank=True, default="")
     license_number = models.CharField(max_length=100, blank=True, null=True)
     cni_number = models.CharField(max_length=100, blank=True, null=True)
     insurance_info = models.TextField(blank=True, null=True)
@@ -160,7 +163,7 @@ class HandymanProfile(models.Model):
         fields = [
             bool(self.bio),
             self.skills.exists(),
-            self.experience_years > 0,
+            self.experience_years > 0 or bool(self.experience_label),   # expérience déclarée (tranche « Moins d’un an » comprise)
             bool(self.license_number),
             bool(self.cni_number),
             bool(self.insurance_info),
@@ -459,6 +462,9 @@ class ServiceCategory(models.Model):
     parent = models.ForeignKey('self', on_delete=models.CASCADE, blank=True, null=True, related_name='children')
     position = models.PositiveIntegerField(default=100, db_index=True, help_text="Ordre d'affichage : le plus petit d'abord (à égalité, ordre alphabétique).")
     is_featured = models.BooleanField(default=False, db_index=True, help_text="Mettre ce métier en avant sur la page d'accueil.")
+    min_experience_years = models.PositiveSmallIntegerField(
+        default=0, help_text="Expérience minimale (en années) exigée pour publier une offre de ce métier ; 0 = débutants acceptés. "
+                             "S'applique aussi à ses prestations. La déclaration de l'artisan n'est jamais modifiée.")
 
     class Meta:
         verbose_name_plural = "Service Categories"

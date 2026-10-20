@@ -116,7 +116,7 @@ class HandymanProfileAdmin(admin.ModelAdmin):
             'fields': (
                 'bio',
                 'skills',
-                'experience_years',
+                ('experience_years', 'experience_label'),
                 ('license_number', 'cni_number'),
                 'insurance_info'
             )
@@ -269,6 +269,14 @@ class ServiceCategoryAdminForm(forms.ModelForm):
         model = ServiceCategory
         fields = "__all__"
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if "min_experience_years" in self.fields:
+            self.fields["min_experience_years"].required = False      # vide = 0 : débutants acceptés
+
+    def clean_min_experience_years(self):
+        return self.cleaned_data.get("min_experience_years") or 0
+
     def clean_icon(self):
         icon = (self.cleaned_data.get("icon") or "").strip()
         if icon and "icon" in self.changed_data:
@@ -310,6 +318,9 @@ class ServiceCategoryAdmin(admin.ModelAdmin):
                       'description': "Sans parent : c'est un MÉTIER. Avec un parent : c'est une PRESTATION de ce métier. Les offres des professionnels se rattachent à une catégorie."}),
         ('Affichage', {'fields': ('is_active', 'is_featured', 'position'),
                        'description': "Actif = visible sur le site et dans l'application (même sans offre). Mise en avant = page d'accueil. Ordre : le plus petit d'abord."}),
+        ('Publication', {'fields': ('min_experience_years',),
+                         'description': "Expérience minimale exigée pour publier une offre de ce métier (0 = débutants acceptés). "
+                                        "Un artisan qui déclare moins n'est pas publié ; sa déclaration n'est jamais modifiée."}),
         ('Icône', {'fields': ('icon', 'display_icon'), 'description': "Nom Font Awesome, par exemple « fa-solid fa-utensils ». Le même nom donne la même icône sur le site et dans l'application."}),
     )
 

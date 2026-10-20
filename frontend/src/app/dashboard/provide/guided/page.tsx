@@ -6,13 +6,16 @@
  */
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ArrowLeft, BadgeCheck, Camera, CheckCircle2, Circle, IdCard, PartyPopper, RotateCcw, ShieldCheck, Smartphone, Volume2, VolumeX } from "lucide-react";
-import { apiErrorMessage, apiJson, get, post } from "@/lib/api";
+import { ArrowLeft, BadgeCheck, Camera, CheckCircle2, Circle, LockKeyhole, PartyPopper, RotateCcw, ShieldCheck, Smartphone, Volume2, VolumeX } from "lucide-react";
+import { GuidedIdentity } from "@/components/kyc/GuidedIdentity";
+import { ApiError, apiErrorMessage, apiJson, get, post } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useDashboard } from "@/lib/dashboard";
+import { deleteLocal, readLocal, writeLocal } from "@/lib/localVault";
 import {
-  GUIDED_PATH, answered, draftFromState, emptyDraft, nextStep, previousStep, remainingAtEnd, resumeStep, stepsFor, toggleAnswer,
-  type OnbConfig, type OnbDraft, type OnbQuestion, type OnbState,
+  GUIDED_PATH, PENDING_NAME, answered, declaredExperience, draftFromState, emptyDraft, keepPending, minimumFor, nextStep, previousStep,
+  progressOf, remainingAtEnd, resumeStep, stepsFor, takePending, toggleAnswer,
+  type OnbConfig, type OnbDraft, type OnbQuestion, type OnbState, type Vault,
 } from "@/lib/onboarding";
 import { featuredTrades, resolveTrades, type ResolvedTrade } from "@/lib/trades";
 import type { Category, Paginated } from "@/lib/types";
@@ -20,6 +23,9 @@ import { patchForm } from "@/lib/uploadPatch";
 import { Alert, Badge, Button, ButtonLink, Card, Skeleton, TextField, cx } from "@/components/ds";
 
 const VOICE_KEY = "tratra.voice.autoplay";
+
+/** Coffre local cloisonné par compte : effacé à la déconnexion volontaire, gardé si la session expire. */
+const vault: Vault = { read: readLocal, write: writeLocal, del: deleteLocal };
 
 /** Voix du navigateur en français (si une voix française est installée) ; « Réécouter » et lecture automatique désactivable. */
 function useVoice() {
@@ -164,33 +170,47 @@ function GuidedFlow() {
   const [otherCity, setOtherCity] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  /** Dernier enregistrement impossible : réponses gardées sur cet appareil (réseau coupé) ou session expirée. */
+  const [kept, setKept] = useState<"" | "offline" | "expired">("");
+  const [sessionChanged, setSessionChanged] = useState(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const photoRef = useRef<HTMLInputElement>(null);
+  const ownerRef = useRef<number | null>(null);          // compte propriétaire de ce parcours
+  const draftRef = useRef<OnbDraft>(draft);
+  const chain = useRef<Promise<unknown>>(Promise.resolve());
+  const busyRef = useRef(false);
+  const stoppedRef = useRef(false);
+  draftRef.current = draft;
 
   const verify = !(user?.is_verified ?? false);
   const steps = useMemo(() => stepsFor(config, { verify }), [config, verify]);
-  const index = Math.max(0, steps.indexOf(step));
 
   // ------------------------------------------------------------------ chargement et reprise
   useEffect(() => {
     let alive = true;
     (async () => {
       try {
-        const [catalog, state] = await Promise.all([
+        const [catalog, state, fresh] = await Promise.all([
           get<Paginated<Category> | Category[]>("/catalog/").catch(() => [] as Category[]),
           get<OnbState>("/me/onboarding/"),
           refreshUser().catch(() => null),
         ]);
+        const account = fresh ?? user;
         if (!alive) return;
         setTrades(resolveTrades(Array.isArray(catalog) ? catalog : catalog.results ?? []));
-        const d = draftFromState(state);
+        const me = account?.id ?? null;
+        ownerRef.current = me;
+        // Réponses gardées sur cet appareil pour CE compte (réseau coupé, session expirée) : plus récentes que le serveur, renvoyées.
+        const pending = me !== null ? takePending(vault, me) : null;
+        const d = pending ?? draftFromState(state);
+        if (pending) void save(pending).catch(() => undefined);
         const cfg = d.trade ? await get<OnbConfig>(`/onboarding/config/?trade=${d.trade}`).catch(() => null) : null;
         if (!alive) return;
         setServer(state);
         setDraft(d);
         setConfig(cfg);
         setOtherCity(Boolean(d.commune) && Boolean(cfg) && !cfg!.communes.includes(d.commune));
-        setStep(resumeStep(cfg, params.get("step") || d.step, { verify: !(user?.is_verified ?? false) }));
+        setStep(resumeStep(cfg, params.get("step") || d.step, { verify: !(account?.is_verified ?? false) }));
       } catch (e) {
         if (alive) setError(apiErrorMessage(e, "Votre inscription n’a pas pu être chargée. Vérifiez votre connexion puis rechargez la page."));
       } finally {
@@ -205,15 +225,33 @@ function GuidedFlow() {
   }, []);
 
   // ------------------------------------------------------------------ sauvegarde (à chaque réponse)
-  const save = useCallback(async (d: OnbDraft) => {
-    const s = await apiJson<OnbState>("/me/onboarding/", { method: "PUT", body: JSON.stringify({ ...d, path: "guided" }) });
-    setServer(s);
-    return s;
+  // Enregistrements UN PAR UN, dans l'ordre (réseau lent : une ancienne réponse n'écrase jamais une plus récente), toujours pour le
+  // compte propriétaire. Échec : les réponses restent sur cet appareil, rattachées à ce compte, et repartent au prochain envoi réussi.
+  const save = useCallback((d: OnbDraft): Promise<OnbState> => {
+    const owner = ownerRef.current;
+    const body = JSON.stringify({ ...d, path: "guided" });
+    const run = chain.current.catch(() => undefined).then(async () => {
+      if (owner === null || stoppedRef.current) throw new Error("Session terminée : vos réponses sont gardées sur cet appareil.");
+      try {
+        const s = await apiJson<OnbState>("/me/onboarding/", { method: "PUT", body });
+        vault.del(owner, PENDING_NAME);
+        setKept("");
+        setServer(s);
+        return s;
+      } catch (e) {
+        keepPending(vault, owner, d);
+        setKept(e instanceof ApiError && e.status === 401 ? "expired" : "offline");
+        throw e;
+      }
+    });
+    chain.current = run;
+    return run;
   }, []);
 
   const persist = useCallback(
     (d: OnbDraft) => {
       if (saveTimer.current) clearTimeout(saveTimer.current);
+      if (stoppedRef.current) return;
       saveTimer.current = setTimeout(() => void save(d).catch(() => undefined), 500);
     },
     [save],
@@ -222,6 +260,27 @@ function GuidedFlow() {
   useEffect(() => () => {
     if (saveTimer.current) clearTimeout(saveTimer.current);
   }, []);
+
+  // Retour du réseau : les réponses gardées repartent sans attendre une nouvelle réponse.
+  useEffect(() => {
+    const retry = () => {
+      if (ownerRef.current !== null && !stoppedRef.current) void save(draftRef.current).catch(() => undefined);
+    };
+    window.addEventListener("online", retry);
+    return () => window.removeEventListener("online", retry);
+  }, [save]);
+
+  // Autre compte ou déconnexion pendant le parcours : plus rien n'est envoyé ; les réponses restent pour LEUR compte, sur cet appareil.
+  useEffect(() => {
+    if (loading || ownerRef.current === null || stoppedRef.current) return;
+    if ((user?.id ?? null) === ownerRef.current) return;
+    stoppedRef.current = true;
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    keepPending(vault, ownerRef.current, draftRef.current);
+    voice.stop();
+    setSessionChanged(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id, loading]);
 
   const update = (patchDraft: Partial<OnbDraft>) => {
     const d = { ...draft, ...patchDraft, step };
@@ -280,13 +339,20 @@ function GuidedFlow() {
   };
 
   async function run(action: () => Promise<void>) {
+    if (busyRef.current || stoppedRef.current) return;      // réseau lent : un seul envoi pour plusieurs clics
+    busyRef.current = true;
     setBusy(true);
     setError("");
     try {
       await action();
     } catch (e) {
-      setError(apiErrorMessage(e, "Une erreur est survenue. Vérifiez votre connexion puis réessayez."));
+      setError(
+        e instanceof ApiError && e.status === 401
+          ? "Votre session a expiré. Vos réponses sont gardées sur cet appareil : reconnectez-vous pour continuer."
+          : apiErrorMessage(e, "Une erreur est survenue. Vérifiez votre connexion puis réessayez. Vos réponses sont gardées."),
+      );
     } finally {
+      busyRef.current = false;
       setBusy(false);
     }
   }
@@ -359,12 +425,38 @@ function GuidedFlow() {
   const q = question(step);
   const shown = allTrades ? trades : featuredTrades(trades, 8);
   const left = remainingAtEnd(server);
+  const minimum = minimumFor(config, draft.prestations);
+  const declared = declaredExperience(config, draft.answers);
+  const blocked = server?.experience?.ok === false;
+  const progress = progressOf(steps, step);
+
+  if (sessionChanged) {
+    return (
+      <Card className="mx-auto max-w-2xl" padding="lg">
+        <Illustration icon={LockKeyhole} />
+        <Title help="Vos réponses sont gardées sur cet appareil pour le compte avec lequel vous aviez commencé. Elles ne sont ni montrées ni envoyées à un autre compte. Reconnectez-vous avec ce compte pour continuer.">
+          Votre session a changé
+        </Title>
+        <ButtonLink href={user ? "/dashboard" : `/login?next=${encodeURIComponent(GUIDED_PATH)}`} size="lg" block>
+          {user ? "Aller à mon espace" : "Me reconnecter"}
+        </ButtonLink>
+      </Card>
+    );
+  }
 
   let content: ReactNode;
   if (q) {
     content = (
       <>
         <Title help={q.help || (q.kind === "multi" ? "Vous pouvez en choisir plusieurs." : undefined)}>{q.text}</Title>
+        {q.target === "experience" ? (
+          // La réponse est enregistrée telle quelle (jamais arrondie) ; le minimum du métier est annoncé AVANT de répondre.
+          <Alert tone="info" className="mb-4">
+            {minimum.years > 0
+              ? `Pour ${minimum.name}, Tratra demande au moins ${minimum.years} an${minimum.years > 1 ? "s" : ""} d’expérience pour publier une offre. Répondez selon la vérité : votre réponse est enregistrée telle quelle.`
+              : "Vous débutez ? C’est accepté pour ce métier. Répondez selon la vérité : votre réponse est enregistrée telle quelle."}
+          </Alert>
+        ) : null}
         <div className="space-y-2.5" role={q.kind === "multi" ? "group" : "radiogroup"} aria-label={q.text}>
           {q.options.map((o) => (
             <Choice
@@ -495,6 +587,13 @@ function GuidedFlow() {
         ) : (
           <Skeleton className="h-40 !rounded-card" />
         )}
+        {declared && declared.years < minimum.years ? (
+          <Alert tone="warning" className="mt-4">
+            Avec « {declared.label} », votre annonce ne pourra pas être publiée : {minimum.name} demande au moins {minimum.years} an
+            {minimum.years > 1 ? "s" : ""} d’expérience. Vos réponses sont gardées telles quelles ; vous pourrez la publier quand vous aurez
+            l’expérience requise.
+          </Alert>
+        ) : null}
         <Reassurance>Elle sera visible des clients après la vérification de votre identité par l’équipe Tratra.</Reassurance>
         <Button variant="ghost" className="mt-2" onClick={() => go(resumeStep(config, "questions", { verify }))}>
           Changer mes réponses
@@ -534,7 +633,7 @@ function GuidedFlow() {
         <Title help="Photographiez votre carte d’identité (recto et verso) ou votre passeport. L’équipe Tratra la vérifie : votre annonce devient visible après sa validation.">
           Vérifier votre identité
         </Title>
-        <Illustration icon={IdCard} />
+        <GuidedIdentity onFinished={() => go("done")} onLater={() => go("done")} />
         <Reassurance>Vos papiers restent privés : seuls vous et l’équipe Tratra les voyez.</Reassurance>
       </>
     );
@@ -545,17 +644,19 @@ function GuidedFlow() {
           help={
             left.length
               ? `Il vous reste à ${left.join(" et ")}. Votre annonce ne sera visible qu’après la vérification de votre identité. Vous pourrez continuer depuis votre espace avec le bouton « Continuer ».`
-              : "Votre annonce est prête. Elle sera visible dès que l’équipe Tratra aura vérifié votre dossier. Vous recevrez une notification."
+              : blocked
+                ? "Elle ne pourra pas être publiée tant que votre expérience n’atteint pas le minimum demandé pour ce métier. Votre réponse est gardée telle quelle ; le détail est dans votre espace."
+                : "Votre annonce est prête. Elle sera visible dès que l’équipe Tratra aura vérifié votre dossier. Vous recevrez une notification."
           }
         >
-          {left.length ? "Votre annonce est enregistrée" : "Bravo, c’est presque fini !"}
+          {left.length || blocked ? "Votre annonce est enregistrée" : "Bravo, c’est presque fini !"}
         </Title>
-        <Illustration icon={left.length ? BadgeCheck : PartyPopper} />
+        <Illustration icon={left.length || blocked ? BadgeCheck : PartyPopper} />
       </>
     );
   }
 
-  const primary: { label: string; onClick?: () => void; href?: string } = (() => {
+  const primary: { label: string; onClick?: () => void; href?: string } | null = (() => {
     switch (step) {
       case "intro":
         return { label: "Commencer", onClick: () => go(nextStep(config, step, { verify })) };
@@ -566,7 +667,7 @@ function GuidedFlow() {
       case "photo":
         return { label: "Ajouter ma photo", onClick: () => photoRef.current?.click() };
       case "identity":
-        return { label: "Photographier ma pièce", href: "/dashboard/profile/kyc" };
+        return null;                                                  // boutons propres à la vérification guidée
       case "done":
         return { label: "Aller à mon espace", href: "/dashboard" };
       default:
@@ -579,9 +680,7 @@ function GuidedFlow() {
       ? { label: "Passer", onClick: () => void next() }
       : step === "verify" || step === "photo"
         ? { label: "Plus tard", onClick: () => go(nextStep(config, step, { verify })) }
-        : step === "identity"
-          ? { label: "Plus tard", onClick: () => go("done") }
-          : null;
+        : null;                                                       // identité : « Plus tard » est dans la vérification guidée
 
   return (
     <div className="mx-auto w-full max-w-2xl">
@@ -589,8 +688,8 @@ function GuidedFlow() {
         <Button variant="ghost" size="sm" aria-label="Retour" disabled={busy} onClick={back}>
           <ArrowLeft aria-hidden className="h-5 w-5" />
         </Button>
-        <p className="min-w-0 flex-1 whitespace-nowrap text-sm font-semibold text-inkSoft" aria-live="polite">
-          Étape {index + 1} sur {steps.length}
+        <p className="min-w-0 flex-1 truncate text-sm font-semibold text-inkSoft" aria-live="polite" title={progress.title}>
+          {progress.title}
         </p>
         {voice.available ? (
           <>
@@ -603,11 +702,19 @@ function GuidedFlow() {
           </>
         ) : null}
       </div>
-      <div className="mt-1 h-2 overflow-hidden rounded-full bg-lineSoft" role="progressbar" aria-valuemin={0} aria-valuemax={steps.length} aria-valuenow={index + 1} aria-label="Progression">
-        <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${((index + 1) / steps.length) * 100}%` }} />
+      <div className="mt-1 h-2 overflow-hidden rounded-full bg-lineSoft" role="progressbar" aria-valuemin={0} aria-valuemax={100}
+        aria-valuenow={Math.round(progress.ratio * 100)} aria-valuetext={progress.title} aria-label="Progression">
+        <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${progress.ratio * 100}%` }} />
       </div>
 
       <Card className="mt-5" padding="lg">
+        {kept ? (
+          <Alert tone="warning" className="mb-4">
+            {kept === "expired"
+              ? "Votre session a expiré : vos réponses sont gardées sur cet appareil. Reconnectez-vous pour continuer."
+              : "Pas de connexion pour l’instant : vos réponses sont gardées sur cet appareil et seront envoyées dès le retour du réseau."}
+          </Alert>
+        ) : null}
         {content}
         {error ? (
           <Alert tone="danger" className="mt-4">
@@ -615,7 +722,7 @@ function GuidedFlow() {
           </Alert>
         ) : null}
         <div className="mt-6 space-y-2">
-          {primary.href ? (
+          {primary === null ? null : primary.href ? (
             <ButtonLink href={primary.href} size="lg" block>
               {primary.label}
             </ButtonLink>

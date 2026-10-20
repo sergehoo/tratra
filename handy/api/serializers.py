@@ -525,7 +525,7 @@ class HandymanProfileSerializer(serializers.ModelSerializer):
         fields = [
             "id", "user", "user_detail",
             "bio", "skills", "skills_detail",
-            "experience_years", "license_number", "cni_number", "insurance_info",
+            "experience_years", "experience_label", "license_number", "cni_number", "insurance_info",
             "commune", "quartier",
             "hourly_rate", "daily_rate", "monthly_rate", "travel_fee",
             "availability", "is_approved", "rating", "completed_jobs", "photo",
@@ -535,7 +535,7 @@ class HandymanProfileSerializer(serializers.ModelSerializer):
         ]
         # `quality_score` n'est pas exposé ici (donc jamais accepté en écriture).
         read_only_fields = ["is_approved", "rating", "completed_jobs", "online",
-                            "cni_number", "license_number"]
+                            "cni_number", "license_number", "experience_label"]
 
     @extend_schema_field(OpenApiTypes.OBJECT)
     def get_location(self, obj):
@@ -559,6 +559,9 @@ class HandymanProfileSerializer(serializers.ModelSerializer):
         lat = validated_data.pop("latitude", None)
         lng = validated_data.pop("longitude", None)
         skills = validated_data.pop("skills", None)
+        # Années saisies dans le formulaire : elles remplacent la tranche déclarée (« Moins d’un an ») seulement si elles CHANGENT.
+        if "experience_years" in validated_data and validated_data["experience_years"] != instance.experience_years:
+            validated_data["experience_label"] = ""
         obj = super().update(instance, validated_data)
         if lat is not None and lng is not None:
             obj.location = Point(lng, lat, srid=4326)

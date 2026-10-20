@@ -12,7 +12,7 @@ from handy.models import Booking, Dispute, HandymanDocument, HandymanProfile, Re
 from trust.engine import evaluate_user
 
 # Champs de profil qui conditionnent l'éligibilité (donc VERIFIE) ou le niveau d'expérience (EXPERT).
-PROFILE_FIELDS = ("is_approved", "bio", "commune", "photo", "experience_years")
+PROFILE_FIELDS = ("is_approved", "bio", "commune", "photo", "experience_years", "experience_label")
 
 
 def _trigger(user_id, why):

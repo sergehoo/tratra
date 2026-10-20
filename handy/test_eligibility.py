@@ -96,6 +96,33 @@ def test_rule_sql_matches_python(case):
     assert publishable().filter(pk=profile.pk).exists() is expected
 
 
+EXPERIENCE_CASES = {
+    # (années, tranche déclarée, minimum du métier de la spécialité, minimum du métier d'une offre active) → publiable ?
+    "tranche_debutant_metier_sans_minimum": (0, "Moins d’un an", 0, 0, True),
+    "aucune_declaration": (0, "", 0, 0, False),
+    "sous_minimum_specialite": (1, "1 à 2 ans", 2, 0, False),
+    "sous_minimum_offre": (1, "", 0, 3, False),
+    "minimum_atteint": (3, "3 à 5 ans", 3, 3, True),
+}
+
+
+@pytest.mark.parametrize("case", sorted(EXPERIENCE_CASES))
+def test_experience_declared_and_trade_minimum_sql_matches_python(case):
+    years, label, skill_min, offer_min, expected = EXPERIENCE_CASES[case]
+    user = artisan(f"x_{case}")
+    profile = user.handyman_profile
+    profile.experience_years, profile.experience_label = years, label
+    profile.save()
+    ServiceCategory.objects.filter(slug="plomberie").update(min_experience_years=skill_min)
+    trade = ServiceCategory.objects.create(name=f"Métier {case}", slug=f"m-{case}", min_experience_years=offer_min)
+    prestation = ServiceCategory.objects.create(name=f"Prestation {case}", slug=f"p-{case}", parent=trade)
+    Service.objects.create(handyman=user, category=prestation, title="Offre", description="d", price_type="fixed", price=1)
+    Service.objects.create(handyman=user, category=trade, title="Inactive", description="d", price_type="fixed", price=1, is_active=False)
+    profile = HandymanProfile.objects.get(pk=profile.pk)
+    assert is_publishable(profile) is expected
+    assert publishable().filter(pk=profile.pk).exists() is expected
+
+
 def test_inactive_account_is_not_publishable():
     user = artisan("inactif", active=False)
     assert not publishable().filter(user=user).exists()
