@@ -47,6 +47,7 @@ import { useData } from "@/lib/useData";
 import { StatusBar } from "@/components/statuses/StatusBar";
 import { ActivityBanner } from "./_components/ActivityBanner";
 import { AnnouncementsBanner } from "./_components/Announcements";
+import { BeginnerCard } from "./_components/BeginnerCard";
 import { formatDateTimeShort } from "./_components/dates";
 
 const itemHref = (i: DashItem) => (i.role === "handyman" ? `/dashboard/provider/missions/${i.id}` : `/dashboard/bookings/${i.id}`);
@@ -427,6 +428,9 @@ export default function DashboardHome() {
           </ButtonLink>
         </div>
       </section>
+
+      {/* Inscription professionnelle commencée et pas encore publiée : progression et UN bouton « Continuer » (rien sinon) */}
+      <BeginnerCard />
 
       {/* Annonces Tratra (rien si aucune) */}
       <AnnouncementsBanner />

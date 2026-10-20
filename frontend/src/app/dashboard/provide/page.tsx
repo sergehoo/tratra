@@ -1,10 +1,12 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { BadgeCheck, Camera, FileCheck2, Hammer, ShieldCheck, UserRoundCheck } from "lucide-react";
+import { BadgeCheck, Camera, FileCheck2, Hammer, NotebookPen, PlayCircle, ShieldCheck, UserRoundCheck, Volume2 } from "lucide-react";
 import { apiErrorMessage, post } from "@/lib/api";
 import { useDashboard } from "@/lib/dashboard";
-import { Alert, Button, Card, CardHeader, PageHeader, Skeleton } from "@/components/ds";
+import { GUIDED_PATH, type OnbState } from "@/lib/onboarding";
+import { useData } from "@/lib/useData";
+import { Alert, Badge, Button, ButtonLink, Card, CardHeader, PageHeader, Skeleton } from "@/components/ds";
 
 const STEPS = [
   { icon: UserRoundCheck, title: "Créez votre profil professionnel", text: "Un clic, avec votre compte actuel : aucune nouvelle inscription." },
@@ -20,6 +22,8 @@ export default function ProvidePage() {
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState("");
   const hasProfile = data?.capabilities.provider === true;
+  const onboarding = useData<OnbState>("/me/onboarding/");
+  const started = Boolean(onboarding.data?.trade);
 
   // Profil existant : on ouvre sa gestion (jamais de doublon).
   useEffect(() => {
@@ -71,17 +75,48 @@ export default function ProvidePage() {
               ))}
             </ol>
           </Card>
-          <Card variant="soft" className="lg:col-span-2">
-            <h2 className="font-display text-lg font-extrabold text-ink">Prêt à commencer ?</h2>
-            <p className="mt-2 text-sm leading-relaxed text-inkSoft">
-              Votre compte reste le même : vous pouvez continuer à réserver des artisans comme avant, et gérer vos prestations
-              depuis le même espace.
+          <div className="space-y-4 lg:col-span-2">
+            <h2 className="font-display text-lg font-extrabold text-ink">Comment voulez-vous vous inscrire ?</h2>
+            <p className="text-sm leading-relaxed text-inkSoft">
+              Les deux gardent votre compte actuel : vous continuez à réserver des artisans comme avant. Vous pouvez changer en cours
+              de route, rien n’est perdu.
             </p>
-            {failure ? <Alert tone="danger" className="mt-4">{failure}</Alert> : null}
-            <Button size="lg" block className="mt-5" loading={busy} onClick={() => void create()}>
-              Créer mon profil professionnel
-            </Button>
-          </Card>
+            {started ? (
+              <Card variant="soft" className="border-2 border-primary">
+                <p className="flex items-center gap-2 font-display text-base font-extrabold text-ink">
+                  <PlayCircle aria-hidden className="h-5 w-5 text-primary" /> Continuer mon inscription
+                </p>
+                <p className="mt-1 text-sm text-inkSoft">
+                  Vous aviez commencé{onboarding.data?.trade ? ` (${onboarding.data.trade.name})` : ""}. Reprenez là où vous vous étiez arrêté.
+                </p>
+                <ButtonLink href={GUIDED_PATH} size="lg" block className="mt-4">
+                  Continuer
+                </ButtonLink>
+              </Card>
+            ) : null}
+            <Card variant={started ? "default" : "soft"} className={started ? "" : "border-2 border-primary"}>
+              <Badge tone="accent">Recommandée si vous débutez</Badge>
+              <p className="mt-2 flex items-center gap-2 font-display text-base font-extrabold text-ink">
+                <Volume2 aria-hidden className="h-5 w-5 text-primary" /> Inscription accompagnée
+              </p>
+              <p className="mt-1 text-sm text-inkSoft">
+                Une question à la fois, de gros boutons et une voix qui vous guide. Votre annonce est écrite pour vous.
+              </p>
+              <ButtonLink href={GUIDED_PATH} size="lg" block variant={started ? "outline" : "primary"} className="mt-4">
+                {started ? "Reprendre l’inscription accompagnée" : "Commencer pas à pas"}
+              </ButtonLink>
+            </Card>
+            <Card>
+              <p className="flex items-center gap-2 font-display text-base font-extrabold text-ink">
+                <NotebookPen aria-hidden className="h-5 w-5 text-primary" /> Inscription classique
+              </p>
+              <p className="mt-1 text-sm text-inkSoft">Je crée mon profil professionnel et je remplis moi-même le formulaire complet.</p>
+              {failure ? <Alert tone="danger" className="mt-4">{failure}</Alert> : null}
+              <Button size="lg" block variant="outline" className="mt-4" loading={busy} onClick={() => void create()}>
+                Créer mon profil professionnel
+              </Button>
+            </Card>
+          </div>
         </div>
       )}
     </>
