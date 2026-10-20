@@ -1,13 +1,14 @@
 "use client";
 import Link from "next/link";
-import { Suspense, useId, useState } from "react";
+import { Suspense, useEffect, useId, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { ArrowRight, CalendarCheck, LockKeyhole, Search } from "lucide-react";
+import { ArrowRight, CalendarCheck, LockKeyhole, Mail, Search, TimerReset } from "lucide-react";
 import { Alert, Button, ButtonLink, Field, Input, PasswordInput, Skeleton } from "@/components/ds";
 import { AuthFrame } from "@/components/auth/AuthFrame";
 import { useAuth } from "@/lib/auth";
 import { ApiError } from "@/lib/api";
 import { isProtectedPath, isSafeInternalPath, registerHref, spaceHref } from "@/lib/links";
+import { formatCountdown, parseLoginLock, secondsLeft } from "@/lib/loginLock";
 
 function FormFallback() {
   return (
@@ -52,16 +53,39 @@ function LoginForm() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  // Blocage après trop de tentatives : fin (horloge locale) et adresse du support ; le serveur reste l'autorité à la fin du décompte.
+  const [lock, setLock] = useState<{ endMs: number; supportEmail: string } | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+  const left = lock ? secondsLeft(lock.endMs, now) : 0;
+  const locked = left > 0;
+
+  useEffect(() => {
+    if (!lock) return;
+    const tick = () => setNow(Date.now());
+    tick();
+    const id = window.setInterval(tick, 1000);
+    return () => window.clearInterval(id);
+  }, [lock]);
+  useEffect(() => {
+    if (lock && left === 0) setLock(null);
+  }, [lock, left]);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
+    if (locked) return;
     setError("");
     setBusy(true);
     try {
       await login(username, password, next);
       // Succès : la redirection est en cours, le bouton reste désactivé.
     } catch (err) {
-      setError(loginErrorMessage(err));
+      const blocked = parseLoginLock(err);
+      if (blocked) {                                   // bloqué : jamais « mot de passe incorrect » ; temps restant donné par le serveur
+        setLock({ endMs: Date.now() + blocked.seconds * 1000, supportEmail: blocked.supportEmail });
+        setNow(Date.now());
+      } else {
+        setError(loginErrorMessage(err));
+      }
       setBusy(false);
     }
   }
@@ -148,6 +172,29 @@ function LoginForm() {
           </Link>
         </div>
 
+        {/* Blocage : annoncé UNE fois (role="alert") ; le décompte est un « timer » non annoncé à chaque seconde. */}
+        {locked && lock ? (
+          <Alert
+            tone="warning"
+            icon={<TimerReset />}
+            title="Connexion bloquée"
+            action={
+              <a
+                href={`mailto:${lock.supportEmail}?subject=${encodeURIComponent("Connexion bloquée")}`}
+                className="inline-flex min-h-[40px] items-center gap-2 rounded-full border border-line bg-white px-4 text-sm font-semibold text-ink hover:border-primary/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              >
+                <Mail aria-hidden className="h-4 w-4" />
+                Contacter le support
+              </a>
+            }
+          >
+            Trop de tentatives de connexion. Consultez le support ou patientez :{" "}
+            <span role="timer" aria-live="off" className="font-display text-xl font-extrabold tabular-nums">
+              {formatCountdown(left)}
+            </span>
+          </Alert>
+        ) : null}
+
         {/* role="alert" (Alert danger) : l'erreur est annoncée dès son apparition. */}
         {error ? (
           <div id={errorId}>
@@ -160,9 +207,10 @@ function LoginForm() {
           size="lg"
           block
           loading={busy}
+          disabled={locked}
           rightIcon={<ArrowRight aria-hidden className="h-5 w-5" />}
         >
-          {busy ? "Connexion…" : "Se connecter"}
+          {locked ? `Réessayer dans ${formatCountdown(left)}` : busy ? "Connexion…" : "Se connecter"}
         </Button>
       </form>
 

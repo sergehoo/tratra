@@ -41,3 +41,34 @@ test("un bloc illisible est ignoré sans casser le flux", () => {
   const { events } = parseSse('event: delta\ndata: {pas du json\n\nevent: done\ndata: {"type":"done","message":3,"content":"ok","sources":[],"provider":"deepseek","usage":{"tokens_in":1,"tokens_out":1}}\n\n');
   assert.deepEqual(events.map((e) => e.type), ["done"]);
 });
+
+// ---- Connexion bloquée (compte à rebours) ----
+import { DEFAULT_SUPPORT_EMAIL, formatCountdown, parseLoginLock, secondsLeft } from "./loginLock.ts";
+
+test("blocage de connexion : le serveur donne le temps restant et le support", () => {
+  assert.deepEqual(parseLoginLock({ status: 429, data: { code: "login_locked", retry_after: 3330, support_email: "aide@exemple.ci" } }), { seconds: 3330, supportEmail: "aide@exemple.ci" });
+  assert.deepEqual(parseLoginLock({ status: 429, data: { code: "login_locked", retry_after: "120" } }), { seconds: 120, supportEmail: DEFAULT_SUPPORT_EMAIL });
+  assert.equal(parseLoginLock({ status: 429, data: { code: "login_locked", retry_after: 10.2 } })?.seconds, 11);
+});
+
+test("un refus ordinaire, un 429 de débit ou une réponse sans délai ne sont jamais pris pour un blocage", () => {
+  assert.equal(parseLoginLock({ status: 400, data: { non_field_errors: ["x"] } }), null);
+  assert.equal(parseLoginLock({ status: 429, data: { detail: "Requête ralentie. Expected available in 60 seconds." } }), null);
+  assert.equal(parseLoginLock({ status: 429, data: { code: "login_locked" } }), null);
+  assert.equal(parseLoginLock({ status: 429, data: { code: "login_locked", retry_after: 0 } }), null);
+  assert.equal(parseLoginLock({ status: 429, data: null }), null);
+  assert.equal(parseLoginLock(new TypeError("network")), null);
+  assert.equal(parseLoginLock({ status: 429, data: { code: "login_locked", retry_after: 5, support_email: "pas un mail" } })?.supportEmail, DEFAULT_SUPPORT_EMAIL);
+});
+
+test("mm:ss et décompte arrondi au-dessus", () => {
+  assert.equal(formatCountdown(3330), "55:30");
+  assert.equal(formatCountdown(3600), "60:00");
+  assert.equal(formatCountdown(7), "00:07");
+  assert.equal(formatCountdown(-3), "00:00");
+  assert.equal(formatCountdown(Number.NaN), "00:00");
+  assert.equal(secondsLeft(10_000, 0), 10);
+  assert.equal(secondsLeft(10_000, 9_200), 1);
+  assert.equal(secondsLeft(10_000, 10_000), 0);
+  assert.equal(secondsLeft(10_000, 12_000), 0);
+});
