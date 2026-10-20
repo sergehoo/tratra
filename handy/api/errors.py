@@ -87,7 +87,11 @@ def exception_handler(exc, context):
     suppression protégée, comportement DRF inchangé pour tout le reste."""
     if isinstance(exc, CodedAPIException):
         set_rollback()
-        return Response(exc.as_payload(), status=exc.status_code)
+        response = Response(exc.as_payload(), status=exc.status_code)
+        retry_after = exc.extra.get("retry_after")
+        if exc.status_code == http_status.HTTP_429_TOO_MANY_REQUESTS and isinstance(retry_after, int):
+            response["Retry-After"] = str(retry_after)           # en-tête standard : les clients peuvent afficher un compte à rebours
+        return response
     if isinstance(exc, (ProtectedError, RestrictedError)):
         # Auparavant : suppression en cascade (perte de paiements, avis…).
         # Depuis 0029 : refus explicite plutôt qu'une erreur 500.

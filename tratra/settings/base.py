@@ -699,6 +699,9 @@ EMAIL_HOST_USER = config("EMAIL_HOST_USER", default='')
 EMAIL_HOST_PASSWORD = config("EMAIL_HOST_PASSWORD", default='')
 DEFAULT_FROM_EMAIL = config("DEFAULT_FROM_EMAIL", default='no-reply@tratra.invalid')
 
+# Contact du support affiché à l'utilisateur (ex. connexion temporairement bloquée).
+SUPPORT_EMAIL = config('SUPPORT_EMAIL', default='support@tratra.net')
+
 # === AXES ===
 AXES_FAILURE_LIMIT = 5
 AXES_COOLOFF_TIME = 1  # heure

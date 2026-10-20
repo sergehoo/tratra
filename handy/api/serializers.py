@@ -1,5 +1,6 @@
 # handy/api/serializers.py
 from collections.abc import Mapping
+from datetime import timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import Optional
@@ -22,6 +23,7 @@ from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 from handy.api.errors import CodedAPIException, field_error
 from handy.api.staff_access import staff_may
+from handy.auth_lockout import countdown, remaining_lock_seconds
 from handy.media.sanitize import sanitize_image
 from handy.sms import SMSError, normalize_msisdn
 from handy.models import (
@@ -454,6 +456,13 @@ class EmailOrUsernameTokenObtainPairSerializer(TokenObtainPairSerializer):
             raise self.fail("no_active_account")
 
         identifier = resolve_login_identifier(raw)
+        locked = remaining_lock_seconds(request, identifier)
+        if locked is not None:          # bloquée : réponse claire, SANS tenter l'authentification (aucun nouvel échec, le délai ne repart pas)
+            raise CodedAPIException(
+                "login_locked",
+                f"Connexion temporairement bloquée après trop de tentatives. Patientez {countdown(locked)} ou contactez le support ({settings.SUPPORT_EMAIL}).",
+                status=429, retry_after=locked, locked_until=(timezone.now() + timedelta(seconds=locked)).isoformat(),
+                support_email=settings.SUPPORT_EMAIL)
         user = authenticate(request=request, username=identifier, password=password)
         if not user:
             raise self.fail("no_active_account")
