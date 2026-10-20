@@ -321,6 +321,68 @@ class KycDossier(models.Model):
         return f"Dossier d'identité #{self.profile_id}"
 
 
+class OnboardingQuestion(models.Model):
+    """Question du parcours « Inscription accompagnée » : une question par écran, réponses en gros boutons. Configurable dans
+    l'administration ; chaque réponse alimente un champ EXISTANT (profil professionnel ou offre) via sa `target` (voir `handy.onboarding`).
+
+    Rattachement : métiers liés (`trades`, prioritaire) ; sinon mots-clés comparés au nom et au slug du métier (`trade_keywords`) ;
+    sans les deux, la question est posée pour tous les métiers."""
+    KINDS = [("single", "Un seul choix"), ("multi", "Plusieurs choix")]
+    TARGETS = [
+        ("experience", "Années d'expérience (profil)"),
+        ("days", "Jours disponibles (profil)"),
+        ("slots", "Moments de la journée (profil)"),
+        ("strengths", "Savoir-faire (présentation et annonce)"),
+        ("price", "Tarif (offre et profil)"),
+        ("info", "Information (annonce)"),
+    ]
+
+    key = models.SlugField(max_length=60, unique=True)
+    text = models.CharField("question", max_length=200)
+    help_text = models.CharField("aide", max_length=300, blank=True, default="")
+    kind = models.CharField(max_length=10, choices=KINDS, default="single")
+    target = models.CharField(max_length=20, choices=TARGETS)
+    # [{"value", "label", "emoji"?, "phrase"?, "years"?, "amount"?, "unit"? (hour|day|month|job|quote)}]
+    options = models.JSONField(default=list)
+    trades = models.ManyToManyField("ServiceCategory", blank=True, related_name="onboarding_questions")
+    trade_keywords = models.CharField(max_length=200, blank=True, default="",
+                                      help_text="Mots-clés séparés par des virgules (ex. « nounou, garde d'enfants »).")
+    position = models.PositiveSmallIntegerField(default=100)
+    required = models.BooleanField(default=True)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ["position", "id"]
+
+    def __str__(self):
+        return self.text
+
+
+class ProOnboarding(models.Model):
+    """Réponses du parcours « Inscription accompagnée », pour reprendre où l'on s'était arrêté sur n'importe quel appareil.
+    Ce n'est PAS un second profil : `handy.onboarding.apply` écrit dans le profil professionnel (`HandymanProfile`) et dans une offre
+    (`Service`) ordinaires, soumis aux mêmes règles (aucune publication avant identité vérifiée et validation de l'équipe)."""
+    PATHS = [("guided", "Accompagnée"), ("classic", "Classique")]
+
+    user = models.OneToOneField(User, on_delete=models.PROTECT, related_name="pro_onboarding")
+    path = models.CharField(max_length=10, choices=PATHS, default="guided")
+    trade = models.ForeignKey("ServiceCategory", on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
+    prestations = models.JSONField(default=list, blank=True)       # identifiants de catégories (prestations du métier)
+    commune = models.CharField(max_length=100, blank=True, default="")
+    quartier = models.CharField(max_length=100, blank=True, default="")
+    answers = models.JSONField(default=dict, blank=True)           # clé de question → valeur(s)
+    step = models.CharField(max_length=30, blank=True, default="")
+    service = models.ForeignKey("Service", on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
+    generated_bio = models.TextField(blank=True, default="")       # texte proposé : remplacé seulement s'il n'a pas été retouché
+    generated_description = models.TextField(blank=True, default="")
+    applied_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Inscription pro #{self.user_id}"
+
+
 # ---- WALLET / CAUTION ----
 class DepositTransaction(models.Model):
     TRANSACTION_TYPES = [('deposit', 'Dépôt'), ('withdrawal', 'Retrait'), ('deduction', 'Déduction mission')]

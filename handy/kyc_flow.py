@@ -150,16 +150,42 @@ def _read(upload) -> tuple:
     return data, kind[0], kind[1]
 
 
-def check_photo(data: bytes, mime: str, dossier: KycDossier, side: str) -> Dict:
+def read_fields(data: bytes, mime: str) -> Optional[Dict]:
+    """Champs lus par l'OCR local (None si la lecture est indisponible). Jamais conservés : ils servent aux indications de qualité
+    et à PROPOSER un préremplissage à l'utilisateur lui-même, qui confirme ou corrige."""
+    from intelligence import documents
+
+    if not (getattr(settings, "KYC_FLOW_OCR", True) and documents.local_ocr_available()):
+        return None
+    text = documents.local_ocr(data, mime)
+    fields = documents.extract_fields(text) if text else {}
+    del text                                                        # le texte lu n'est jamais conservé
+    return fields
+
+
+def suggestions(fields: Optional[Dict]) -> Dict:
+    """Préremplissage proposé (nom, prénoms, date de naissance lus sur la pièce) : renvoyé à l'utilisateur, jamais enregistré."""
+    if not fields:
+        return {}
+    out = {}
+    if fields.get("given_names"):
+        out["first_name"] = " ".join(w.capitalize() for w in str(fields["given_names"]).split())[:150]
+    if fields.get("surname"):
+        out["last_name"] = str(fields["surname"]).strip().upper()[:150]
+    try:
+        out["birth_date"] = date.fromisoformat(str(fields.get("birth_date") or "")).isoformat()
+    except ValueError:
+        pass
+    return out
+
+
+def check_photo(data: bytes, mime: str, dossier: KycDossier, side: str, fields: Optional[Dict] = None) -> Dict:
     """Qualité mesurée (`intelligence.documents`) et lecture automatique INDICATIVE : seuls des indicateurs sont renvoyés et conservés."""
     from intelligence import documents
 
     problems = [{"code": c, "label": QUALITY[c][0], "blocking": QUALITY[c][1]} for c in documents.image_quality_problems(data)]
     reading = {"status": "unavailable", "notes": []}
-    if getattr(settings, "KYC_FLOW_OCR", True) and documents.local_ocr_available():
-        text = documents.local_ocr(data, mime)
-        fields = documents.extract_fields(text) if text else {}
-        del text                                                    # le texte lu n'est jamais conservé
+    if fields is not None:
         reading["status"] = "read" if len([k for k in fields if k != "detected_type"]) >= 1 else "unread"
         notes = reading["notes"]
         detected = fields.get("detected_type")
@@ -358,11 +384,12 @@ def capture(user, side: str, upload) -> Dict:
     if upload is None:
         raise KycFlowError("no_file", "Ajoutez la photo de la pièce.")
     data, mime, ext = _read(upload)
-    check = check_photo(data, mime, dossier, side)
+    fields = read_fields(data, mime)
+    check = check_photo(data, mime, dossier, side, fields)
     getattr(dossier, side).save(f"capture{ext}", ContentFile(data), save=False)
     setattr(dossier, f"{side}_check", check)
     dossier.save(update_fields=[side, f"{side}_check", "updated_at"])
-    return {**state(user), "check": check}
+    return {**state(user), "check": check, "suggestions": suggestions(fields) if side == "front" else {}}
 
 
 @transaction.atomic

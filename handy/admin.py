@@ -482,3 +482,33 @@ class ReviewAdmin(ReadOnlyHistoryAdmin, admin.ModelAdmin):
     search_fields = ('booking__id', 'booking__client__username', 'booking__handyman__username', 'comment')
     raw_id_fields = ('booking',)
     date_hierarchy = 'created_at'
+
+
+# ---- Inscription accompagnée : questions configurables par métier ----
+from .models import OnboardingQuestion, ProOnboarding  # noqa: E402
+
+
+@admin.register(OnboardingQuestion)
+class OnboardingQuestionAdmin(admin.ModelAdmin):
+    """Questions posées une par une (réponses en gros boutons). `options` : liste JSON de
+    {"value", "label", "emoji", "phrase" (texte de l'annonce), "years" (expérience), "amount" + "unit" (hour|day|month|job|quote)}."""
+    list_display = ("text", "key", "target", "kind", "trade_keywords", "position", "required", "is_active")
+    list_editable = ("position", "is_active")
+    list_filter = ("target", "kind", "is_active")
+    search_fields = ("text", "key", "trade_keywords")
+    filter_horizontal = ("trades",)
+
+
+@admin.register(ProOnboarding)
+class ProOnboardingAdmin(admin.ModelAdmin):
+    """Suivi des inscriptions accompagnées (lecture seule : les réponses appartiennent à l'utilisateur)."""
+    list_display = ("user", "path", "trade", "commune", "step", "applied_at", "updated_at")
+    list_filter = ("path", "applied_at")
+    search_fields = ("user__username", "user__phone", "commune")
+    readonly_fields = [f.name for f in ProOnboarding._meta.fields]
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
