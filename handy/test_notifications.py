@@ -109,7 +109,9 @@ def test_push_goes_to_every_mobile_device_with_deeplink_channel_and_badge(servic
     fcm = [kw["json"]["message"] for url, kw in http.calls if "fcm.googleapis.com" in url]
     assert {m["token"] for m in fcm} == {"tok-a1", "tok-a2", "tok-i1"}          # 3 appareils mobiles, jamais « web »
     m = fcm[0]
-    assert m["notification"] == {"title": "Moussa", "body": "Bonjour, à quelle heure ?"}
+    # Écran verrouillé : texte neutre, jamais le contenu du message (aperçu activable par l'exploitant : PUSH_MESSAGE_PREVIEW).
+    assert m["notification"] == {"title": "Nouveau message", "body": "Moussa vous a écrit."}
+    assert m["android"]["notification"]["visibility"] == "PRIVATE"
     assert m["data"]["deeplink"] == "tratra://conversation/5" and m["data"]["nid"] == str(n.pk) and m["data"]["cat"] == "message"
     assert m["android"]["notification"]["channel_id"] == "tratra_default" and m["android"]["notification"]["tag"] == "conversation-5"
     assert m["apns"]["payload"]["aps"]["badge"] == 1                           # compteur de non lues

@@ -70,10 +70,12 @@ def send_notification_push(self, notification_id, collapse_key=None):
             Notification.objects.filter(pk=n.pk).update(push_status='disabled')
             return {"skipped": "announcement_not_deliverable"}
     payload = {"t": n.notification_type, "cat": n.category, "nid": n.pk, "deeplink": notifications.deeplink(n.data), **(n.data or {})}
+    title, body = notifications.push_text(n)          # texte neutre pour les catégories sensibles (écran verrouillé)
     result = push.send_to_user(
-        n.user_id, n.title or notifications.TYPE_LABELS.get(n.notification_type, "Tratra"), n.message[:200], payload,
+        n.user_id, title, body, payload,
         channel=notifications.CHANNEL_BY_CATEGORY.get(n.category), collapse_key=collapse_key,
-        badge=notifications.unread_count(n.user_id), ttl_seconds=notifications.TTL_BY_CATEGORY.get(n.category, 86400))
+        badge=notifications.unread_count(n.user_id), ttl_seconds=notifications.TTL_BY_CATEGORY.get(n.category, 86400),
+        private=n.category in notifications.SENSITIVE_PUSH_CATEGORIES)
     if result["skipped"] == "not_configured":
         status = "unconfigured"
     elif result["sent"]:

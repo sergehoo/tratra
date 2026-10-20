@@ -229,3 +229,52 @@ def test_token_renewal_removes_the_previous_token_of_the_same_account_only():
     tokens = set(Device.objects.values_list("device_token", flat=True))
     assert "tok-old" not in tokens and {"tok-new", "tok-new2", "tok-b"} <= tokens
 
+
+
+# ── Écran verrouillé : aucun contenu sensible dans le push, pastille numérique Android ──
+
+def _push_for(user, ntype, message, title, http, path, monkeypatch, django_capture_on_commit_callbacks, **settings_kw):
+    from handy.notifications import notify
+
+    monkeypatch.setattr(push.requests, "post", http.post)
+    with override_settings(FCM_CREDENTIALS_FILE=path, **settings_kw), django_capture_on_commit_callbacks(execute=True):
+        notify(user.id, ntype, message, title=title)
+    return [kw["json"]["message"] for url, kw in http.calls if "fcm.googleapis.com" in url][-1]
+
+
+@pytest.mark.parametrize("ntype,message,title,expected_title,hidden", [
+    ("message_received", "Mon code d'accès est 4821", "Awa K.", "Nouveau message", "4821"),
+    ("kyc_rejected", "Votre document « Carte nationale d’identité » a été refusé. Motif : photo floue.", "Document refusé", "Votre compte Tratra", "floue"),
+    ("payment_received", "Paiement de 15000 FCFA disponible pour « Fuite ».", "Paiement reçu", "Paiement", "15000"),
+])
+def test_sensitive_pushes_show_neutral_text_on_the_lock_screen(service_account, monkeypatch, django_capture_on_commit_callbacks,
+                                                               ntype, message, title, expected_title, hidden):
+    path, _ = service_account
+    u = user_with_devices()
+    msg = _push_for(u, ntype, message, title, FakeHTTP(), path, monkeypatch, django_capture_on_commit_callbacks)
+    assert msg["notification"]["title"] == expected_title
+    assert hidden not in json.dumps(msg["notification"], ensure_ascii=False)
+    assert msg["android"]["notification"]["visibility"] == "PRIVATE"
+    # le détail reste dans l'application (notification enregistrée intacte)
+    assert Notification.objects.filter(user=u, notification_type=ntype, message=message).exists()
+
+
+def test_message_preview_can_be_enabled_by_the_operator_and_ordinary_pushes_stay_complete(service_account, monkeypatch, django_capture_on_commit_callbacks):
+    path, _ = service_account
+    u = user_with_devices()
+    msg = _push_for(u, "message_received", "On se voit demain ?", "Awa K.", FakeHTTP(), path, monkeypatch, django_capture_on_commit_callbacks,
+                    PUSH_MESSAGE_PREVIEW=True)
+    assert msg["notification"] == {"title": "Awa K.", "body": "On se voit demain ?"}
+    live = _push_for(u, "booking_confirmed", "Votre réservation « Fuite » est confirmée.", "Réservation confirmée", FakeHTTP(), path,
+                     monkeypatch, django_capture_on_commit_callbacks)
+    assert live["notification"]["body"] == "Votre réservation « Fuite » est confirmée."
+    assert "visibility" not in live["android"]["notification"]
+
+
+def test_android_shows_the_unread_count_as_a_badge(service_account, monkeypatch, django_capture_on_commit_callbacks):
+    path, _ = service_account
+    u = user_with_devices()
+    Notification.objects.create(user=u, notification_type="system", message="déjà là")
+    msg = _push_for(u, "booking_confirmed", "Confirmée.", "Réservation confirmée", FakeHTTP(), path, monkeypatch, django_capture_on_commit_callbacks)
+    assert msg["android"]["notification"]["notification_count"] == 2
+    assert msg["apns"]["payload"]["aps"]["badge"] == 2

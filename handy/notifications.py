@@ -49,6 +49,31 @@ CHANNEL_BY_CATEGORY = {
     "engagement": "tratra_default",
     "announcement": "tratra_announcements",
 }
+# Écran verrouillé : pour ces catégories, le push n'affiche qu'un texte NEUTRE (le détail — texte d'un message, montant, motif d'un
+# refus KYC, sécurité du compte — reste dans l'application, après déverrouillage) et il est marqué « privé » sur Android.
+# `PUSH_MESSAGE_PREVIEW=True` permet d'afficher l'aperçu des messages (choix de l'exploitant).
+SENSITIVE_PUSH_CATEGORIES = {"message", "payment", "account"}
+LOCK_SCREEN_TEXT = {
+    "payment": ("Paiement", "Mise à jour d’un paiement : ouvrez Tratra pour le détail."),
+    "account": ("Votre compte Tratra", "Mise à jour de votre compte : ouvrez Tratra pour le détail."),
+}
+
+
+def push_text(notification) -> tuple:
+    """(titre, texte) du push : complet, sauf pour les catégories sensibles (texte neutre, sans contenu privé)."""
+    from django.conf import settings
+
+    title = notification.title or TYPE_LABELS.get(notification.notification_type, "Tratra")
+    body = notification.message[:200]
+    if notification.category == "message":
+        if getattr(settings, "PUSH_MESSAGE_PREVIEW", False):
+            return title, body
+        return "Nouveau message", (f"{title} vous a écrit." if notification.title else "Vous avez reçu un message.")
+    if notification.category in LOCK_SCREEN_TEXT:
+        return LOCK_SCREEN_TEXT[notification.category]
+    return title, body
+
+
 # Durée de vie d'un push non délivré (appareil éteint) : un « artisan en route » périmé n'a aucun intérêt.
 TTL_BY_CATEGORY = {"live": 900, "message": 86400, "announcement": 259200}
 

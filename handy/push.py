@@ -88,14 +88,16 @@ def _stringify(data: Optional[Dict]) -> Dict[str, str]:
 
 def send_to_user(user_id: int, title: str, body: str, data: Optional[Dict] = None, *, channel: Optional[str] = None,
                  collapse_key: Optional[str] = None, badge: Optional[int] = None, ttl_seconds: int = 86400,
-                 validate_only: bool = False) -> Dict:
+                 validate_only: bool = False, private: bool = False) -> Dict:
     """Envoie la notification à TOUS les appareils mobiles du compte. Ne lève jamais d'exception.
 
     Retour : {"sent": n, "removed": n, "failed": n, "devices": n, "skipped": None|"not_configured"|"no_device"|"no_access_token"}.
     `failed` ne compte que les échecs TRANSITOIRES (réseau, 5xx, 429) : l'appelant peut réessayer. Un jeton refusé par FCM
     comme périmé est supprimé (`removed`). `collapse_key` remplace la notification précédente de même clé (ex. messages d'une
-    conversation) ; `badge` (iOS) = nombre de notifications non lues. `validate_only` : FCM valide le message (jeton, charge utile,
-    droits du compte de service) SANS le remettre à l'appareil — contrôle de configuration (`manage.py push_check`)."""
+    conversation) ; `badge` = nombre de notifications non lues (pastille iOS, et chiffre Android sur les lanceurs qui l'affichent).
+    `private` : notification marquée « privée » sur Android (contenu masqué sur l'écran verrouillé sécurisé si l'utilisateur l'a choisi).
+    `validate_only` : FCM valide le message (jeton, charge utile, droits du compte de service) SANS le remettre à l'appareil —
+    contrôle de configuration (`manage.py push_check`)."""
     result = {"sent": 0, "removed": 0, "failed": 0, "devices": 0, "skipped": None}
     try:
         if not is_configured():
@@ -116,6 +118,10 @@ def send_to_user(user_id: int, title: str, body: str, data: Optional[Dict] = Non
         android_notification = {"channel_id": channel or ANDROID_CHANNEL}
         if collapse_key:
             android_notification["tag"] = collapse_key
+        if badge is not None:
+            android_notification["notification_count"] = int(badge)
+        if private:
+            android_notification["visibility"] = "PRIVATE"
         android = {"priority": "high", "ttl": f"{int(ttl_seconds)}s", "notification": android_notification}
         if collapse_key:
             android["collapse_key"] = collapse_key

@@ -27,19 +27,35 @@ export default function manifest(): MetadataRoute.Manifest {
       { src: "/icons/icon-512.png", sizes: "512x512", type: "image/png", purpose: "any" },
       { src: "/icons/maskable-512.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
     ],
+    // Raccourcis (appui long sur l'icône installée) : les mêmes que l'application mobile. Les pages de l'espace demandent la connexion
+    // si nécessaire ; aucune donnée n'est exposée par le raccourci lui-même.
     shortcuts: [
       {
-        name: "Trouver un artisan",
-        short_name: "Rechercher",
-        description: "Parcourir les services et artisans disponibles",
+        name: "Nouvelle demande",
+        short_name: "Demander",
+        description: "Trouver un artisan et réserver une intervention",
         url: "/search",
         icons: [{ src: "/icons/icon-192.png", sizes: "192x192", type: "image/png" }],
       },
       {
-        name: "Intervention immédiate",
-        short_name: "Immédiat",
-        description: "Voir les artisans en ligne maintenant",
-        url: "/search?online=1",
+        name: "Mes réservations et missions",
+        short_name: "Missions",
+        description: "Suivre mes réservations et les missions à traiter",
+        url: "/dashboard/bookings",
+        icons: [{ src: "/icons/icon-192.png", sizes: "192x192", type: "image/png" }],
+      },
+      {
+        name: "Messages",
+        short_name: "Messages",
+        description: "Mes conversations",
+        url: "/dashboard/messages",
+        icons: [{ src: "/icons/icon-192.png", sizes: "192x192", type: "image/png" }],
+      },
+      {
+        name: "Mon espace professionnel",
+        short_name: "Espace pro",
+        description: "Mes offres, ma vérification et mes missions",
+        url: "/dashboard/provider",
         icons: [{ src: "/icons/icon-192.png", sizes: "192x192", type: "image/png" }],
       },
     ],

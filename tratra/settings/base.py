@@ -339,6 +339,8 @@ MEDIA_SIGNED_URL_TTL_SECONDS = int(config('MEDIA_SIGNED_URL_TTL_SECONDS', defaul
 # Téléphone : pays présélectionné à défaut de préférence, de carte SIM ou de région de l'appareil (ISO 3166) ; en-tête de pays posé
 # par le proxy (ex. CF-IPCountry chez Cloudflare), lu seulement s'il est configuré — aucune géolocalisation IP n'est faite par Tratra.
 PHONE_DEFAULT_REGION = config('PHONE_DEFAULT_REGION', default='CI')
+# Push : l'aperçu du TEXTE des messages sur l'écran verrouillé est désactivé par défaut (« Awa K. vous a écrit »).
+PUSH_MESSAGE_PREVIEW = config('PUSH_MESSAGE_PREVIEW', default=False, cast=bool)
 PHONE_IP_COUNTRY_HEADER = config('PHONE_IP_COUNTRY_HEADER', default='')
 # Parcours « Vérifier mon identité » : âge minimal pour proposer des services ; lecture automatique (Tesseract local) des photos de pièce.
 KYC_MIN_AGE = int(config('KYC_MIN_AGE', default='18'))
