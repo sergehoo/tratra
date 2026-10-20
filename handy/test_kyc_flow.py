@@ -11,7 +11,7 @@ from rest_framework.test import APIClient
 from backoffice.services import approve_profile
 from handy import kyc_flow
 from handy.eligibility import eligibility_summary, is_publishable
-from handy.models import HandymanDocument, KycDossier, User
+from handy.models import HandymanDocument, KycDossier, Notification, User
 from handy.test_eligibility import BREAKERS, artisan, service
 
 pytestmark = pytest.mark.django_db
@@ -125,7 +125,7 @@ def test_cni_needs_front_and_back_then_is_sent_to_the_existing_kyc_queue(django_
     assert d["status"] == "in_review" and d["current_step"] == "review" and steps(d)["review"] == "waiting"
     docs = HandymanDocument.objects.filter(handyman=u.handyman_profile).order_by("id")
     assert [(x.document_type, x.status, x.title) for x in docs] == [
-        ("id_card", "pending", "Carte nationale d'identité — recto"), ("id_card", "pending", "Carte nationale d'identité — verso")]
+        ("id_card", "pending", "Carte nationale d’identité — recto"), ("id_card", "pending", "Carte nationale d’identité — verso")]
     dossier = KycDossier.objects.get(profile=u.handyman_profile)
     assert docs[0].file.name == dossier.front.name and dossier.attempts == 1        # même fichier privé, aucune copie
     assert sorted(call.args[0] for call in delay.call_args_list) == [x.pk for x in docs]     # analyse assistée pour l'examinateur
@@ -207,6 +207,9 @@ def test_rejection_then_new_photos_then_approval_keeps_the_whole_history():
     d = c.get(URL).json()
     assert d["status"] == "changes_requested" and d["review"]["reason"] == "Verso illisible : reflet sur la date."
     assert steps(d)["capture"] == "error" and d["current_step"] == "capture" and d["editable"] is True
+    # les photos refusées ne s'affichent plus comme « nettes et lisibles » : les deux faces sont à reprendre
+    assert [(x["present"], x["quality"]) for x in d["document"]["captures"]] == [(False, None), (False, None)]
+    assert d["document"]["ready_to_send"] is False
     # nouvelle photo : le dossier repart en brouillon, le motif reste affiché, rien n'est supprimé
     d = c.post(URL + "capture/", {"side": "front", "file": upload()}, format="multipart").json()
     assert d["status"] == "draft" and d["review"]["previous_reason"] == "Verso illisible : reflet sur la date."
@@ -223,7 +226,9 @@ def test_rejection_then_new_photos_then_approval_keeps_the_whole_history():
     assert c.post(URL + "restart/").json()["code"] == "not_rejected"
     assert c.patch(URL, {"document_kind": "passport"}, format="json").json()["code"] == "already_verified"
     front.refresh_from_db()
-    assert front.status == "pending"                 # l'ancienne transmission reste dans la file : décision humaine, jamais automatique
+    # l'ancienne face encore « en attente » a quitté la file de l'examinateur (motif explicite), sans être supprimée ni notifiée
+    assert front.status == "rejected" and front.rejection_reason == kyc_flow.SUPERSEDED_REASON and front.reviewed_by_id is None
+    assert Notification.objects.filter(user=u, notification_type="kyc_rejected").count() == 1      # le seul refus notifié : celui de l'équipe
 
 
 def test_restart_is_only_possible_after_a_refusal():
@@ -360,4 +365,4 @@ def test_the_reviewer_sees_the_declared_identity_next_to_the_documents():
     _send(api(u))
     ident = _identity(u.handyman_profile)
     assert ident["first_name"] == "Awa Marie" and str(ident["birth_date"]) == "1990-04-12"
-    assert ident["document_label"] == "Carte nationale d'identité" and ident["attempts"] == 1 and ident["sent_at"]
+    assert ident["document_label"] == "Carte nationale d’identité" and ident["attempts"] == 1 and ident["sent_at"]

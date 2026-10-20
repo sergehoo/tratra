@@ -289,7 +289,7 @@ def me_services(request):
             return {"state": "inactive", "label": "Désactivée", "hint": "Invisible des clients. Activez-la pour la proposer."}
         if publishable:
             return {"state": "published", "label": "Publiée", "hint": "Visible des clients dans le catalogue et la recherche."}
-        return {"state": "waiting", "label": "En attente d'autorisation",
+        return {"state": "waiting", "label": "En attente d’autorisation",
                 "hint": "Elle sera publiée automatiquement dès que votre publication sera autorisée."}
 
     return Response({

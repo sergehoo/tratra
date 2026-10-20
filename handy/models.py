@@ -297,8 +297,8 @@ class KycDossier(models.Model):
     Ce n'est PAS un second système de vérification : la décision reste celle des pièces (`HandymanDocument`, revue humaine
     « kyc.review ») puis du profil (`HandymanProfile.is_approved`) ; la vérification faciale reste celle du module `biometrics`.
     Le dossier garde seulement ce qui a été saisi et les photos pas encore transmises (voir `handy.kyc_flow`)."""
-    DOC_KINDS = [("cni", "Carte nationale d'identité"), ("passport", "Passeport")]
-    FACE_CHOICES = [("", "Non choisi"), ("biometric", "Vérification faciale"), ("human", "Vérification par l'équipe")]
+    DOC_KINDS = [("cni", "Carte nationale d’identité"), ("passport", "Passeport")]
+    FACE_CHOICES = [("", "Non choisi"), ("biometric", "Vérification faciale"), ("human", "Vérification par l’équipe")]
 
     profile = models.OneToOneField('HandymanProfile', on_delete=models.PROTECT, related_name='kyc_dossier')
     legal_first_name = models.CharField(max_length=150, blank=True, default='')

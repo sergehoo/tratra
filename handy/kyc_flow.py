@@ -1,4 +1,4 @@
-"""Parcours guidé « Vérifier mon identité » (7 étapes). La progression est enregistrée ICI (`KycDossier`) : l'application l'affiche et la
+"""Parcours guidé « Vérifier mon identité » (7 étapes). La progression est enregistrée ICI (`KycDossier`) : l’application l’affiche et la
 reprend après une fermeture, elle ne décide rien.
 
  1 personal    Informations personnelles : nom et prénoms tels qu'ils figurent sur la pièce, date de naissance
@@ -29,18 +29,18 @@ STEPS = [
     ("capture", "Photo de la pièce"),
     ("quality", "Contrôle qualité et lecture"),
     ("face", "Vérification faciale"),
-    ("review", "Revue par l'équipe Tratra"),
+    ("review", "Revue par l’équipe Tratra"),
     ("activation", "Activation du profil professionnel"),
 ]
 SIDES = {"cni": ["front", "back"], "passport": ["front"]}
 SIDE_LABELS = {("cni", "front"): "Recto", ("cni", "back"): "Verso", ("passport", "front"): "Page photo"}
-DOC_TITLES = {("cni", "front"): "Carte nationale d'identité — recto", ("cni", "back"): "Carte nationale d'identité — verso",
+DOC_TITLES = {("cni", "front"): "Carte nationale d’identité — recto", ("cni", "back"): "Carte nationale d’identité — verso",
               ("passport", "front"): "Passeport — page photo"}
-# Défauts d'image : (message, bloquant). Bloquant = la pièce ne pourrait pas être examinée ; sinon « reprendre » est seulement conseillé.
+# Défauts d’image : (message, bloquant). Bloquant = la pièce ne pourrait pas être examinée ; sinon « reprendre » est seulement conseillé.
 QUALITY = {
     "unreadable": ("Image illisible : reprenez la photo.", True),
-    "low_resolution": ("Résolution insuffisante : rapprochez-vous de la pièce et utilisez l'appareil photo arrière.", True),
-    "too_dark": ("Photo trop sombre : placez-vous près d'une fenêtre ou d'une lampe.", False),
+    "low_resolution": ("Résolution insuffisante : rapprochez-vous de la pièce et utilisez l’appareil photo arrière.", True),
+    "too_dark": ("Photo trop sombre : placez-vous près d’une fenêtre ou d’une lampe.", False),
     "overexposed": ("Reflet ou surexposition : évitez le flash et la lumière directe sur la pièce.", False),
     "blurry": ("Photo floue : tenez le téléphone immobile et attendez la mise au point.", False),
 }
@@ -56,7 +56,7 @@ class KycFlowError(Exception):
 def profile_of(user) -> HandymanProfile:
     profile = HandymanProfile.objects.filter(user=user).select_related("user").first()
     if profile is None:
-        raise KycFlowError("no_profile", "Créez d'abord votre profil professionnel pour vérifier votre identité.", 409)
+        raise KycFlowError("no_profile", "Créez d’abord votre profil professionnel pour vérifier votre identité.", 409)
     return profile
 
 
@@ -72,7 +72,7 @@ def dossier_for(profile: HandymanProfile) -> KycDossier:
 
 def _reason(docs) -> str:
     reasons = [r for r in dict.fromkeys((d.rejection_reason or "").strip() for d in docs if d.status == "rejected") if r]
-    return " ".join(reasons) or "Votre pièce n'a pas pu être validée. Reprenez des photos nettes et complètes."
+    return " ".join(reasons) or "Votre pièce n’a pas pu être validée. Reprenez des photos nettes et complètes."
 
 
 def review_state(profile: HandymanProfile, dossier: Optional[KycDossier]) -> Dict:
@@ -81,7 +81,7 @@ def review_state(profile: HandymanProfile, dossier: Optional[KycDossier]) -> Dic
     - une pièce d'identité approuvée suffit (même règle que l'éligibilité) ;
     - sinon la dernière transmission du parcours décide : une face refusée = nouvelle pièce demandée ;
     - une nouvelle tentative en cours dans le parcours (photos reprises après un refus) repart de « none » ;
-    - à défaut, les pièces d'identité déposées avant le parcours guidé (écran historique des documents)."""
+    - à défaut, les pièces d’identité déposées avant le parcours guidé (écran historique des documents)."""
     if profile.has_required_kyc():
         return {"state": "approved", "reason": ""}
     if dossier is not None and dossier.sent_at:
@@ -100,13 +100,15 @@ def review_state(profile: HandymanProfile, dossier: Optional[KycDossier]) -> Dic
 
 
 def _previous_reason(profile: HandymanProfile) -> str:
-    """Motif du dernier refus d'une pièce d'identité (rappelé pendant la nouvelle tentative)."""
-    last = HandymanDocument.objects.filter(handyman=profile, document_type="id_card").order_by("-uploaded_at").first()
-    return (last.rejection_reason or "").strip() if last is not None and last.status == "rejected" else ""
+    """Motif du dernier refus DÉCIDÉ par l’équipe sur une pièce d’identité (rappelé pendant la nouvelle tentative) ; les retraits
+    automatiques d’un envoi remplacé ne sont pas des refus."""
+    last = (HandymanDocument.objects.filter(handyman=profile, document_type="id_card", status="rejected").exclude(rejection_reason=SUPERSEDED_REASON)
+            .order_by("-reviewed_at", "-uploaded_at").first())
+    return (last.rejection_reason or "").strip() if last is not None else ""
 
 
 def kyc_status(profile: HandymanProfile) -> Dict:
-    """État d'identité affiché partout (profil, tableau de bord, parcours) : draft | pending | rejected | approved."""
+    """État d’identité affiché partout (profil, tableau de bord, parcours) : draft | pending | rejected | approved."""
     dossier = KycDossier.objects.filter(profile=profile).first()
     review = review_state(profile, dossier)
     state = {"none": "draft"}.get(review["state"], review["state"])
@@ -127,11 +129,11 @@ def _face(profile: HandymanProfile, dossier: KycDossier) -> Dict:
     done = (not enabled) or bool(ver and ver.satisfied) or status == BiometricVerification.PENDING_REVIEW or human
     return {"enabled": enabled, "required": False, "status": status, "satisfied": bool(ver and ver.satisfied), "choice": dossier.face_choice,
             "human_review_requested": human, "done": done,
-            "note": ("Comparez votre visage à votre pièce, après votre consentement explicite, ou demandez une vérification par l'équipe."
-                     if enabled else "Non requise : l'équipe Tratra vérifie votre pièce elle-même.")}
+            "note": ("Comparez votre visage à votre pièce, après votre consentement explicite, ou demandez une vérification par l’équipe."
+                     if enabled else "Non requise : l’équipe Tratra vérifie votre pièce elle-même.")}
 
 
-# ═══ Contrôle qualité et lecture d'une photo ═══════════════════════════════════════════════════════════════════════════
+# ═══ Contrôle qualité et lecture d’une photo ═══════════════════════════════════════════════════════════════════════════
 
 def _read(upload) -> tuple:
     size = getattr(upload, "size", None) or 0
@@ -164,17 +166,17 @@ def check_photo(data: bytes, mime: str, dossier: KycDossier, side: str) -> Dict:
         if detected == "passport" and dossier.document_kind == "cni":
             notes.append("La pièce ressemble à un passeport : vérifiez le type de pièce choisi.")
         elif detected == "id_card" and dossier.document_kind == "passport":
-            notes.append("La pièce ressemble à une carte d'identité : vérifiez le type de pièce choisi.")
+            notes.append("La pièce ressemble à une carte d’identité : vérifiez le type de pièce choisi.")
         try:
             expiry = date.fromisoformat(str(fields.get("expiry_date") or ""))
         except ValueError:
             expiry = None
         if expiry and expiry < timezone.localdate():
-            notes.append(f"La date d'expiration lue ({expiry:%d/%m/%Y}) semble dépassée : une pièce en cours de validité est nécessaire.")
+            notes.append(f"La date d’expiration lue ({expiry:%d/%m/%Y}) semble dépassée : une pièce en cours de validité est nécessaire.")
         doc_name = f"{fields.get('given_names', '')} {fields.get('surname', '')}".strip()
         legal = f"{dossier.legal_first_name} {dossier.legal_last_name}".strip()
         if doc_name and legal and documents.name_similarity(doc_name, legal) < documents.NAME_WARN:
-            notes.append("Le nom lu ne correspond pas exactement à celui saisi : vérifiez l'étape « Informations personnelles ».")
+            notes.append("Le nom lu ne correspond pas exactement à celui saisi : vérifiez l’étape « Informations personnelles ».")
     blocking = any(p["blocking"] for p in problems)
     return {"side": side, "quality": "fail" if blocking else "warn" if problems else "ok", "problems": problems, "reading": reading,
             "checked_at": timezone.now().isoformat()}
@@ -185,9 +187,9 @@ def check_photo(data: bytes, mime: str, dossier: KycDossier, side: str) -> Dict:
 def _personal_errors(first: str, last: str, birth: Optional[date]) -> Dict[str, str]:
     errors = {}
     if len(first.strip()) < 2:
-        errors["first_name"] = "Indiquez vos prénoms tels qu'ils figurent sur la pièce."
+        errors["first_name"] = "Indiquez vos prénoms tels qu’ils figurent sur la pièce."
     if len(last.strip()) < 2:
-        errors["last_name"] = "Indiquez votre nom tel qu'il figure sur la pièce."
+        errors["last_name"] = "Indiquez votre nom tel qu’il figure sur la pièce."
     if birth is None:
         errors["birth_date"] = "Indiquez votre date de naissance."
     else:
@@ -201,11 +203,12 @@ def _personal_errors(first: str, last: str, birth: Optional[date]) -> Dict[str, 
     return errors
 
 
-def _captures(dossier: KycDossier) -> List[Dict]:
+def _captures(dossier: KycDossier, *, retake: bool = False) -> List[Dict]:
+    """Photos de la pièce choisie. `retake` : pièce refusée par l’équipe, les photos transmises ne valent plus (« à reprendre »)."""
     out = []
     for side in SIDES.get(dossier.document_kind, []):
-        check = (dossier.front_check if side == "front" else dossier.back_check) or {}
-        out.append({"side": side, "label": SIDE_LABELS[(dossier.document_kind, side)], "present": bool(getattr(dossier, side)),
+        check = {} if retake else (dossier.front_check if side == "front" else dossier.back_check) or {}
+        out.append({"side": side, "label": SIDE_LABELS[(dossier.document_kind, side)], "present": bool(getattr(dossier, side)) and not retake,
                     "quality": check.get("quality"), "problems": check.get("problems", []), "reading": check.get("reading")})
     return out
 
@@ -216,8 +219,8 @@ def state(user) -> Dict:
     profile = profile_of(user)
     dossier = dossier_for(profile)
     review = review_state(profile, dossier)
-    sent = review["state"] in ("pending", "approved")                 # pièce déjà entre les mains de l'équipe (ou validée)
-    captures = _captures(dossier)
+    sent = review["state"] in ("pending", "approved")                 # pièce déjà entre les mains de l’équipe (ou validée)
+    captures = _captures(dossier, retake=review["state"] == "rejected")
     personal_ok = not _personal_errors(dossier.legal_first_name, dossier.legal_last_name, dossier.birth_date)
     captured = bool(captures) and all(c["present"] for c in captures)
     quality_ok = captured and not any(c["quality"] == "fail" for c in captures)
@@ -271,19 +274,29 @@ def state(user) -> Dict:
 # ═══ Actions ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
 
 def _editable(profile: HandymanProfile, dossier: KycDossier) -> None:
-    """Refuse toute modification d'une pièce validée ou en revue ; après un refus, rouvre le dossier pour une nouvelle tentative."""
+    """Refuse toute modification d’une pièce validée ou en revue ; après un refus, rouvre le dossier pour une nouvelle tentative."""
     review = review_state(profile, dossier)["state"]
     if review == "approved":
         raise KycFlowError("already_verified", "Votre identité est déjà vérifiée.", 409)
     if review == "pending":
-        raise KycFlowError("in_review", "Votre pièce est en cours de revue par l'équipe Tratra : elle ne peut pas être modifiée pour l'instant.", 409)
+        raise KycFlowError("in_review", "Votre pièce est en cours de revue par l’équipe Tratra : elle ne peut pas être modifiée pour l’instant.", 409)
     if review == "rejected" and dossier.sent_at:
         _reopen(dossier)
 
 
+SUPERSEDED_REASON = "Remplacée par un nouvel envoi de l’artisan (parcours « Vérifier mon identité »)."
+
+
 def _reopen(dossier: KycDossier) -> None:
-    """Nouvelle tentative : informations saisies et type de pièce gardés, nouvelles photos demandées. Rien n'est supprimé : les pièces
-    refusées restent dans l'historique du dossier KYC (et leurs fichiers dans le stockage privé)."""
+    """Nouvelle tentative : informations saisies et type de pièce gardés, nouvelles photos demandées (toutes les faces : une pièce se
+    revoit en entier). Rien n'est supprimé : les pièces de l'envoi précédent restent dans l'historique du dossier KYC ; celles encore
+    « en attente » sont retirées de la file de l’examinateur (motif explicite, sans notification à l’artisan : ce n’est pas une décision)."""
+    from trust.models import audit
+
+    stale = list(dossier.documents.filter(status="pending").values_list("pk", flat=True))
+    if stale:
+        HandymanDocument.objects.filter(pk__in=stale).update(status="rejected", rejection_reason=SUPERSEDED_REASON, reviewed_at=timezone.now())
+        audit("kyc.identity_superseded", actor=dossier.profile.user, target=dossier.profile.user, documents=stale)
     dossier.front, dossier.back, dossier.front_check, dossier.back_check, dossier.sent_at = "", "", {}, {}, None
     dossier.save(update_fields=["front", "back", "front_check", "back_check", "sent_at", "updated_at"])
     dossier.documents.clear()
@@ -291,7 +304,7 @@ def _reopen(dossier: KycDossier) -> None:
 
 @transaction.atomic
 def update(user, data: Dict) -> Dict:
-    """Enregistre l'étape 1 (informations personnelles), l'étape 2 (type de pièce) ou le choix de l'étape 5, sans rien transmettre."""
+    """Enregistre l’étape 1 (informations personnelles), l’étape 2 (type de pièce) ou le choix de l’étape 5, sans rien transmettre."""
     profile = profile_of(user)
     dossier = KycDossier.objects.select_for_update().get(pk=dossier_for(profile).pk)
     fields = []
@@ -322,7 +335,7 @@ def update(user, data: Dict) -> Dict:
         fields += ["legal_first_name", "legal_last_name", "birth_date"]
     if kind is not None:
         if kind not in SIDES:
-            raise KycFlowError("invalid_kind", "Choisissez une carte nationale d'identité ou un passeport.")
+            raise KycFlowError("invalid_kind", "Choisissez une carte nationale d’identité ou un passeport.")
         if kind != dossier.document_kind:                           # autre pièce : les photos de l'ancienne ne valent plus
             dossier.document_kind = kind
             dossier.front, dossier.back, dossier.front_check, dossier.back_check = "", "", {}, {}
@@ -334,14 +347,14 @@ def update(user, data: Dict) -> Dict:
 
 @transaction.atomic
 def capture(user, side: str, upload) -> Dict:
-    """Étapes 3 et 4 : enregistre la photo d'une face (remplace la précédente non transmise) et renvoie son contrôle qualité / lecture."""
+    """Étapes 3 et 4 : enregistre la photo d’une face (remplace la précédente non transmise) et renvoie son contrôle qualité / lecture."""
     profile = profile_of(user)
     dossier = KycDossier.objects.select_for_update().get(pk=dossier_for(profile).pk)
     _editable(profile, dossier)
     if not dossier.document_kind:
-        raise KycFlowError("no_kind", "Choisissez d'abord le type de pièce.", 409)
+        raise KycFlowError("no_kind", "Choisissez d’abord le type de pièce.", 409)
     if side not in SIDES[dossier.document_kind]:
-        raise KycFlowError("invalid_side", "Cette face n'est pas demandée pour la pièce choisie.")
+        raise KycFlowError("invalid_side", "Cette face n’est pas demandée pour la pièce choisie.")
     if upload is None:
         raise KycFlowError("no_file", "Ajoutez la photo de la pièce.")
     data, mime, ext = _read(upload)
@@ -354,20 +367,20 @@ def capture(user, side: str, upload) -> Dict:
 
 @transaction.atomic
 def send(user) -> Dict:
-    """Fin de l'étape 4 : les photos deviennent des pièces « en attente » dans la file KYC de l'équipe ; l'analyse assistée est lancée."""
+    """Fin de l’étape 4 : les photos deviennent des pièces « en attente » dans la file KYC de l’équipe ; l’analyse assistée est lancée."""
     from trust.models import audit
 
     profile = profile_of(user)
     dossier = KycDossier.objects.select_for_update().get(pk=dossier_for(profile).pk)
     _editable(profile, dossier)
     if _personal_errors(dossier.legal_first_name, dossier.legal_last_name, dossier.birth_date):
-        raise KycFlowError("personal_incomplete", "Complétez d'abord vos informations personnelles.", 409)
+        raise KycFlowError("personal_incomplete", "Complétez d’abord vos informations personnelles.", 409)
     captures = _captures(dossier)
     if not captures or not all(c["present"] for c in captures):
         missing = ", ".join(c["label"].lower() for c in captures if not c["present"]) or "pièce"
         raise KycFlowError("capture_missing", f"Photo manquante : {missing}.", 409)
     if any(c["quality"] == "fail" for c in captures):
-        raise KycFlowError("quality_failed", "Une photo n'est pas exploitable : reprenez-la avant de l'envoyer.", 409)
+        raise KycFlowError("quality_failed", "Une photo n’est pas exploitable : reprenez-la avant de l’envoyer.", 409)
     created = []
     for side in SIDES[dossier.document_kind]:
         doc = HandymanDocument(handyman=profile, document_type="id_card", status="pending", title=DOC_TITLES[(dossier.document_kind, side)],
@@ -403,6 +416,6 @@ def restart(user) -> Dict:
     profile = profile_of(user)
     dossier = KycDossier.objects.select_for_update().get(pk=dossier_for(profile).pk)
     if review_state(profile, dossier)["state"] != "rejected":
-        raise KycFlowError("not_rejected", "Aucune nouvelle pièce n'est demandée pour le moment.", 409)
+        raise KycFlowError("not_rejected", "Aucune nouvelle pièce n’est demandée pour le moment.", 409)
     _reopen(dossier)
     return state(user)
