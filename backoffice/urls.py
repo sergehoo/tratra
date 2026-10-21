@@ -2,7 +2,7 @@ from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
 from announcements.api import AnnouncementAdminViewSet
-from backoffice import api_core, api_engagements, api_mfa, api_money, api_ops, api_people, api_system, api_transport, api_reputation, api_intelligence, api_biometrics, api_messaging, api_statuses, api_assistant
+from backoffice import api_core, api_engagements, api_flash, api_mfa, api_money, api_ops, api_people, api_system, api_transport, api_reputation, api_intelligence, api_biometrics, api_messaging, api_statuses, api_assistant
 
 router = DefaultRouter()
 router.register("announcements", AnnouncementAdminViewSet, basename="bo-announcements")
@@ -139,6 +139,13 @@ urlpatterns = [
     path("analytics/overview/", api_system.AnalyticsOverview.as_view(), name="bo-analytics"),
     path("analytics/export/<str:dataset>/", api_system.AnalyticsExport.as_view(), name="bo-export"),
     # Réglages
+    # Tratra Flash & Smart Dispatch ; pénalités Tratra Trust
+    path("flash/config/", api_flash.FlashConfigView.as_view(), name="bo-flash-config"),
+    path("flash/requests/", api_flash.FlashRequestList.as_view(), name="bo-flash-requests"),
+    path("flash/requests/<int:pk>/", api_flash.FlashRequestDetail.as_view(), name="bo-flash-request"),
+    path("flash/supervision/", api_flash.FlashSupervision.as_view(), name="bo-flash-supervision"),
+    path("trust/penalties/", api_flash.PenaltyList.as_view(), name="bo-trust-penalties"),
+    path("trust/penalties/<int:pk>/decide/", api_flash.PenaltyDecide.as_view(), name="bo-trust-penalty-decide"),
     path("reputation/summary/", api_reputation.ReputationSummary.as_view(), name="bo-reputation-summary"),
     path("reputation/watch/", api_reputation.WatchList.as_view(), name="bo-watch"),
     path("reputation/watch/<int:pk>/", api_reputation.WatchDetail.as_view(), name="bo-watch-detail"),

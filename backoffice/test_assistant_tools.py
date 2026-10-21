@@ -34,8 +34,9 @@ def booking(client, handyman, status="pending", days_ago=0):
 def test_each_role_is_offered_only_the_tools_its_rights_allow():
     cases = {
         "super_admin": ALL_TOOLS,
-        "support": {"platform_overview", "search_users", "get_user_summary", "bookings_overview", "booking_anomalies", "account_alerts", "communications_overview"},
-        "finance": {"platform_overview", "bookings_overview", "booking_anomalies"},
+        "support": {"platform_overview", "search_users", "get_user_summary", "bookings_overview", "booking_anomalies", "account_alerts", "communications_overview",
+                    "flash_overview"},
+        "finance": {"platform_overview", "bookings_overview", "booking_anomalies", "flash_overview"},
         "marketing": {"platform_overview"},
         "analyst": {"platform_overview"},
     }

@@ -25,7 +25,7 @@ export interface GroupDef {
 export const GROUPS: readonly GroupDef[] = [
   { id: "overview", label: "Vue d’ensemble", modules: ["dashboard", "analytics"] },
   { id: "people", label: "Utilisateurs & Identités", modules: ["users", "kyc", "trust", "tratra_id"] },
-  { id: "missions", label: "Prestations & Missions", modules: ["services", "bookings", "live", "reviews", "engagements", "continuity"] },
+  { id: "missions", label: "Prestations & Missions", modules: ["services", "bookings", "flash", "live", "reviews", "engagements", "continuity"] },
   { id: "business", label: "Tratra Business", modules: ["business"] },
   { id: "finance", label: "Finances", modules: ["finance"] },
   { id: "communication", label: "Communication", modules: ["messages", "announcements", "notifications", "support"] },
@@ -43,6 +43,12 @@ export interface SubDef {
 export const SUBS: Record<string, readonly SubDef[]> = {
   services: [{ tab: "services", label: "Services" }, { tab: "categories", label: "Catégories et métiers", keywords: "tarifs métiers" }],
   bookings: [{ tab: "bookings", label: "Réservations" }, { tab: "disputes", label: "Litiges", keywords: "médiation réclamation" }],
+  flash: [
+    { tab: "supervision", label: "Supervision", keywords: "missions sans réponse attente smart dispatch" },
+    { tab: "requests", label: "Historique des attributions", keywords: "propositions vagues délais refus" },
+    { tab: "config", label: "Réglages", keywords: "poids délais règles classement" },
+    { tab: "penalties", label: "Pénalités et contestations", keywords: "trust désistement recours" },
+  ],
   kyc: [{ tab: "files", label: "Dossiers" }, { tab: "risks", label: "Risques et fraudes", keywords: "doublons fraude documents incohérents expirés identité" }],
   reviews: [{ tab: "reviews", label: "Avis" }, { tab: "reports", label: "Signalements", keywords: "modération abus" }, { tab: "statuses", label: "Statuts signalés", keywords: "statuts éphémères modération contenu signalé retrait" }, { tab: "watch", label: "Surveillance", keywords: "évaluations réputation fraude contestation recours bannissement" }],
   business: [
@@ -89,6 +95,7 @@ export const KEYWORDS: Record<string, string> = {
   tratra_id: "qr identifiant professionnel pass mission",
   services: "prestations catégories métiers modération",
   bookings: "missions réservations litiges annulations",
+  flash: "tratra flash smart dispatch attribution propositions vagues disponibilité pénalités contestations",
   live: "suivi gps position interventions incidents",
   reviews: "avis notes commentaires signalements modération",
   engagements: "contrats longue durée échéances récurrents",

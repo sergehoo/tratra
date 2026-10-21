@@ -363,15 +363,22 @@ def test_client_api_creates_cancels_and_relaunches(make_pro, client_user, plombe
 
 # ═══ Disponibilité ═══════════════════════════════════════════════════════════════════════════════════════════════════
 
-def test_availability_switch_uses_the_single_eligibility_rule(make_pro, make_handyman):
+def test_availability_state_and_the_existing_presence_switch(make_pro, make_handyman, make_request):
     pro = make_pro("dispo", online=False)
     r = as_user(pro).post("/handy/handymen/presence/", {"online": True}, format="json")
-    assert r.status_code == 200 and r.json()["online"] is True and r.json()["eligible"] is True
+    assert r.status_code == 200 and r.json() == {"online": True}          # contrat historique inchangé
     stranger = make_handyman("pasverifie")
-    r = as_user(stranger).post("/handy/handymen/presence/", {"online": True}, format="json")
-    assert r.status_code == 403
+    assert as_user(stranger).post("/handy/handymen/presence/", {"online": True}, format="json").status_code == 403
     state = as_user(pro).get("/handy/flash/availability/").json()
-    assert state["online"] is True and state["missed_streak"] == 0
+    assert state["online"] is True and state["eligible"] is True and state["missed_streak"] == 0
+    make_request()
+    assert as_user(pro).get("/handy/flash/availability/").json()["pending_offers"] == 1
+    # Approuvé mais dossier incomplet : « Disponible » possible (contrat historique) mais AUCUNE mission proposée (règle d'éligibilité).
+    half = make_handyman("demi", location=Point(-3.99, 5.361, srid=4326))
+    HandymanProfile.objects.filter(user=half).update(is_approved=True, online=True)
+    state = as_user(half).get("/handy/flash/availability/").json()
+    assert state["eligible"] is False and state["reason"]
+    assert not MissionOffer.objects.filter(handyman=half).exists()
 
 
 # ═══ Push prioritaire (FCM simulé) ═══════════════════════════════════════════════════════════════════════════════════
@@ -408,6 +415,8 @@ def test_new_mission_push_is_a_data_message_for_flash_capable_phones_and_never_s
     assert "notification" not in new and new["data"]["t"] == "new_mission" and new["data"]["kind"] == "flash_offer"
     assert new["android"]["priority"] == "high" and int(new["android"]["ttl"][:-1]) <= DispatchConfig.get_solo().offer_timeout_seconds
     assert new["data"]["zone"] == "Cocody" and "Rue des Jardins" not in str(new)
+    assert 0 < int(new["data"]["expires_in"]) <= DispatchConfig.get_solo().offer_timeout_seconds
+    assert new["data"]["title"] == "Nouvelle mission · Plomberie" and "pour répondre" in new["data"]["body"]
     old = msgs["old-app"]["android"]["notification"]
     assert old["channel_id"] == "tratra_new_missions" and old["sound"] == "tratra_flash" and old["visibility"] == "PRIVATE"
     assert msgs["iphone"]["apns"]["payload"]["aps"]["sound"] == "tratra_flash.caf"

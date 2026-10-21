@@ -254,6 +254,13 @@ def _communications_overview(perms: Set[str], args: Dict) -> Dict:
     return out
 
 
+def _flash_overview(perms: Set[str], args: Dict) -> Dict:
+    from flash import insights as flash_insights
+
+    d = flash_insights.overview(args.get("days", 7))
+    return {**d, "lien": "/backoffice/flash", "note": "Lecture seule : les recommandations sont des propositions ; les réglages restent une décision de l'équipe."}
+
+
 def _insight_tool(scope: str):
     def handler(perms: Set[str], args: Dict) -> Dict:
         return insights.HANDLERS[scope](perms)
@@ -283,6 +290,9 @@ TOOLS: List[Tool] = [
          "Chaque alerte donne la règle appliquée, des exemples et des actions PROPOSÉES.", "users.view", _schema(), _insight_tool("accounts")),
     Tool("security_events", "Synthèse des événements de sécurité…", "Synthèse sécurité : échecs et blocages de connexion (Axes), sources suspectes (adresses réduites), connexions, verrouillages de double authentification, "
          "consultations sensibles par le personnel, changements de rôles. Alertes explicables et actions PROPOSÉES.", "security.manage", _schema(), _insight_tool("security")),
+    Tool("flash_overview", "Consultation de Tratra Flash…", "Tratra Flash et Smart Dispatch sur une période : demandes par statut, taux et délai d'attribution, propositions "
+         "sans réponse, motifs de refus, demandes en attente, réglages actuels et recommandations EXPLICABLES (jamais appliquées automatiquement).",
+         "bookings.view", _schema({"days": _DAYS}), _flash_overview, ("days",)),
     Tool("communications_overview", "Consultation des communications…", "Messagerie de l'équipe (réponses non lues, plus ancien en attente), envois des 7 derniers jours et leur résultat, état des notifications (selon les droits).",
          "messages.send", _schema(), _communications_overview),
 ]

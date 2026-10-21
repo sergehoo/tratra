@@ -11,6 +11,7 @@ MODULES = [
     ("tratra_id", "Tratra ID", "tratra_id.manage", "id-card", "/backoffice/tratra-id"),
     ("services", "Services", "services.moderate", "briefcase", "/backoffice/services"),
     ("bookings", "Réservations et litiges", "bookings.view", "calendar-check", "/backoffice/bookings"),
+    ("flash", "Tratra Flash", "bookings.view", "zap", "/backoffice/flash"),
     ("live", "Suivi en direct", "live.view", "map-pin", "/backoffice/live"),
     ("reviews", "Avis", "reviews.moderate", "star", "/backoffice/reviews"),
     ("business", "Tratra Business", "business.manage", "building-2", "/backoffice/business"),

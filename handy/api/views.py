@@ -59,7 +59,7 @@ from handy.api.staff_access import staff_may
 from handy.media.sanitize import sanitize_image
 from handy import catalog
 from handy.eligibility import (
-    can_receive_missions, is_publishable, not_on_timeoff, publishable, publishable_user_ids, published_services,
+    can_receive_missions, not_on_timeoff, publishable, publishable_user_ids, published_services,
     restrict_public_services,
 )
 from handy.models import (
@@ -618,18 +618,15 @@ class HandymanProfileViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
         if online is None:
             return Response({"detail": "online (booléen) requis."},
                             status=status.HTTP_400_BAD_REQUEST)
-        online = online is True or str(online).lower() in ("1", "true", "on", "oui")
-        # Conformité : seul un profil éligible aux missions (règle unique handy/eligibility.py) peut se rendre disponible.
-        if online and not is_publishable(profile):
+        # Conformité : un profil non vérifié ne peut pas se rendre disponible.
+        if bool(online) and not profile.is_approved:
             return Response(
-                {"detail": "Profil non vérifié : impossible de passer en ligne.", "code": "not_eligible"},
+                {"detail": "Profil non vérifié : impossible de passer en ligne."},
                 status=status.HTTP_403_FORBIDDEN,
             )
-        profile.online = online
+        profile.online = bool(online)
         profile.save(update_fields=["online"])
-        from flash.api import availability_payload
-
-        return Response(availability_payload(profile))   # { online, eligible, reason, missed_streak, schedule, pending_offers }
+        return Response({"online": profile.online})
 
     @extend_schema(
         tags=["Public"],

@@ -45,7 +45,7 @@ def test_me_refuses_everyone_without_a_role_and_lists_only_the_modules_of_the_ro
     assert ok["roles"] == ["marketing"] and {m["id"] for m in ok["modules"]} == {"dashboard", "announcements", "notifications", "analytics"}
     assert "finance.manage" not in ok["permissions"] and ok["user"]["name"] == "C_Mkt A."
     root = api(staff("c_root", superuser=True)).get("/handy/backoffice/me/").json()
-    assert len(root["modules"]) == 20 and root["roles"] == ["super_admin"]                    # 18 modules du cahier des charges + Engagements + Messagerie
+    assert len(root["modules"]) == 21 and root["roles"] == ["super_admin"]   # 18 modules du cahier des charges + Engagements + Messagerie + Tratra Flash
     for module in root["modules"]:
         assert set(module) == {"id", "label", "permission", "icon", "path"} and module["path"].startswith("/backoffice")
 

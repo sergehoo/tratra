@@ -77,6 +77,11 @@ class DispatchConfig(models.Model):
         obj, _ = cls.objects.get_or_create(pk=1)
         return obj
 
+    @classmethod
+    def current(cls) -> "DispatchConfig":
+        """Lecture SANS écriture (supervision, Tratra AI) : la ligne enregistrée, sinon les valeurs par défaut."""
+        return cls.objects.filter(pk=1).first() or cls(pk=1)
+
     WEIGHTS = ("distance", "trust", "rating", "reactivity", "fairness")
 
     def weights(self) -> dict:

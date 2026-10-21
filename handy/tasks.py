@@ -82,6 +82,7 @@ def send_notification_push(self, notification_id, collapse_key=None):
             return {"skipped": "obsolete"}
         flash = {"sound": notifications.FLASH_SOUND, "apns_category": notifications.FLASH_IOS_CATEGORY,
                  "data_only_capability": FLASH_CAPABILITY}
+        payload["expires_in"] = ttl   # délai RELATIF à l'envoi : l'alerte se retire à l'échéance sans dépendre de l'horloge du téléphone
     result = push.send_to_user(
         n.user_id, title, body, payload,
         channel=notifications.CHANNEL_BY_CATEGORY.get(n.category), collapse_key=collapse_key,
