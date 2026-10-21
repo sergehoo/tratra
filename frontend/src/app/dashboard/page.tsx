@@ -1,5 +1,5 @@
 "use client";
-import { useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -13,7 +13,9 @@ import {
   CircleCheck,
   Compass,
   Hammer,
+  Hourglass,
   Info,
+  Plus,
   Search,
   ShieldCheck,
   Star,
@@ -22,10 +24,8 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import ServiceCard from "@/components/market/ServiceCard";
-import { TrustBadges, TrustScorePill } from "@/components/trust/TrustBadge";
 import {
   Alert,
-  Badge,
   ButtonLink,
   Card,
   CardHeader,
@@ -41,6 +41,7 @@ import {
 } from "@/components/ds";
 import { TARGET_HREF, useDashboard, type DashAction, type DashItem, type DashboardData } from "@/lib/dashboard";
 import { formatFCFA } from "@/lib/format";
+import { actionHref, isVerified, proHomeState } from "@/lib/proStatus";
 import { iconForCategory } from "@/lib/trades";
 import type { Category, Paginated, Service } from "@/lib/types";
 import { useData } from "@/lib/useData";
@@ -155,12 +156,6 @@ function ActionsCard({ actions }: { actions: DashAction[] }) {
   );
 }
 
-const KYC_LABEL = {
-  none: { label: "À déposer", tone: "gray" },
-  pending: { label: "En vérification", tone: "accent" },
-  approved: { label: "Vérifiée", tone: "success" },
-  rejected: { label: "Refusée", tone: "danger" },
-} as const;
 
 function ProfileCard({ data }: { data: DashboardData }) {
   const p = data.provider;
@@ -180,26 +175,44 @@ function ProfileCard({ data }: { data: DashboardData }) {
       </Card>
     );
   }
-  const kyc = KYC_LABEL[p.kyc.status];
+  const st = proHomeState(p.eligibility, { publishable: p.publishable, servicesTotal: p.services.total });
+  // Vérifié : plus de carte de progression (badge « Vérifié » près du nom ; le détail reste dans Mon profil professionnel →
+  // Vérification et réputation).
+  if (st.kind === "verified") return null;
+  if (st.kind === "firstOffer") {
+    return (
+      <Card variant="soft" data-testid="pro-first-offer">
+        <h2 className="font-display text-lg font-extrabold text-ink">{st.title}</h2>
+        <p className="mt-2 text-sm leading-relaxed text-inkSoft">{st.message}</p>
+        <ButtonLink href={actionHref("add_service")} className="mt-5" leftIcon={<Plus aria-hidden className="h-4 w-4" />}>
+          {st.action?.label}
+        </ButtonLink>
+      </Card>
+    );
+  }
+  if (st.kind === "kycPending" || st.kind === "approvalPending" || st.kind === "blocked") {
+    // Statut compact ; un bouton seulement s'il y a vraiment quelque chose à faire.
+    return (
+      <Card padding="md" className="flex items-start gap-3" data-testid={`pro-status-${st.kind}`}>
+        <span aria-hidden className={cx("grid h-10 w-10 shrink-0 place-items-center rounded-2xl", st.kind === "blocked" ? "bg-warningSoft text-warning" : "bg-accentSoft text-accentDark")}>
+          {st.kind === "blocked" ? <Info className="h-5 w-5" /> : <Hourglass className="h-5 w-5" />}
+        </span>
+        <div className="min-w-0">
+          <p className="font-display text-base font-extrabold text-ink">{st.title}</p>
+          {st.message ? <p className="mt-1 text-sm text-inkSoft">{st.message}</p> : null}
+          {st.action ? (
+            <ButtonLink href={actionHref(st.action.code)} size="sm" variant="outline" className="mt-3">{st.action.label}</ButtonLink>
+          ) : null}
+        </div>
+      </Card>
+    );
+  }
+  // Il reste quelque chose à faire soi-même : progression et « Continuer » (ou la correction demandée si la pièce a été refusée).
   const missing = p.completion.items.filter((i) => !i.done).slice(0, 4);
   return (
-    <Card>
-      <CardHeader
-        title="Profil professionnel"
-        icon={<ShieldCheck className="h-5 w-5" />}
-        action={<Badge tone={p.publishable ? "success" : "gray"} dot>{p.publishable ? "Publié" : "Non publié"}</Badge>}
-      />
-      {p.badges?.length ? (
-        <div className="mb-4 flex flex-wrap items-center gap-2">
-          <TrustBadges badges={p.badges} />
-          {p.trust_score != null ? <TrustScorePill score={p.trust_score} /> : null}
-          <Link href="/dashboard/reputation" className="text-xs font-semibold text-primaryDark hover:underline">Ma réputation</Link>
-        </div>
-      ) : null}
-      <div className="mb-1 flex items-baseline justify-between">
-        <span className="text-sm font-semibold text-ink">Progression</span>
-        <span className="font-display text-lg font-extrabold text-primaryDark">{p.completion.percent}%</span>
-      </div>
+    <Card data-testid="pro-progress">
+      <CardHeader title="Profil professionnel" icon={<ShieldCheck className="h-5 w-5" />}
+        action={<span className="font-display text-lg font-extrabold text-primaryDark">{p.completion.done}/{p.completion.total}</span>} />
       <div
         role="progressbar"
         aria-label="Progression du profil professionnel"
@@ -210,16 +223,9 @@ function ProfileCard({ data }: { data: DashboardData }) {
       >
         <div className="h-full rounded-full bg-gradient-to-r from-primary to-accent transition-[width] duration-slow ease-emphasized" style={{ width: `${p.completion.percent}%` }} />
       </div>
-      <div className="mt-4 flex items-center justify-between gap-3 rounded-panel bg-canvas px-3.5 py-3">
-        <span className="flex items-center gap-2 text-sm font-semibold text-ink">
-          <BadgeCheck aria-hidden className="h-4 w-4 text-primary" /> Identité (KYC)
-        </span>
-        <Badge tone={kyc.tone} dot>{kyc.label}</Badge>
-      </div>
-      {p.kyc.status === "rejected" && p.kyc.rejection_reason ? (
-        <Alert tone="danger" className="mt-3">{p.kyc.rejection_reason}</Alert>
-      ) : null}
-      {missing.length ? (
+      {st.kind === "kycRejected" ? (
+        <Alert tone="danger" title={st.title} className="mt-4">{st.message}</Alert>
+      ) : missing.length ? (
         <ul className="mt-4 space-y-1.5 text-sm text-inkSoft">
           {missing.map((i) => (
             <li key={i.key} className="flex items-start gap-2">
@@ -228,13 +234,12 @@ function ProfileCard({ data }: { data: DashboardData }) {
             </li>
           ))}
         </ul>
-      ) : (
-        <p className="mt-4 text-sm font-medium text-successInk">Votre dossier est complet.</p>
-      )}
-      <div className="mt-5 flex flex-wrap gap-2">
-        <ButtonLink href="/dashboard/profile" size="sm">Compléter mon profil</ButtonLink>
-        <ButtonLink href="/dashboard/profile/kyc" size="sm" variant="outline">Mes documents</ButtonLink>
-      </div>
+      ) : st.message ? (
+        <p className="mt-4 text-sm text-inkSoft">{st.message}</p>
+      ) : null}
+      <ButtonLink href={actionHref(st.action?.code ?? "edit_profile")} className="mt-5" rightIcon={<ArrowRight aria-hidden className="h-4 w-4" />}>
+        {st.action?.label ?? "Continuer"}
+      </ButtonLink>
     </Card>
   );
 }
@@ -318,6 +323,17 @@ export default function DashboardHome() {
   const router = useRouter();
   const [q, setQ] = useState("");
   const [tab, setTab] = useState<"bookings" | "missions">("bookings");
+  // Statuts relus auprès du serveur au retour sur l'accueil (après une vérification d'identité, une publication, le profil) et quand
+  // l'onglet redevient visible ; le premier chargement est celui du tableau de bord (reconnexion : nouveau compte, nouveau chargement).
+  const alreadyLoaded = useRef(data !== null);
+  useEffect(() => {
+    if (alreadyLoaded.current) void reload();
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void reload();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [reload]);
 
   if (loading) {
     return (
@@ -401,6 +417,12 @@ export default function DashboardHome() {
         <h1 id="titre-dashboard" className="mt-3 font-display text-[1.85rem] font-extrabold leading-[1.1] tracking-tight [text-wrap:balance] sm:text-4xl">
           Bonjour, <span className="text-accent">{greeting}</span>
         </h1>
+        {provider && isVerified(proHomeState(provider.eligibility, { publishable: provider.publishable, servicesTotal: provider.services.total })) ? (
+          <span data-testid="hero-verified" title="Profil professionnel vérifié par Tratra"
+            className="mt-2 inline-flex items-center gap-1 rounded-full bg-success/25 px-2.5 py-1 text-xs font-bold text-white">
+            <BadgeCheck aria-hidden className="h-3.5 w-3.5" /> Vérifié
+          </span>
+        ) : null}
         <p className="mt-2 max-w-xl text-sm leading-relaxed text-white/80 sm:text-base">{summary}</p>
 
         <form role="search" onSubmit={onSearch} className="mt-6 flex max-w-xl flex-col gap-2 sm:flex-row">

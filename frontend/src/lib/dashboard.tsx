@@ -52,10 +52,34 @@ export interface ProviderBlock {
     rejection_reason: string | null;
   };
   services: { active: number; total: number };
+  /** Synthèse d'éligibilité du serveur (handy/eligibility.py) : la SEULE source pour « vérifié », jamais le 7/7. */
+  eligibility?: Eligibility;
   missions: BookingCounts;
   earnings: { available: string; currency: string };
   next_missions: DashItem[];
   recent_missions: DashItem[];
+}
+
+export interface EligibilityAction {
+  code: "edit_profile" | "verify_identity" | "add_service" | "manage_services" | "contact_support" | string;
+  label: string;
+}
+
+export interface EligibilityBlocker {
+  code: string;
+  label: string;
+  hint?: string | null;
+  action: EligibilityAction | null;
+}
+
+/** `eligibility_summary` : profil complet, identité, autorisation de publication, offres — quatre notions distinctes. */
+export interface Eligibility {
+  profile: { complete: boolean; done: number; total: number; items: ChecklistItem[] };
+  kyc: { status: "draft" | "pending" | "rejected" | "approved"; label: string; reason: string | null; approved: boolean };
+  approval: { approved: boolean; label: string };
+  publication: { authorized: boolean; label: string; blockers: EligibilityBlocker[] };
+  offers: { total: number; active: number; published: number; inactive: number; label: string; action: EligibilityAction | null };
+  next_action: EligibilityAction | null;
 }
 
 /** Destinations neutres renvoyées par l'API (le backend ne connaît aucune URL). */
