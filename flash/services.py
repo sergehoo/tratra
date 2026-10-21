@@ -203,13 +203,15 @@ class Candidate:
         return self.detail["score"]
 
 
-def candidates(req: MissionRequest, config: DispatchConfig, now=None, *, explain: bool = False):
-    """Professionnels éligibles et disponibles, classés. Avec `explain=True`, renvoie aussi les écartés et pourquoi (Back-Office)."""
+def candidates(req: MissionRequest, config: DispatchConfig, now=None, *, explain: bool = False, listing: bool = False):
+    """Professionnels éligibles et disponibles, classés. Avec `explain=True`, renvoie aussi les écartés et pourquoi (Back-Office).
+    `listing=True` : liste montrée au CLIENT pour choisir son professionnel (demande pas encore créée) — une proposition en attente
+    ailleurs n'écarte personne (le client choisit ; le pro répondra)."""
     now = now or timezone.now()
     family = category_family(req.category)
-    offered = set(req.offers.values_list("handyman_id", flat=True))
-    busy_elsewhere = set(MissionOffer.objects.filter(status=MissionOffer.PENDING, expires_at__gt=now)
-                         .exclude(request=req).values_list("handyman_id", flat=True))
+    offered = set(req.offers.values_list("handyman_id", flat=True)) if req.pk else set()
+    busy_elsewhere = set() if listing else set(
+        MissionOffer.objects.filter(status=MissionOffer.PENDING, expires_at__gt=now).exclude(request=req).values_list("handyman_id", flat=True))
     qs = (publishable(HandymanProfile.objects.select_related("user", "service_area"))
           .filter(Q(user__services__is_active=True, user__services__category_id__in=family) | Q(skills__id__in=family))
           .exclude(user_id=req.client_id).distinct())
@@ -244,7 +246,7 @@ def is_immediate(when, config: DispatchConfig, now=None) -> bool:
 
 def create_request(client, *, category: ServiceCategory, address: str, scheduled_for=None, mode: str = MissionRequest.FIRM,
                    amount=None, commune: str = "", city: str = "Abidjan", postal_code: str = "", description: str = "",
-                   lat=None, lng=None) -> MissionRequest:
+                   lat=None, lng=None, matching: str = MissionRequest.AUTO, target_id=None, service_id=None) -> MissionRequest:
     config = DispatchConfig.get_solo()
     now = timezone.now()
     when = scheduled_for or now
@@ -268,14 +270,35 @@ def create_request(client, *, category: ServiceCategory, address: str, scheduled
     active = MissionRequest.objects.filter(client=client, status__in=MissionRequest.OPEN).count()
     if active >= config.max_active_requests_per_client:
         raise FlashError("too_many_requests", f"Vous avez déjà {active} demandes en cours.", 429)
+    if matching not in dict(MissionRequest.MATCHINGS):
+        raise FlashError("invalid_matching", "Mode inconnu : « auto » (Trouvez-moi un professionnel) ou « direct » (Choisir mon professionnel).")
+    target = service = None
+    if matching == MissionRequest.DIRECT:
+        from flash import hybrid
+
+        draft = MissionRequest(client=client, category=category, commune=(commune or "").strip(), scheduled_for=when,
+                               is_immediate=is_immediate(when, config, now),
+                               location=Point(float(lng), float(lat), srid=4326) if lat is not None and lng is not None else None)
+        target = hybrid.validate_target(client, target_id, draft, config, now)
+        if service_id:
+            service = Service.objects.filter(pk=service_id, handyman=target, is_active=True).first()
+            if service is None:
+                raise FlashError("service_unavailable", "Cette offre n'est plus disponible chez ce professionnel.")
     with transaction.atomic():
         req = MissionRequest.objects.create(
             client=client, category=category, description=(description or "").strip()[:1000], address=address.strip()[:255],
             commune=(commune or "").strip()[:100], city=(city or "Abidjan").strip()[:100], postal_code=(postal_code or "").strip()[:20],
             location=Point(float(lng), float(lat), srid=4326) if lat is not None and lng is not None else None,
-            scheduled_for=when, is_immediate=is_immediate(when, config, now), mode=mode, amount=amount)
-        log(req, "created", actor=client, mode=mode, amount=str(amount) if amount is not None else None, immediate=req.is_immediate)
-    launch_wave(req.pk)
+            scheduled_for=when, is_immediate=is_immediate(when, config, now), mode=mode, amount=amount,
+            matching=matching, target=target, service=service)
+        log(req, "created", actor=client, mode=mode, amount=str(amount) if amount is not None else None, immediate=req.is_immediate,
+            matching=matching, target=target.pk if target else None)
+    if matching == MissionRequest.DIRECT:
+        from flash import hybrid
+
+        hybrid.start_direct(req.pk, target)
+    else:
+        launch_wave(req.pk)
     req.refresh_from_db()
     return req
 
@@ -293,6 +316,12 @@ def launch_wave(request_id: int, *, now=None) -> List[MissionOffer]:
         if req.status != MissionRequest.SEARCHING:
             return []
         if req.offers.filter(status=MissionOffer.PENDING).exists():
+            return []
+        if req.matching == MissionRequest.DIRECT:
+            # Professionnel choisi par le client : jamais de vague. Sans réponse positive, le CLIENT décide (autre pro, Smart Dispatch, annuler).
+            from flash import hybrid
+
+            hybrid.after_targeted_response(req, config, now)
             return []
         quotes = req.offers.filter(status=MissionOffer.QUOTED).count()
         if req.wave >= config.max_waves or (req.mode == MissionRequest.QUOTE and quotes >= config.max_quotes):
@@ -438,7 +467,8 @@ def accept(offer_id: int, user, *, now=None) -> MissionRequest:
 
 
 def _assign(req: MissionRequest, offer: MissionOffer, pro, amount, now) -> Booking:
-    service = (Service.objects.filter(handyman=pro, is_active=True, category_id__in=category_family(req.category))
+    chosen = req.service if req.service_id and req.service.handyman_id == pro.pk else None   # offre choisie par le client
+    service = chosen or (Service.objects.filter(handyman=pro, is_active=True, category_id__in=category_family(req.category))
                .annotate(exact=Case(When(category_id=req.category_id, then=Value(1)), default=Value(0), output_field=IntegerField()))
                .order_by("-exact", "-id").first())
     booking = Booking(client_id=req.client_id, handyman=pro, service=service, booking_date=req.scheduled_for,

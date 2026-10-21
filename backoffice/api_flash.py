@@ -63,7 +63,9 @@ def _request_row(r: MissionRequest) -> dict:
             "client": public_name(r.client), "client_id": r.client_id, "created_at": r.created_at, "scheduled_for": r.scheduled_for,
             "wave": r.wave, "contacted": getattr(r, "n_offers", None), "assigned_to": public_name(r.assigned_to) if r.assigned_to_id else None,
             "assigned_at": r.assigned_at, "seconds_to_assign": int((r.assigned_at - r.created_at).total_seconds()) if r.assigned_at else None,
-            "booking": r.booking_id, "close_reason": r.close_reason}
+            "booking": r.booking_id, "close_reason": r.close_reason,
+            "matching": r.matching, "matching_label": r.get_matching_display(), "switches": r.switches,
+            "target": public_name(r.target) if r.target_id else None}
 
 
 class FlashRequestList(BOView):
@@ -71,7 +73,9 @@ class FlashRequestList(BOView):
 
     def get(self, request):
         p = request.query_params
-        qs = MissionRequest.objects.select_related("category", "client", "assigned_to").annotate(n_offers=Count("offers"))
+        qs = MissionRequest.objects.select_related("category", "client", "assigned_to", "target").annotate(n_offers=Count("offers"))
+        if p.get("matching") in dict(MissionRequest.MATCHINGS):
+            qs = qs.filter(matching=p["matching"])
         if p.get("status") == "open":
             qs = qs.filter(status__in=MissionRequest.OPEN)
         elif p.get("status") in dict(MissionRequest.STATUSES):
@@ -88,14 +92,15 @@ class FlashRequestDetail(BOView):
     bo_permission = "bookings.view"
 
     def get(self, request, pk):
-        r = MissionRequest.objects.select_related("category", "client", "assigned_to").filter(pk=pk).first()
+        r = MissionRequest.objects.select_related("category", "client", "assigned_to", "target").filter(pk=pk).first()
         if r is None:
             return bad_request("not_found", "Demande introuvable.", 404)
         offers = [{"id": o.pk, "pro": public_name(o.handyman), "pro_id": o.handyman_id, "wave": o.wave, "rank": o.rank, "score": o.score,
                    "criteria": o.score_detail.get("criteria", []), "distance_km": o.distance_km, "status": o.status, "status_label": o.get_status_display(),
                    "sent_at": o.sent_at, "expires_at": o.expires_at, "seen_at": o.seen_at, "responded_at": o.responded_at,
                    "response_seconds": o.response_seconds, "decline_reason": o.get_decline_reason_display() if o.decline_reason else "",
-                   "quote_amount": int(o.quote_amount) if o.quote_amount is not None else None, "push_status": o.push_status}
+                   "quote_amount": int(o.quote_amount) if o.quote_amount is not None else None, "push_status": o.push_status,
+                   "targeted": o.targeted}
                   for o in r.offers.select_related("handyman").order_by("wave", "rank")]
         events = [{"kind": e.kind, "label": e.get_kind_display(), "at": e.at, "actor": public_name(e.actor) if e.actor_id else None, "data": e.data}
                   for e in r.events.select_related("actor")]
@@ -111,11 +116,11 @@ class FlashSupervision(BOView):
         except ValueError:
             days = 7
         data = insights.overview(days)
-        waiting = (MissionRequest.objects.filter(status__in=MissionRequest.OPEN).select_related("category", "client", "assigned_to")
+        waiting = (MissionRequest.objects.filter(status__in=MissionRequest.OPEN).select_related("category", "client", "assigned_to", "target")
                    .annotate(n_offers=Count("offers")).order_by("created_at")[:30])
         data["open_requests"] = [_request_row(r) for r in waiting]
         data["recent_unfulfilled"] = [_request_row(r) for r in MissionRequest.objects.filter(status=MissionRequest.UNFULFILLED)
-                                      .select_related("category", "client", "assigned_to").annotate(n_offers=Count("offers"))
+                                      .select_related("category", "client", "assigned_to", "target").annotate(n_offers=Count("offers"))
                                       .order_by("-closed_at")[:20]]
         return Response(data)
 

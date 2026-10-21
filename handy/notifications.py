@@ -38,7 +38,7 @@ CATEGORY_BY_TYPE: Dict[str, str] = {
     "installment_overdue": "engagement", "payment_declared": "engagement", "payment_confirmed": "engagement",
     "schedule_event": "engagement", "evaluation_received": "engagement", "evaluation_invite": "review", "engagement_dispute": "engagement",
     # Tratra Flash : propositions aux professionnels (alerte prioritaire), devis et suites côté client.
-    "new_mission": "flash", "mission_paused": "flash", "mission_quote": "booking", "mission_unfulfilled": "booking",
+    "new_mission": "flash", "mission_paused": "flash", "mission_quote": "booking", "mission_unfulfilled": "booking", "mission_choice": "booking",
     "trust_penalty": "account",
 }
 

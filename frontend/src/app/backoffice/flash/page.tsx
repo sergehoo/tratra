@@ -15,12 +15,13 @@ interface ReqRow {
   id: number; status: string; status_label: string; mode: string; category: string; commune: string; immediate: boolean; amount: number | null;
   client: string; client_id: number; created_at: string; scheduled_for: string; wave: number; contacted: number | null; assigned_to: string | null;
   assigned_at: string | null; seconds_to_assign: number | null; booking: number | null; close_reason: string;
+  matching: "auto" | "direct"; matching_label: string; switches: number; target: string | null;
 }
 interface Criterion { key: string; label: string; weight: number; value: number; measured: boolean; points: number; detail: string }
 interface OfferRow {
   id: number; pro: string; pro_id: number; wave: number; rank: number; score: number; criteria: Criterion[]; distance_km: number | null; status: string;
   status_label: string; sent_at: string; expires_at: string; seen_at: string | null; responded_at: string | null; response_seconds: number | null;
-  decline_reason: string; quote_amount: number | null;
+  decline_reason: string; quote_amount: number | null; targeted: boolean;
 }
 interface EventRow { kind: string; label: string; at: string; actor: string | null; data: Record<string, unknown> }
 interface ReqDetail extends ReqRow { description: string; offers: OfferRow[]; events: EventRow[] }
@@ -28,7 +29,8 @@ interface Supervision {
   period_days: number;
   requests: { total: number; by_status: Record<string, number>; assignment_rate: number | null; median_seconds_to_assign: number | null };
   offers: { total: number; by_status: Record<string, number>; expiry_rate: number | null; median_response_seconds: number | null; decline_reasons: Record<string, number> };
-  auto_paused: number; no_candidate: number; waiting_over_10_min: number;
+  auto_paused: number; no_candidate: number; waiting_over_10_min: number; switches: number; awaiting_choice: number;
+  by_matching: Record<"auto" | "direct", { total: number; assigned: number }>;
   recommendations: { rule: string; evidence: string; suggestion: string }[];
   open_requests: ReqRow[]; recent_unfulfilled: ReqRow[];
 }
@@ -40,7 +42,7 @@ interface Penalty {
 }
 
 const STATUS_TONE: Record<string, "success" | "accent" | "gray" | "danger" | "warning"> = {
-  assigned: "success", searching: "accent", quoting: "warning", unfulfilled: "danger", cancelled: "gray",
+  assigned: "success", searching: "accent", quoting: "warning", awaiting: "warning", unfulfilled: "danger", cancelled: "gray",
   accepted: "success", pending: "accent", quoted: "warning", declined: "gray", expired: "danger", withdrawn: "gray",
 };
 const pct = (v: number | null) => (v === null ? "—" : `${Math.round(v * 100)} %`);
@@ -61,7 +63,8 @@ function RequestPanel({ id, onClose }: { id: number | null; onClose: () => void 
       {error ? <Alert tone="danger">{error}</Alert> : null}
       {d ? (
         <div className="space-y-5">
-          <KV items={[["Statut", <Badge key="s" tone={STATUS_TONE[d.status] ?? "gray"}>{d.status_label}</Badge>], ["Client", d.client], ["Zone", d.commune || "—"],
+          <KV items={[["Statut", <Badge key="s" tone={STATUS_TONE[d.status] ?? "gray"}>{d.status_label}</Badge>], ["Mode", `${d.matching_label}${d.target ? ` — ${d.target}` : ""}${d.switches ? ` (${d.switches} changement${d.switches > 1 ? "s" : ""} de mode)` : ""}`],
+            ["Client", d.client], ["Zone", d.commune || "—"],
             ["Quand", `${d.immediate ? "Immédiate" : "Planifiée"} — ${dt(d.scheduled_for)}`], ["Montant", money(d.amount)], ["Vagues", d.wave],
             ["Attribuée à", d.assigned_to ?? "—"], ["Délai d’attribution", secs(d.seconds_to_assign)], ["Réservation", d.booking ? `#${d.booking}` : "—"]]} />
           {d.description ? <p className="whitespace-pre-line rounded-panel bg-canvas p-3 text-sm text-inkSoft">{d.description}</p> : null}
@@ -74,7 +77,7 @@ function RequestPanel({ id, onClose }: { id: number | null; onClose: () => void 
                   {d.offers.map((o) => (
                     <tr key={o.id} className="border-t border-line align-top">
                       <td className="py-1.5 pr-2">{o.wave}.{o.rank}</td>
-                      <td className="pr-2">{o.pro}<details className="text-xs text-ash"><summary className="cursor-pointer">Pourquoi ce rang</summary>
+                      <td className="pr-2">{o.pro}{o.targeted ? <Badge tone="accent" className="ml-1">Choisi par le client</Badge> : null}<details className="text-xs text-ash"><summary className="cursor-pointer">Pourquoi ce rang</summary>
                         <ul className="mt-1 space-y-0.5">{o.criteria.map((c) => <li key={c.key}>{c.label} : {c.points} pts (poids {c.weight}) — {c.detail}</li>)}</ul></details></td>
                       <td className="pr-2">{o.score.toFixed(1)}</td>
                       <td className="pr-2">{o.distance_km === null ? "Même commune" : `${o.distance_km.toFixed(1)} km`}</td>
@@ -134,6 +137,11 @@ function SupervisionTab({ onOpen }: { onOpen: (id: number) => void }) {
         <Kpi icon={<Gauge className="h-5 w-5" />} tone="night" label="Propositions sans réponse" value={pct(d.offers.expiry_rate)} hint={`Réponse médiane : ${secs(d.offers.median_response_seconds)}`} />
         <Kpi icon={<Hourglass className="h-5 w-5" />} tone={d.waiting_over_10_min ? "danger" : "primary"} label="En recherche depuis +10 min" value={d.waiting_over_10_min} hint={`${d.no_candidate} sans candidat · ${d.auto_paused} pause(s) auto`} />
       </KpiGrid>
+      <KpiGrid>
+        <Kpi icon={<Zap className="h-5 w-5" />} label="Trouvez-moi un professionnel" value={d.by_matching.auto.total} hint={`${d.by_matching.auto.assigned} attribuée(s)`} />
+        <Kpi icon={<UserRound className="h-5 w-5" />} tone="accent" label="Choisir mon professionnel" value={d.by_matching.direct.total} hint={`${d.by_matching.direct.assigned} attribuée(s)`} />
+        <Kpi icon={<Timer className="h-5 w-5" />} tone={d.awaiting_choice ? "danger" : "night"} label="Choix du client attendu" value={d.awaiting_choice} hint={`${d.switches} changement(s) de mode sur la période`} />
+      </KpiGrid>
       <Section title="Recommandations (lecture seule)">
         {d.recommendations.length ? (
           <ul className="space-y-3">{d.recommendations.map((r, i) => (
@@ -153,11 +161,12 @@ function SupervisionTab({ onOpen }: { onOpen: (id: number) => void }) {
 }
 
 function RequestsTab({ onOpen }: { onOpen: (id: number) => void }) {
-  const m = useManagedList<ReqRow, { status: string }>("/flash/requests/", { status: "" });
+  const m = useManagedList<ReqRow, { status: string; matching: string }>("/flash/requests/", { status: "", matching: "" });
   const { values: f, list } = m;
   const columns: BoColumn<ReqRow>[] = [
     { key: "id", header: "Demande", primary: true, cell: (r) => <span className="font-semibold text-ink">#{r.id} {r.category}</span> },
     { key: "status", header: "Statut", cell: (r) => <Badge tone={STATUS_TONE[r.status] ?? "gray"}>{r.status_label}</Badge> },
+    { key: "matching", header: "Mode", hideOnMobile: true, cell: (r) => <span>{r.matching === "direct" ? "Choix du client" : "Smart Dispatch"}{r.target ? <span className="block text-xs text-ash">{r.target}</span> : null}</span> },
     { key: "client", header: "Client", hideOnMobile: true, cell: (r) => r.client },
     { key: "amount", header: "Montant", align: "right", hideOnMobile: true, cell: (r) => money(r.amount) },
     { key: "contacted", header: "Contactés", align: "right", from: "xl", hideOnMobile: true, cell: (r) => r.contacted ?? 0 },
@@ -172,7 +181,8 @@ function RequestsTab({ onOpen }: { onOpen: (id: number) => void }) {
   return (
     <>
       <FilterBar search={<SearchBox value={f.q} onChange={(v) => m.set({ q: v })} placeholder="Métier, commune, client, professionnel…" />} activeCount={m.activeCount} onReset={m.reset} onRefresh={() => void list.reload()} refreshing={list.loading}>
-        <FilterSelect label="Statut" value={f.status} onChange={(v) => m.set({ status: v })} options={[["", "Tous"], ["open", "En cours"], ["assigned", "Attribuées"], ["unfulfilled", "Sans professionnel"], ["cancelled", "Annulées"]]} />
+        <FilterSelect label="Statut" value={f.status} onChange={(v) => m.set({ status: v })} options={[["", "Tous"], ["open", "En cours"], ["awaiting", "Choix du client attendu"], ["assigned", "Attribuées"], ["unfulfilled", "Sans professionnel"], ["cancelled", "Annulées"]]} />
+        <FilterSelect label="Mode" value={f.matching} onChange={(v) => m.set({ matching: v })} options={[["", "Tous"], ["auto", "Smart Dispatch"], ["direct", "Choix du client"]]} />
       </FilterBar>
       <ListView list={list} columns={columns} rowKey={(r) => r.id} rowLabel={(r) => `Demande #${r.id}`} caption="Historique des attributions" empty="Aucune demande."
         ordering={f.ordering} onOrdering={(v) => m.set({ ordering: v })} rowActions={rowActions} pageSize={m.pageSize} onPageSize={(n) => m.set({ size: String(n) })} />

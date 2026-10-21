@@ -28,6 +28,12 @@ class DispatchConfig(models.Model):
     immediate_horizon_minutes = models.PositiveIntegerField(
         "Une mission est « immédiate » si elle commence dans moins de (minutes)", default=120,
         validators=[MinValueValidator(15), MaxValueValidator(1440)])
+    direct_offer_timeout_seconds = models.PositiveIntegerField(
+        "Délai de réponse du professionnel CHOISI — mission immédiate (secondes)", default=300,
+        validators=[MinValueValidator(60), MaxValueValidator(3600)])
+    direct_scheduled_offer_timeout_seconds = models.PositiveIntegerField(
+        "Délai de réponse du professionnel CHOISI — mission planifiée (secondes)", default=3600,
+        validators=[MinValueValidator(300), MaxValueValidator(86400)])
     quote_window_hours = models.PositiveSmallIntegerField("Durée pendant laquelle le client choisit un devis (heures)", default=24,
                                                           validators=[MinValueValidator(1), MaxValueValidator(168)])
     max_quotes = models.PositiveSmallIntegerField("Devis recherchés (sur devis) avant d'arrêter les vagues", default=3,
@@ -91,10 +97,15 @@ class DispatchConfig(models.Model):
 class MissionRequest(models.Model):
     FIRM, QUOTE = "firm", "quote"
     MODES = [(FIRM, "Prix ferme (le premier qui accepte)"), (QUOTE, "Sur devis (le client choisit)")]
+    # Attribution : Smart Dispatch (vagues) ou professionnel choisi par le client (proposition ciblée). UNE seule commande, un seul
+    # flux (propositions → acceptation atomique → réservation) ; on peut passer d'un mode à l'autre sans ressaisie (hybrid.switch).
+    AUTO, DIRECT = "auto", "direct"
+    MATCHINGS = [(AUTO, "Trouvez-moi un professionnel"), (DIRECT, "Choisir mon professionnel")]
     SEARCHING, QUOTING, ASSIGNED, UNFULFILLED, CANCELLED = "searching", "quoting", "assigned", "unfulfilled", "cancelled"
-    STATUSES = [(SEARCHING, "Recherche en cours"), (QUOTING, "Devis à choisir"), (ASSIGNED, "Attribuée"),
+    AWAITING = "awaiting"
+    STATUSES = [(SEARCHING, "Recherche en cours"), (QUOTING, "Devis à choisir"), (AWAITING, "Votre choix est attendu"), (ASSIGNED, "Attribuée"),
                 (UNFULFILLED, "Aucun professionnel disponible"), (CANCELLED, "Annulée par le client")]
-    OPEN = (SEARCHING, QUOTING)
+    OPEN = (SEARCHING, QUOTING, AWAITING)
 
     client = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="flash_requests")
     category = models.ForeignKey("handy.ServiceCategory", on_delete=models.PROTECT, related_name="flash_requests")
@@ -108,6 +119,10 @@ class MissionRequest(models.Model):
     scheduled_for = models.DateTimeField(db_index=True)
     is_immediate = models.BooleanField(default=False, db_index=True)
     mode = models.CharField(max_length=5, choices=MODES, default=FIRM)
+    matching = models.CharField(max_length=6, choices=MATCHINGS, default=AUTO, db_index=True)
+    target = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="flash_targeted")
+    service = models.ForeignKey("handy.Service", null=True, blank=True, on_delete=models.SET_NULL, related_name="flash_requests")
+    switches = models.PositiveSmallIntegerField(default=0)
     amount = models.DecimalField(max_digits=10, decimal_places=0, null=True, blank=True,
                                  validators=[MinValueValidator(0)])                      # prix ferme (FCFA, déplacement compris)
 
@@ -157,6 +172,7 @@ class MissionOffer(models.Model):
     score_detail = models.JSONField(default=dict, blank=True)          # critères, valeurs, poids : pourquoi ce pro, à ce rang
     distance_km = models.FloatField(null=True, blank=True)
     status = models.CharField(max_length=10, choices=STATUSES, default=PENDING, db_index=True)
+    targeted = models.BooleanField(default=False)                     # proposition au professionnel CHOISI par le client
     sent_at = models.DateTimeField(auto_now_add=True, db_index=True)
     expires_at = models.DateTimeField(db_index=True)
     seen_at = models.DateTimeField(null=True, blank=True)              # ouverte dans l'application (aucun effet sur le classement)
@@ -190,6 +206,7 @@ class DispatchEvent(models.Model):
         ("quoted", "Devis reçu"), ("quote_chosen", "Devis retenu"), ("assigned", "Mission attribuée"), ("no_candidate", "Aucun professionnel éligible"),
         ("unfulfilled", "Demande sans professionnel"), ("cancelled", "Demande annulée"), ("auto_paused", "Professionnel passé « Indisponible »"),
         ("conflict", "Acceptation refusée (conflit)"), ("withdrawal", "Désistement après acceptation"),
+        ("targeted", "Proposition au professionnel choisi"), ("awaiting", "Choix du client attendu"), ("switched", "Changement de mode"),
     ]
     request = models.ForeignKey(MissionRequest, on_delete=models.CASCADE, related_name="events")
     offer = models.ForeignKey(MissionOffer, null=True, blank=True, on_delete=models.SET_NULL, related_name="events")

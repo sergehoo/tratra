@@ -51,7 +51,8 @@ def offer_payload(offer: MissionOffer) -> dict:
             "zone": zone_label(req), "when": timezone.localtime(req.scheduled_for).isoformat(), "when_label": when_label(req),
             "immediate": "1" if req.is_immediate else "0", "amount": str(int(req.amount)) if req.amount is not None else "",
             "amount_label": money(req.amount) if req.amount is not None else "Sur devis",
-            "expires_at": offer.expires_at.isoformat(), "distance_km": "" if offer.distance_km is None else str(offer.distance_km)}
+            "expires_at": offer.expires_at.isoformat(), "distance_km": "" if offer.distance_km is None else str(offer.distance_km),
+            "direct": "1" if offer.targeted else "0"}
 
 
 def new_offer(offer_id: int) -> None:
@@ -63,7 +64,8 @@ def new_offer(offer_id: int) -> None:
     price = money(req.amount) if req.amount is not None else "Sur devis"
     notify(offer.handyman_id, "new_mission",
            f"{zone_label(req)} · {when_label(req)} · {price} — {duration_label(remaining)} pour répondre",
-           title=f"Nouvelle mission · {req.category.name}", data=offer_payload(offer), dedupe_key=offer_key(offer.pk),
+           title=f"{'Un client vous a choisi' if offer.targeted else 'Nouvelle mission'} · {req.category.name}", data=offer_payload(offer),
+           dedupe_key=offer_key(offer.pk),
            content_object=offer, collapse_key=f"flash-{offer.pk}")
 
 
@@ -116,3 +118,15 @@ def paused(user_id: int, streak: int) -> None:
            f"{streak} propositions sont restées sans réponse : vous ne recevez plus de missions immédiates. Repassez « Disponible » quand "
            f"vous le souhaitez — aucune conséquence sur votre réputation.",
            title="Vous êtes passé « Indisponible »", data={"kind": "availability"}, dedupe_key=f"flash:paused:{user_id}:{now:%Y%m%d%H%M}")
+
+
+def choice_needed(request_id: int, reason: str) -> None:
+    """Le professionnel choisi n'a pas accepté : le client décide (autre professionnel, Smart Dispatch, annuler). Rien n'est relancé sans lui."""
+    req = MissionRequest.objects.select_related("category", "target").filter(pk=request_id).first()
+    if req is None or req.status != MissionRequest.AWAITING:
+        return
+    who = (getattr(req.target, "first_name", "") or "").strip() or "Le professionnel choisi"
+    notify(req.client_id, "mission_choice",
+           f"{who} {reason}. Choisissez un autre professionnel ou laissez Tratra en trouver un, sans rien ressaisir.",
+           title=f"« {req.category.name} » : votre choix est attendu", data={"kind": "flash_request", "id": req.pk},
+           dedupe_key=f"flash:request:{req.pk}:choice:{req.switches}", content_object=req)

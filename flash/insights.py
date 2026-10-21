@@ -36,6 +36,10 @@ def overview(days: int = 7, *, now=None) -> Dict:
         "offers": {"total": sum(offer_status.values()), "by_status": offer_status,
                    "expiry_rate": round(offer_status.get(MissionOffer.EXPIRED, 0) / decided, 3) if decided else None,
                    "median_response_seconds": int(median(times)) if times else None, "decline_reasons": reasons},
+        "by_matching": {m: {"total": reqs.filter(matching=m).count(), "assigned": reqs.filter(matching=m, status=MissionRequest.ASSIGNED).count()}
+                        for m, _ in MissionRequest.MATCHINGS},
+        "switches": DispatchEvent.objects.filter(kind="switched", at__gte=since).count(),
+        "awaiting_choice": MissionRequest.objects.filter(status=MissionRequest.AWAITING).count(),
         "auto_paused": DispatchEvent.objects.filter(kind="auto_paused", at__gte=since).count(),
         "no_candidate": DispatchEvent.objects.filter(kind="no_candidate", at__gte=since).count(),
         "waiting_over_10_min": waiting.count(),

@@ -69,6 +69,13 @@ def request_payload(req: MissionRequest, request) -> dict:
         "quote_deadline": req.quote_deadline, "created_at": req.created_at, "assigned_at": req.assigned_at, "closed_at": req.closed_at,
         "close_reason": req.close_reason, "booking": req.booking_id, "version": req.version,
         "assigned_to": _pro_card(req.assigned_to, request) if req.assigned_to_id else None,
+        # Hybrid Matching : mode courant, professionnel choisi, bascule possible (avec confirmation) tant que la demande est ouverte.
+        "matching": req.matching, "matching_label": req.get_matching_display(), "switches": req.switches,
+        "target": _pro_card(req.target, request) if req.target_id else None,
+        "service": {"id": req.service_id, "title": req.service.title} if req.service_id else None,
+        "can_switch": req.is_open,
+        "awaiting_reason": (req.events.filter(kind="awaiting").order_by("-at").values_list("data", flat=True).first() or {}).get("reason")
+        if req.status == MissionRequest.AWAITING else None,
         "can_cancel": req.is_open, "can_relaunch": req.status in (MissionRequest.UNFULFILLED, MissionRequest.CANCELLED)
         or (req.status == MissionRequest.ASSIGNED and req.booking is not None and req.booking.status == "cancelled"),
     }
@@ -80,7 +87,8 @@ def request_payload(req: MissionRequest, request) -> dict:
 
 
 def _client_request(request, pk) -> MissionRequest:
-    return get_object_or_404(MissionRequest.objects.select_related("category", "assigned_to", "booking"), pk=pk, client=request.user)
+    return get_object_or_404(MissionRequest.objects.select_related("category", "assigned_to", "booking", "target", "service"), pk=pk,
+                             client=request.user)
 
 
 def _float(value, name):
@@ -95,7 +103,7 @@ def _float(value, name):
 @endpoint(["GET", "POST"], "Mes demandes Tratra Flash / nouvelle demande", idempotent="request.create")
 def requests_view(request):
     if request.method == "GET":
-        qs = MissionRequest.objects.filter(client=request.user).select_related("category", "assigned_to", "booking")[:30]
+        qs = MissionRequest.objects.filter(client=request.user).select_related("category", "assigned_to", "booking", "target", "service")[:30]
         return Response({"results": [request_payload(r, request) for r in qs]})
     d = request.data
     category = ServiceCategory.objects.filter(pk=d.get("category")).first() if str(d.get("category") or "").isdigit() else None
@@ -117,11 +125,91 @@ def requests_view(request):
     lat, lng = _float(d.get("lat"), "lat"), _float(d.get("lng"), "lng")
     if (lat is None) != (lng is None):
         raise FlashError("invalid", "Position incomplète.")
+    matching = str(d.get("matching") or MissionRequest.AUTO)
+    mode = str(d.get("mode") or MissionRequest.FIRM)
+    service_id = d.get("service") if str(d.get("service") or "").isdigit() else None
+    if matching == MissionRequest.DIRECT and service_id and amount is None and mode == MissionRequest.FIRM:
+        from handy.models import Service
+
+        svc = Service.objects.filter(pk=service_id, is_active=True).first()
+        if svc is not None and svc.price_type == "fixed" and svc.price is not None:
+            amount = int(svc.price)   # réservation d'une offre à prix fixe : le prix affiché de l'offre
+        elif svc is not None and svc.price_type == "quote":
+            mode = MissionRequest.QUOTE
     req = services.create_request(request.user, category=category, address=str(d.get("address") or ""), scheduled_for=when,
-                                  mode=str(d.get("mode") or MissionRequest.FIRM), amount=amount, commune=str(d.get("commune") or ""),
+                                  mode=mode, amount=amount, commune=str(d.get("commune") or ""),
                                   city=str(d.get("city") or "Abidjan"), postal_code=str(d.get("postal_code") or ""),
-                                  description=str(d.get("description") or ""), lat=lat, lng=lng)
+                                  description=str(d.get("description") or ""), lat=lat, lng=lng,
+                                  matching=matching, target_id=d.get("target"), service_id=service_id)
     return Response(request_payload(req, request), status=201)
+
+
+@endpoint(["POST"], "Changer de mode (Trouvez-moi un professionnel ⇄ Choisir mon professionnel), avec confirmation", idempotent="request.switch")
+def request_switch(request, pk):
+    from flash import hybrid
+
+    _client_request(request, pk)
+    d = request.data
+    req = hybrid.switch(pk, request.user, str(d.get("to") or ""), target_id=d.get("target"), expected_version=d.get("expected_version"),
+                        confirm=d.get("confirm") in (True, "true", "1", 1))
+    return Response(request_payload(req, request))
+
+
+def _when(raw):
+    if not raw:
+        return None
+    when = parse_datetime(str(raw))
+    if when is None:
+        raise FlashError("invalid_date", "Date invalide.")
+    return timezone.make_aware(when) if timezone.is_naive(when) else when
+
+
+def _category(raw) -> ServiceCategory:
+    category = ServiceCategory.objects.filter(pk=raw, is_active=True).first() if str(raw or "").isdigit() else None
+    if category is None:
+        raise FlashError("category_required", "Choisissez le métier recherché.")
+    return category
+
+
+@endpoint(["GET"], "Mode conseillé pour ce métier (immédiat, planifié ou sur devis), dernier choix du client")
+def suggest_view(request):
+    from flash import hybrid
+
+    p = request.query_params
+    return Response(hybrid.suggest(request.user, _category(p.get("category")), when=_when(p.get("when")), quote=p.get("mode") == "quote",
+                                   lat=_float(p.get("lat"), "lat"), lng=_float(p.get("lng"), "lng"), commune=p.get("commune", "")))
+
+
+@endpoint(["GET"], "Professionnels disponibles à choisir (profils, avis, badges, favoris)")
+def pros_view(request):
+    from flash import hybrid
+
+    p = request.query_params
+    sort = p.get("sort", "recommended")
+    rows = hybrid.direct_pros(request.user, _category(p.get("category")), when=_when(p.get("when")), lat=_float(p.get("lat"), "lat"),
+                              lng=_float(p.get("lng"), "lng"), commune=p.get("commune", ""),
+                              sort=sort if sort in hybrid.SORTS else "recommended", min_rating=_float(p.get("min_rating"), "min_rating"),
+                              badge=p.get("badge", "") if p.get("badge") in ("VERIFIE", "EXPERT", "SUR") else "",
+                              favorites_only=p.get("favorites") in ("1", "true"), request=request)
+    return Response({"count": len(rows), "results": rows})
+
+
+@endpoint(["GET", "POST"], "Mes professionnels favoris / ajouter un favori", idempotent="favorite.add")
+def favorites_view(request):
+    from flash import hybrid
+
+    if request.method == "POST":
+        hybrid.add_favorite(request.user, request.data.get("handyman"))
+        return Response({"results": hybrid.favorites(request.user, request)}, status=201)
+    return Response({"results": hybrid.favorites(request.user, request)})
+
+
+@endpoint(["DELETE"], "Retirer un favori")
+def favorite_delete(request, handyman_id):
+    from flash import hybrid
+
+    hybrid.remove_favorite(request.user, handyman_id)
+    return Response({"results": hybrid.favorites(request.user, request)})
 
 
 @endpoint(["GET"], "Détail d'une demande Tratra Flash")
@@ -156,7 +244,9 @@ def request_relaunch(request, pk):
         request.user, category=old.category, address=old.address, scheduled_for=when or max(old.scheduled_for, timezone.now()),
         mode=old.mode, amount=int(amount) if amount not in (None, "") else None, commune=old.commune, city=old.city,
         postal_code=old.postal_code, description=old.description,
-        lat=old.location.y if old.location else None, lng=old.location.x if old.location else None)
+        lat=old.location.y if old.location else None, lng=old.location.x if old.location else None,
+        # Le choix du client est conservé (même mode, même professionnel) sauf s'il en indique un autre.
+        matching=str(d.get("matching") or old.matching), target_id=d.get("target", old.target_id), service_id=old.service_id)
     services.log(req, "created", actor=request.user, relaunch_of=old.pk)
     return Response(request_payload(req, request), status=201)
 

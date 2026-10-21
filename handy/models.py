@@ -1044,9 +1044,13 @@ class Dispute(models.Model):
 
 
 class FavoriteHandyman(models.Model):
+    """Professionnel favori d'un client : réservation rapide (« Choisir mon professionnel » prérempli)."""
     client = models.ForeignKey(User, on_delete=models.CASCADE, related_name='favorite_handymen')
     handyman = models.ForeignKey(User, on_delete=models.CASCADE, related_name='favorited_by')
     created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['client', 'handyman'], name='uniq_favorite_handyman')]
 
 
 class Review(models.Model):
@@ -1214,6 +1218,7 @@ class Notification(models.Model):
         ('mission_quote', 'Devis reçu (Tratra Flash)'),
         ('mission_unfulfilled', 'Demande sans professionnel (Tratra Flash)'),
         ('mission_paused', 'Disponibilité suspendue (Tratra Flash)'),
+        ('mission_choice', 'Choix à faire sur une demande (Tratra Flash)'),
         ('trust_penalty', 'Pénalité ou décision Tratra Trust'),
     ]
     CATEGORIES = [
