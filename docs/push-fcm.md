@@ -86,6 +86,6 @@ préférences par catégorie, une seule notification par événement (idempotenc
   nouvelle demande de réservation/mission (app en arrière-plan), nouveau message (app FERMÉE, processus tué), app ouverte
   (bandeau « Voir » + pastille d'onglet), téléphone en veille ; canal `tratra_default` importance haute (bannière), visibilité
   PRIVATE (rien sur l'écran verrouillé, texte du message jamais envoyé), compteur de pastille, regroupement par conversation ;
-  toucher → conversation ou détail de la mission ; préférence « Messages » coupée → aucun push (`skipped: disabled`).
-- Restent à qualifier : permission Android 13+ (le S10+ est en Android 12), iOS (APNs), déconnexion sur l'appareil (couverte par
-  les tests automatisés).
+  toucher → conversation ou détail de la mission ; préférence « Messages » coupée → aucun push (`skipped: disabled`) ;
+  déconnexion dans l'application → appareil supprimé côté serveur, plus aucun push vers ce téléphone (`no_device`).
+- Restent à qualifier : permission Android 13+ (le S10+ est en Android 12), iOS (APNs).
