@@ -113,7 +113,7 @@ def test_push_goes_to_every_mobile_device_with_deeplink_channel_and_badge(servic
     assert m["notification"] == {"title": "Nouveau message", "body": "Moussa vous a écrit."}
     assert m["android"]["notification"]["visibility"] == "PRIVATE"
     assert m["data"]["deeplink"] == "tratra://conversation/5" and m["data"]["nid"] == str(n.pk) and m["data"]["cat"] == "message"
-    assert m["android"]["notification"]["channel_id"] == "tratra_default" and m["android"]["notification"]["tag"] == "conversation-5"
+    assert m["android"]["notification"]["channel_id"] == "tratra_activity" and m["android"]["notification"]["tag"] == "conversation-5"
     assert m["apns"]["payload"]["aps"]["badge"] == 1                           # compteur de non lues
     assert m["apns"]["headers"]["apns-collapse-id"] == "conversation-5"
 

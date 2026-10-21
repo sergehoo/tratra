@@ -49,6 +49,16 @@ class TrustConfig(models.Model):
     weight_reactivity = models.PositiveSmallIntegerField("Poids : réactivité", default=10)
     weight_track_record = models.PositiveSmallIntegerField("Poids : missions terminées", default=10)
     weight_certifications = models.PositiveSmallIntegerField("Poids : justificatifs professionnels", default=5)
+    weight_commitment = models.PositiveSmallIntegerField("Poids : engagements tenus (missions acceptées puis honorées)", default=10)
+
+    # --- XP (expérience cumulée, distincte du score de confiance) ------------------------------------------------------
+    xp_per_mission = models.PositiveSmallIntegerField("XP par mission réellement terminée", default=100)
+    xp_flash_bonus = models.PositiveSmallIntegerField("XP en plus pour une mission Tratra Flash terminée", default=20)
+    xp_pair_cap = models.PositiveSmallIntegerField(
+        "Missions récompensées par client sur 30 jours (anti-fraude ; au-delà : 0 XP)", default=3)
+
+    # --- Pénalités (faits vérifiables uniquement) ------------------------------------------------------------------------
+    penalty_validity_days = models.PositiveSmallIntegerField("Durée de prise en compte d'une pénalité (jours)", default=180)
 
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -183,3 +193,69 @@ class IdentityCheck(models.Model):
 
     def __str__(self):
         return f"Vérification #{self.pk} — mission #{self.booking_id}"
+
+
+class XpEntry(models.Model):
+    """XP cumulés : gagnés UNIQUEMENT sur des missions réellement terminées, jamais retirés, sans effet sur le score de confiance.
+    Une ligne par (professionnel, mission, motif) : un rejeu ne double jamais les points."""
+    MISSION, FLASH_BONUS = "mission", "flash_bonus"
+    REASONS = [(MISSION, "Mission terminée"), (FLASH_BONUS, "Mission Tratra Flash terminée")]
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="xp_entries")
+    booking = models.ForeignKey("handy.Booking", null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    reason = models.CharField(max_length=12, choices=REASONS)
+    points = models.PositiveIntegerField()
+    detail = models.CharField(max_length=200, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+        verbose_name = "XP"
+        verbose_name_plural = "XP"
+        constraints = [models.UniqueConstraint(fields=["user", "booking", "reason"], name="xp_once_per_mission_reason")]
+
+
+class TrustPenalty(models.Model):
+    """Pénalité fondée sur un FAIT VÉRIFIABLE (jamais un refus, jamais une absence de réponse) : désistement après une acceptation ferme
+    (constaté automatiquement), absence ou manquement constaté par l'équipe sur une mission précise. Contestable ; annulée si la
+    contestation est retenue. Elle pèse sur la composante « Engagements tenus » du score pendant `penalty_validity_days`."""
+    WITHDRAWAL, NO_SHOW, OTHER = "withdrawal", "no_show", "other"
+    KINDS = [(WITHDRAWAL, "Désistement après une acceptation ferme"), (NO_SHOW, "Absence au rendez-vous constatée"),
+             (OTHER, "Manquement constaté par l'équipe")]
+    ACTIVE, CONTESTED, CANCELLED = "active", "contested", "cancelled"
+    STATUSES = [(ACTIVE, "En vigueur"), (CONTESTED, "Contestée — en cours d'examen"), (CANCELLED, "Annulée")]
+    COUNTED = (ACTIVE, CONTESTED)
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="trust_penalties")
+    kind = models.CharField(max_length=12, choices=KINDS)
+    status = models.CharField(max_length=10, choices=STATUSES, default=ACTIVE, db_index=True)
+    booking = models.ForeignKey("handy.Booking", null=True, blank=True, on_delete=models.SET_NULL, related_name="trust_penalties")
+    explanation = models.CharField(max_length=500)
+    evidence = models.JSONField(default=dict, blank=True)               # faits datés qui fondent la pénalité
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    contest_reason = models.CharField(max_length=1000, blank=True, default="")
+    contested_at = models.DateTimeField(null=True, blank=True)
+    decided_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    decided_at = models.DateTimeField(null=True, blank=True)
+    decision_note = models.CharField(max_length=500, blank=True, default="")
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+        verbose_name = "Pénalité Tratra Trust"
+        verbose_name_plural = "Pénalités Tratra Trust"
+        constraints = [models.UniqueConstraint(fields=["user", "kind", "booking"], condition=Q(booking__isnull=False),
+                                               name="trust_one_penalty_per_fact")]
+
+
+class TrustScoreChange(models.Model):
+    """Historique consultable du score : une ligne à chaque changement, avec le détail des composantes à cet instant."""
+    profile = models.ForeignKey("handy.HandymanProfile", on_delete=models.CASCADE, related_name="trust_score_changes")
+    previous = models.PositiveSmallIntegerField(null=True, blank=True)
+    score = models.PositiveSmallIntegerField(null=True, blank=True)
+    components = models.JSONField(default=list, blank=True)
+    trigger = models.CharField(max_length=40, blank=True, default="")
+    at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ["-at", "-id"]

@@ -86,6 +86,14 @@ def review_changed(sender, instance, **kwargs):
 def booking_saved(sender, instance, **kwargs):
     if kwargs.get("raw"):
         return
+    if instance.status == "completed":   # XP : uniquement les missions réellement terminées (idempotent)
+        from trust import xp
+
+        try:
+            xp.award_for(instance)
+        except Exception:
+            import logging
+            logging.getLogger(__name__).exception("XP non attribués (réservation %s)", instance.pk)
     if instance.status in ("completed", "cancelled"):  # missions comptabilisées / litiges / ponctualité
         _trigger(instance.handyman_id, "mission")
 

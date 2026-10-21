@@ -100,6 +100,7 @@ INSTALLED_APPS = [
     'intelligence',
     'biometrics',
     'statuses',
+    'flash',
     'backoffice',
     # Libs
     'allauth',
@@ -600,6 +601,11 @@ CELERY_BEAT_SCHEDULE = {
     'announcements-tick': {
         'task': 'announcements.tasks.tick',
         'schedule': 60.0,
+    },
+    # Tratra Flash : échéances des propositions, vagues suivantes, fenêtres de choix des devis (filet de sécurité des comptes à rebours).
+    'flash-tick': {
+        'task': 'flash.tasks.tick',
+        'schedule': 30.0,
     },
     # Continuité : purge des clés d'idempotence périmées (48 h).
     'continuity-purge-idempotency': {

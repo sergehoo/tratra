@@ -124,4 +124,11 @@ def build(profile, *, request=None, owner: bool = False, config=None) -> Dict:
             for d in HandymanDocument.objects.filter(handyman=profile, document_type="certification")
             .exclude(status="approved").order_by("-uploaded_at")[:20]]
         data["evaluated_now"] = timezone.now()
+        from trust import penalties, xp
+        from trust.models import TrustPenalty, TrustScoreChange
+
+        data["xp"] = xp.summary(profile.user_id)
+        data["penalties"] = [penalties.payload(p) for p in TrustPenalty.objects.filter(user_id=profile.user_id)[:30]]
+        data["score_history"] = [{"previous": h.previous, "score": h.score, "trigger": h.trigger, "at": h.at, "components": h.components}
+                                 for h in TrustScoreChange.objects.filter(profile=profile)[:30]]
     return data

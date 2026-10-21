@@ -1091,15 +1091,20 @@ class ReportSerializer(serializers.ModelSerializer):
 
 
 class DeviceSerializer(serializers.ModelSerializer):
+    KNOWN_CAPABILITIES = ("flash1",)
     user_detail = UserMiniSerializer(source="user", read_only=True)
+    capabilities = serializers.ListField(child=serializers.CharField(max_length=20), required=False, max_length=10)
 
     class Meta:
         model = Device
-        fields = ["id", "user", "user_detail", "device_token", "device_type", "last_active", "created_at"]
+        fields = ["id", "user", "user_detail", "device_token", "device_type", "capabilities", "last_active", "created_at"]
         read_only_fields = ["user", "last_active", "created_at"]
         # Le jeton FCM est propre à l'installation : s'il existe déjà (changement de compte sur le même téléphone),
         # l'enregistrement le rattache au compte courant au lieu d'échouer (voir DeviceViewSet.create).
         extra_kwargs = {"device_token": {"validators": []}}
+
+    def validate_capabilities(self, value):
+        return sorted({c for c in value if c in self.KNOWN_CAPABILITIES})   # capacités inconnues ignorées
 
 
 # ========= EXTRA SERIALIZERS (matching, pricing, payments) =========

@@ -20,8 +20,11 @@ from django.conf import settings
 logger = logging.getLogger(__name__)
 
 SCOPE = "https://www.googleapis.com/auth/firebase.messaging"
-# Canal de notification créé par l'application Android au démarrage (importance haute : alerte visible).
-ANDROID_CHANNEL = "tratra_default"
+# Canal de notification créé par l'application Android au démarrage (importance haute : alerte visible, son « tratra_notification »).
+ANDROID_CHANNEL = "tratra_activity"
+# Son de la marque (« Ta – Tra – Tra ! ») : fichier res/raw/<nom>.ogg sur Android (le canal porte le son à partir d'Android 8),
+# <nom>.caf dans l'application iOS. Un fichier absent fait jouer le son système par défaut.
+DEFAULT_SOUND = "tratra_notification"
 TIMEOUT = 5
 _lock = threading.Lock()
 _token: Dict[str, object] = {"value": None, "exp": 0.0}
@@ -88,7 +91,8 @@ def _stringify(data: Optional[Dict]) -> Dict[str, str]:
 
 def send_to_user(user_id: int, title: str, body: str, data: Optional[Dict] = None, *, channel: Optional[str] = None,
                  collapse_key: Optional[str] = None, badge: Optional[int] = None, ttl_seconds: int = 86400,
-                 validate_only: bool = False, private: bool = False) -> Dict:
+                 validate_only: bool = False, private: bool = False, sound: str = DEFAULT_SOUND,
+                 apns_category: Optional[str] = None, data_only_capability: Optional[str] = None) -> Dict:
     """Envoie la notification à TOUS les appareils mobiles du compte. Ne lève jamais d'exception.
 
     Retour : {"sent": n, "removed": n, "failed": n, "devices": n, "skipped": None|"not_configured"|"no_device"|"no_access_token"}.
@@ -97,7 +101,10 @@ def send_to_user(user_id: int, title: str, body: str, data: Optional[Dict] = Non
     conversation) ; `badge` = nombre de notifications non lues (pastille iOS, et chiffre Android sur les lanceurs qui l'affichent).
     `private` : notification marquée « privée » sur Android (contenu masqué sur l'écran verrouillé sécurisé si l'utilisateur l'a choisi).
     `validate_only` : FCM valide le message (jeton, charge utile, droits du compte de service) SANS le remettre à l'appareil —
-    contrôle de configuration (`manage.py push_check`)."""
+    contrôle de configuration (`manage.py push_check`).
+    `sound` : son de la marque ; `apns_category` : actions iOS (ex. « NEW_MISSION » : Accepter / Refuser / Voir).
+    `data_only_capability` : les appareils Android qui annoncent cette capacité reçoivent un message de DONNÉES (priorité haute) et
+    affichent eux-mêmes l'alerte (actions, arrêt à l'échéance) ; les autres reçoivent une notification classique."""
     result = {"sent": 0, "removed": 0, "failed": 0, "devices": 0, "skipped": None}
     try:
         if not is_configured():
@@ -115,7 +122,7 @@ def send_to_user(user_id: int, title: str, body: str, data: Optional[Dict] = Non
             result["skipped"] = "no_access_token"
             return result
         url = f"https://fcm.googleapis.com/v1/projects/{project_id()}/messages:send"
-        android_notification = {"channel_id": channel or ANDROID_CHANNEL}
+        android_notification = {"channel_id": channel or ANDROID_CHANNEL, "sound": sound}
         if collapse_key:
             android_notification["tag"] = collapse_key
         if badge is not None:
@@ -125,13 +132,21 @@ def send_to_user(user_id: int, title: str, body: str, data: Optional[Dict] = Non
         android = {"priority": "high", "ttl": f"{int(ttl_seconds)}s", "notification": android_notification}
         if collapse_key:
             android["collapse_key"] = collapse_key
-        apns = {"headers": {"apns-priority": "10", "apns-expiration": str(int(time.time()) + int(ttl_seconds))},
-                "payload": {"aps": {"sound": "default", **({"badge": int(badge)} if badge is not None else {})}}}
+        aps = {"sound": f"{sound}.caf" if sound else "default", **({"badge": int(badge)} if badge is not None else {})}
+        if apns_category:
+            aps["category"] = apns_category
+        apns = {"headers": {"apns-priority": "10", "apns-expiration": str(int(time.time()) + int(ttl_seconds))}, "payload": {"aps": aps}}
         if collapse_key:
             apns["headers"]["apns-collapse-id"] = collapse_key[:64]
         for device in devices:
-            message = {"message": {"token": device.device_token, "notification": {"title": title, "body": body},
-                                   "data": _stringify(data), "android": android, "apns": apns}}
+            if data_only_capability and device.device_type == "android" and data_only_capability in (device.capabilities or []):
+                # L'application construit l'alerte (canal, son, actions, version publique neutre pour l'écran verrouillé).
+                message = {"message": {"token": device.device_token, "data": _stringify({**(data or {}), "title": title, "body": body}),
+                                       "android": {"priority": "high", "ttl": f"{int(ttl_seconds)}s",
+                                                   **({"collapse_key": collapse_key} if collapse_key else {})}}}
+            else:
+                message = {"message": {"token": device.device_token, "notification": {"title": title, "body": body},
+                                       "data": _stringify(data), "android": android, "apns": apns}}
             if validate_only:
                 message["validate_only"] = True
             try:
@@ -167,3 +182,44 @@ def _is_dead_token(response) -> bool:
     if "UNREGISTERED" in text or "NOT_FOUND" in text:
         return True
     return "INVALID_ARGUMENT" in text and "token" in text.lower()
+
+
+def send_data_to_user(user_id: int, data: Dict, *, capability: str, ttl_seconds: int = 600, collapse_key: Optional[str] = None) -> Dict:
+    """Signal SILENCIEUX (aucune notification affichée) aux appareils Android qui annoncent `capability` — ex. retirer l'alerte d'une
+    mission déjà attribuée ou expirée. Ne lève jamais d'exception ; même retour que `send_to_user`."""
+    result = {"sent": 0, "removed": 0, "failed": 0, "devices": 0, "skipped": None}
+    try:
+        if not is_configured():
+            result["skipped"] = "not_configured"
+            return result
+        from handy.models import Device
+
+        devices = [d for d in Device.objects.filter(user_id=user_id, device_type="android") if capability in (d.capabilities or [])]
+        result["devices"] = len(devices)
+        if not devices:
+            result["skipped"] = "no_device"
+            return result
+        token = _access_token()
+        if token is None:
+            result["skipped"] = "no_access_token"
+            return result
+        url = f"https://fcm.googleapis.com/v1/projects/{project_id()}/messages:send"
+        for device in devices:
+            message = {"message": {"token": device.device_token, "data": _stringify(data),
+                                   "android": {"priority": "high", "ttl": f"{int(ttl_seconds)}s",
+                                               **({"collapse_key": collapse_key} if collapse_key else {})}}}
+            try:
+                r = requests.post(url, json=message, headers={"Authorization": f"Bearer {token}"}, timeout=TIMEOUT)
+            except requests.RequestException:
+                result["failed"] += 1
+                continue
+            if r.status_code == 200:
+                result["sent"] += 1
+            elif r.status_code in (400, 404) and _is_dead_token(r):
+                device.delete()
+                result["removed"] += 1
+            else:
+                result["failed"] += 1
+    except Exception:
+        logger.warning("Signal FCM non envoyé.", exc_info=True)
+    return result

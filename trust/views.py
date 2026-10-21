@@ -121,3 +121,27 @@ class VerifyPassView(APIView):
         response = Response(data)
         response["Cache-Control"] = "private, no-store"
         return response
+
+
+class MyPenaltyContestView(APIView):
+    """POST /handy/me/trust/penalties/{id}/contest/ { reason } — contester une pénalité ; décision humaine motivée au Back-Office."""
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, pk):
+        from trust import penalties
+
+        try:
+            penalty = penalties.contest(pk, request.user, str(request.data.get("reason") or ""))
+        except penalties.PenaltyError as e:
+            return Response({"code": e.code, "detail": e.message}, status=e.status)
+        return Response(penalties.payload(penalty))
+
+
+class MyXpView(APIView):
+    """GET /handy/me/xp/ — XP cumulés et niveau (distincts du score de confiance)."""
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        from trust import xp
+
+        return Response(xp.summary(request.user.pk))

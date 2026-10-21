@@ -111,6 +111,10 @@ def trust_score(m: Dict, c: TrustConfig) -> Dict:
          f"{m['completed_total']} mission{'s' if m['completed_total'] > 1 else ''} terminée{'s' if m['completed_total'] > 1 else ''}",
          "plateforme",
          available=m["completed_total"] >= 1, missing="Aucune mission terminée pour le moment")
+    com = m.get("commitment") or {"taken": 0, "broken": 0, "rate": None}
+    part("commitment", "Engagements tenus", getattr(c, "weight_commitment", 0), com["rate"],
+         f"{com['taken']} mission(s) acceptée(s), {com['broken']} désistement(s) ou absence(s) constaté(s)", "plateforme",
+         available=com["rate"] is not None, missing=f"Pas encore assez de missions acceptées ({com['taken']}/{n})")
     certs = len(m["certifications"])
     part("certifications", "Justificatifs professionnels", c.weight_certifications, min(certs, 3) / 3,
          f"{certs} justificatif(s) approuvé(s)", "vérifié", available=certs >= 1,
@@ -203,6 +207,12 @@ def evaluate_profile(profile: HandymanProfile, *, trigger: str = "signal", actor
     if BadgeAward.VERIFIE in awarded:
         audit("tratra_id.activated", actor=actor, target=profile, trigger=trigger)
     codes = [c for c in BadgeAward.ORDER if c in wanted]
+    if score["score"] != profile.trust_score:   # historique consultable : chaque changement, avec le détail du calcul
+        from trust.models import TrustScoreChange
+
+        TrustScoreChange.objects.create(profile=profile, previous=profile.trust_score, score=score["score"], trigger=trigger[:40],
+                                        components=[{k: p.get(k) for k in ("key", "label", "weight", "value", "points", "detail", "available")}
+                                                    for p in score["components"]])
     HandymanProfile.objects.filter(pk=profile.pk).update(
         trust_score=score["score"], trust_badges=codes, trust_evaluated_at=now)
     profile.trust_score, profile.trust_badges, profile.trust_evaluated_at = score["score"], codes, now

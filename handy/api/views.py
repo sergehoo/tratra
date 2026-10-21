@@ -59,7 +59,7 @@ from handy.api.staff_access import staff_may
 from handy.media.sanitize import sanitize_image
 from handy import catalog
 from handy.eligibility import (
-    can_receive_missions, not_on_timeoff, publishable, publishable_user_ids, published_services,
+    can_receive_missions, is_publishable, not_on_timeoff, publishable, publishable_user_ids, published_services,
     restrict_public_services,
 )
 from handy.models import (
@@ -618,15 +618,18 @@ class HandymanProfileViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
         if online is None:
             return Response({"detail": "online (booléen) requis."},
                             status=status.HTTP_400_BAD_REQUEST)
-        # Conformité : un profil non vérifié ne peut pas se rendre disponible.
-        if bool(online) and not profile.is_approved:
+        online = online is True or str(online).lower() in ("1", "true", "on", "oui")
+        # Conformité : seul un profil éligible aux missions (règle unique handy/eligibility.py) peut se rendre disponible.
+        if online and not is_publishable(profile):
             return Response(
-                {"detail": "Profil non vérifié : impossible de passer en ligne."},
+                {"detail": "Profil non vérifié : impossible de passer en ligne.", "code": "not_eligible"},
                 status=status.HTTP_403_FORBIDDEN,
             )
-        profile.online = bool(online)
+        profile.online = online
         profile.save(update_fields=["online"])
-        return Response({"online": profile.online})
+        from flash.api import availability_payload
+
+        return Response(availability_payload(profile))   # { online, eligible, reason, missed_streak, schedule, pending_offers }
 
     @extend_schema(
         tags=["Public"],
@@ -1546,7 +1549,8 @@ class DeviceViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
             Device.objects.filter(user=request.user, device_token=previous).delete()
         device, created = Device.objects.update_or_create(
             device_token=serializer.validated_data["device_token"],
-            defaults={"user": request.user, "device_type": serializer.validated_data["device_type"]},
+            defaults={"user": request.user, "device_type": serializer.validated_data["device_type"],
+                      "capabilities": serializer.validated_data.get("capabilities", [])},
         )
         return Response(self.get_serializer(device).data, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
 

@@ -86,6 +86,20 @@ def disputes(profile, config, now=None) -> Dict:
     return {"count": disputed, "missions": missions, "rate": round(disputed / missions, 3) if missions else None}
 
 
+def commitment(profile, config, now=None) -> Dict:
+    """Engagements tenus : missions acceptées FERMEMENT via Tratra Flash sur la période, et pénalités fondées sur des faits vérifiables
+    (désistement après acceptation, absence constatée). Les refus et les propositions sans réponse n'y figurent JAMAIS."""
+    from flash.models import MissionRequest
+    from trust import penalties
+
+    since = window_start(config, now)
+    taken = MissionRequest.objects.filter(assigned_to_id=profile.user_id, assigned_at__gte=since).count()
+    broken = penalties.counted(profile.user_id, config, now).count()
+    if not broken and taken < config.min_sample:
+        return {"taken": taken, "broken": 0, "rate": None}
+    return {"taken": taken, "broken": broken, "rate": round(max(0.0, 1 - broken / max(taken, config.min_sample)), 3)}
+
+
 def certifications(profile, today=None):
     """Justificatifs professionnels APPROUVÉS par l'équipe et encore valides."""
     today = today or timezone.localdate()
@@ -111,6 +125,7 @@ def collect(profile, config, now=None) -> Dict:
         "completed_total": completed_missions(profile.user_id).count(),
         "completed_window": completed_missions(profile.user_id, since).count(),
         "certifications": certifications(profile),
+        "commitment": commitment(profile, config, now),
         "declared_experience_years": profile.experience_years or 0,
     }
 

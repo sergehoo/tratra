@@ -1210,6 +1210,11 @@ class Notification(models.Model):
         ('evaluation_received', 'Évaluation reçue'),
         ('evaluation_invite', 'Évaluation à laisser'),
         ('engagement_dispute', "Litige sur un contrat"),
+        ('new_mission', 'Nouvelle mission (Tratra Flash)'),
+        ('mission_quote', 'Devis reçu (Tratra Flash)'),
+        ('mission_unfulfilled', 'Demande sans professionnel (Tratra Flash)'),
+        ('mission_paused', 'Disponibilité suspendue (Tratra Flash)'),
+        ('trust_penalty', 'Pénalité ou décision Tratra Trust'),
     ]
     CATEGORIES = [
         ('booking', 'Réservations et missions'),
@@ -1222,10 +1227,12 @@ class Notification(models.Model):
         ('announcement', 'Annonces'),
         ('system', 'Informations'),
         ('engagement', 'Contrats et engagements'),
+        ('flash', 'Nouvelles missions (Tratra Flash)'),
     ]
     PUSH_STATUSES = [
         ('', 'Non concerné'), ('queued', 'En file'), ('sent', 'Envoyé'), ('no_device', 'Aucun appareil'),
         ('disabled', 'Désactivé par l\'utilisateur'), ('unconfigured', 'Firebase non configuré'), ('failed', 'Échec'),
+        ('obsolete', 'Non envoyé : mission déjà attribuée ou expirée'),
     ]
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notifications', db_index=True)
     notification_type = models.CharField(max_length=50, choices=TYPES, db_index=True)
@@ -1308,6 +1315,8 @@ class Device(models.Model):
     ])
     last_active = models.DateTimeField(auto_now=True)
     created_at=models.DateTimeField(auto_now_add=True)
+    # Fonctions annoncées par l'application installée (ex. « flash1 » : elle affiche elle-même l'alerte Tratra Flash avec ses actions).
+    capabilities = models.JSONField(default=list, blank=True)
 
     def __str__(self):
         return f"Device {self.device_type} pour {self.user}"

@@ -98,7 +98,8 @@ def on_booking_status_change(sender, instance: Booking, created: bool, **kwargs)
     from handy import notification_events
 
     if created:
-        notification_events.booking_created(instance)  # l'artisan est prévenu de la nouvelle demande
+        if not getattr(instance, '_flash_origin', False):  # Tratra Flash : le pro vient d'accepter, pas de « nouvelle demande »
+            notification_events.booking_created(instance)  # l'artisan est prévenu de la nouvelle demande
         return
 
     actor_id = getattr(instance, '_transition_actor_id', None)

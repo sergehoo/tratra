@@ -95,7 +95,9 @@ def test_with_credentials_android_and_ios_devices_receive_the_exact_payload(serv
     msg = kw["json"]["message"]
     assert msg["notification"] == {"title": "Moussa est en route", "body": "Suivez son arrivée."}
     assert msg["data"] == {"t": "live", "id": "12"}   # valeurs converties en texte (exigence FCM)
-    assert msg["android"] == {"priority": "high", "ttl": "86400s", "notification": {"channel_id": "tratra_default"}}
+    # Canal « Activité » (son de la marque « tratra_notification » ; le canal le porte à partir d'Android 8).
+    assert msg["android"] == {"priority": "high", "ttl": "86400s",
+                              "notification": {"channel_id": "tratra_activity", "sound": "tratra_notification"}}
     # le jeton OAuth est signé par le compte de service (vérifiable avec sa clé publique)
     oauth = next(kw for url, kw in http.calls if url == "https://oauth.test/token")
     claims = jwt.decode(oauth["data"]["assertion"], public, algorithms=["RS256"], audience="https://oauth.test/token")

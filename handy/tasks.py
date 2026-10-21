@@ -71,11 +71,22 @@ def send_notification_push(self, notification_id, collapse_key=None):
             return {"skipped": "announcement_not_deliverable"}
     payload = {"t": n.notification_type, "cat": n.category, "nid": n.pk, "deeplink": notifications.deeplink(n.data), **(n.data or {})}
     title, body = notifications.push_text(n)          # texte neutre pour les catégories sensibles (écran verrouillé)
+    ttl, flash = notifications.TTL_BY_CATEGORY.get(n.category, 86400), {}
+    if n.notification_type == "new_mission":
+        # Tratra Flash : jamais d'alerte pour une proposition déjà attribuée, retirée ou expirée ; durée de vie = délai de réponse restant.
+        from flash.notify import FLASH_CAPABILITY, deliverable_ttl
+
+        ttl = deliverable_ttl(n)
+        if ttl is None:
+            Notification.objects.filter(pk=n.pk).update(push_status='obsolete')
+            return {"skipped": "obsolete"}
+        flash = {"sound": notifications.FLASH_SOUND, "apns_category": notifications.FLASH_IOS_CATEGORY,
+                 "data_only_capability": FLASH_CAPABILITY}
     result = push.send_to_user(
         n.user_id, title, body, payload,
         channel=notifications.CHANNEL_BY_CATEGORY.get(n.category), collapse_key=collapse_key,
-        badge=notifications.unread_count(n.user_id), ttl_seconds=notifications.TTL_BY_CATEGORY.get(n.category, 86400),
-        private=n.category in notifications.SENSITIVE_PUSH_CATEGORIES)
+        badge=notifications.unread_count(n.user_id), ttl_seconds=ttl,
+        private=n.category in notifications.SENSITIVE_PUSH_CATEGORIES or n.category == "flash", **flash)
     if result["skipped"] == "not_configured":
         status = "unconfigured"
     elif result["sent"]:

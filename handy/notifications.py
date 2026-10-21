@@ -37,18 +37,24 @@ CATEGORY_BY_TYPE: Dict[str, str] = {
     "contract_ended": "engagement", "contract_renewal": "engagement", "installment_due": "engagement",
     "installment_overdue": "engagement", "payment_declared": "engagement", "payment_confirmed": "engagement",
     "schedule_event": "engagement", "evaluation_received": "engagement", "evaluation_invite": "review", "engagement_dispute": "engagement",
+    # Tratra Flash : propositions aux professionnels (alerte prioritaire), devis et suites côté client.
+    "new_mission": "flash", "mission_paused": "flash", "mission_quote": "booking", "mission_unfulfilled": "booking",
+    "trust_penalty": "account",
 }
 
 # Catégories dont le push ne peut pas être désactivé (vérification d'identité, sécurité du compte).
 LOCKED_CATEGORIES = {"account"}
 
-# Canaux de notification Android (créés par MainActivity) : importance haute pour l'opérationnel, plus discrète pour le reste.
+# Canaux de notification Android (créés par MainActivity) : importance haute pour l'opérationnel (son « tratra_notification »), plus
+# discrète pour le reste ; les nouvelles missions ont leur canal dédié (son « tratra_flash », vibration rythmée, actions).
 CHANNEL_BY_CATEGORY = {
-    "booking": "tratra_default", "message": "tratra_default", "live": "tratra_default", "payment": "tratra_default",
-    "account": "tratra_default", "review": "tratra_updates", "business": "tratra_updates", "system": "tratra_updates",
-    "engagement": "tratra_default",
+    "booking": "tratra_activity", "message": "tratra_activity", "live": "tratra_activity", "payment": "tratra_activity",
+    "account": "tratra_activity", "review": "tratra_updates", "business": "tratra_updates", "system": "tratra_updates",
+    "engagement": "tratra_activity",
     "announcement": "tratra_announcements",
+    "flash": "tratra_new_missions",
 }
+FLASH_CHANNEL, FLASH_SOUND, FLASH_IOS_CATEGORY = "tratra_new_missions", "tratra_flash", "NEW_MISSION"
 # Écran verrouillé : pour ces catégories, le push n'affiche qu'un texte NEUTRE (le détail — texte d'un message, montant, motif d'un
 # refus KYC, sécurité du compte — reste dans l'application, après déverrouillage) et il est marqué « privé » sur Android.
 # `PUSH_MESSAGE_PREVIEW=True` permet d'afficher l'aperçu des messages (choix de l'exploitant).

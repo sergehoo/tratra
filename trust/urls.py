@@ -4,6 +4,8 @@ from trust import views
 
 urlpatterns = [
     path("me/trust/", views.MyTrustView.as_view(), name="me-trust"),
+    path("me/trust/penalties/<int:pk>/contest/", views.MyPenaltyContestView.as_view(), name="me-trust-penalty-contest"),
+    path("me/xp/", views.MyXpView.as_view(), name="me-xp"),
     path("me/tratra-id/", views.MyTratraIdView.as_view(), name="me-tratra-id"),
     path("me/tratra-id/badge.pdf", views.MyBadgePdfView.as_view(), name="me-tratra-id-pdf"),
     path("verify/id/<str:code>/", views.PublicVerifyView.as_view(), name="verify-id"),
