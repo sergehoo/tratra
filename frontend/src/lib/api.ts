@@ -1,5 +1,7 @@
 import { API_BASE } from "./config";
 import { wipeContinuity } from "./localVault";
+import { clearSessionHint, hasSessionHint, setSessionHint } from "./sessionHint";
+export { hasSessionHint } from "./sessionHint";
 import type { User } from "./types";
 
 const ACCESS = "tratra_access";
@@ -7,10 +9,13 @@ const REFRESH = "tratra_refresh";
 export const SESSION_EXPIRED_EVENT = "tratra:session-expired";
 
 /**
- * Les jetons ne sont volontairement conservés que pour la session du navigateur.
- * Une migration serveur vers des cookies HttpOnly reste la protection XSS cible ;
- * le front ne peut pas créer ces cookies de manière sûre à lui seul.
+ * Jeton d'ACCÈS (30 min) : mémoire de l'onglet (sessionStorage). Jeton de RAFRAÎCHISSEMENT : cookie HttpOnly posé par l'API
+ * (handy/auth_tokens.py, jamais lisible ici), persistant si « Se souvenir de moi » est coché, sinon cookie de session (fin à la
+ * fermeture du navigateur). Une ancienne session encore porteuse d'un jeton de rafraîchissement en sessionStorage migre vers le
+ * cookie à son prochain renouvellement. Un simple indice (cookie lisible, sans secret) dit qu'une session peut être restaurée.
  */
+const AUTH_TRANSPORT = { "X-Auth-Transport": "cookie" } as const;
+
 function storage(kind: "session" | "legacy"): Storage | null {
   if (typeof window === "undefined") return null;
   try {
@@ -44,6 +49,7 @@ function apiUrl(path: string) {
 
 function expireSession() {
   tokens.clear();
+  clearSessionHint();
   if (typeof window !== "undefined") {
     window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT));
   }
@@ -80,6 +86,14 @@ export const tokens = {
       }
     }
   },
+  /** Le jeton de rafraîchissement est désormais dans le cookie HttpOnly : l'ancienne copie lisible est effacée. */
+  dropRefresh() {
+    try {
+      storage("session")?.removeItem(REFRESH);
+    } catch {
+      // Best effort.
+    }
+  },
   /** Déplace une session créée par une ancienne version hors de localStorage. */
   migrateLegacy() {
     const session = storage("session");
@@ -114,7 +128,7 @@ async function refreshAccess(): Promise<string | null> {
   if (refreshInFlight) return refreshInFlight;
 
   const r = tokens.refresh;
-  if (!r) {
+  if (!r && !hasSessionHint()) {
     expireSession();
     return null;
   }
@@ -123,10 +137,10 @@ async function refreshAccess(): Promise<string | null> {
     try {
       const res = await fetch(apiUrl("/auth/refresh/"), {
         method: "POST",
-        headers: { "Content-Type": "application/json", Accept: "application/json" },
-        body: JSON.stringify({ refresh: r }),
+        headers: { "Content-Type": "application/json", Accept: "application/json", ...AUTH_TRANSPORT },
+        body: JSON.stringify(r ? { refresh: r } : {}),
         cache: "no-store",
-        credentials: "omit",
+        credentials: "include",                      // cookie HttpOnly du jeton de rafraîchissement (même site que l'API)
       });
       if (!res.ok) {
         // Une erreur réseau/serveur ne détruit pas une session potentiellement valide.
@@ -136,6 +150,7 @@ async function refreshAccess(): Promise<string | null> {
       const data = await res.json();
       if (data?.access) {
         tokens.set(data.access, data.refresh);
+        if (!data.refresh) tokens.dropRefresh();   // rotation reçue dans le cookie : plus aucune copie lisible
         return data.access as string;
       }
       expireSession();
@@ -286,13 +301,25 @@ export function uploadWithProgress<T>(path: string, form: FormData, onProgress?:
 
 // ---- Auth ----
 /** Connexion : `identifier` = téléphone (+225 par défaut), ou identifiant / e-mail d'un ancien compte. */
-export async function login(identifier: string, password: string): Promise<User> {
-  const data = await apiJson<{ access: string; refresh: string; user?: User }>(
+/** Connexion. `remember` (« Se souvenir de moi », coché par défaut) : session gardée après la fermeture du navigateur et restaurée
+ *  automatiquement ; sinon elle s'arrête avec la session du navigateur. Aucun mot de passe n'est conservé. */
+export async function login(identifier: string, password: string, remember = true): Promise<User> {
+  const data = await apiJson<{ access: string; refresh?: string; user?: User }>(
     "/auth/login/",
-    { method: "POST", body: JSON.stringify({ username: identifier, password }) },
+    { method: "POST", body: JSON.stringify({ username: identifier, password, remember_me: remember }), headers: AUTH_TRANSPORT,
+      credentials: "include" },
   );
-  tokens.set(data.access, data.refresh);
+  tokens.clear();                                  // changement de compte : rien de l'ancienne session ne survit
+  tokens.set(data.access, data.refresh);           // `refresh` absent : il est dans le cookie HttpOnly (API à jour)
+  setSessionHint(remember);
   return data.user ?? (await me());
+}
+
+/** Démarrage : session restaurable sans jeton d'accès (nouvel onglet, réouverture du navigateur) ? Renouvelle par le cookie. */
+export async function resumeSession(): Promise<boolean> {
+  if (tokens.access || tokens.refresh) return true;
+  if (!hasSessionHint()) return false;
+  return (await refreshAccess()) !== null;
 }
 
 export const me = () => get<User>("/users/me/");
@@ -316,11 +343,14 @@ export async function register(payload: {
 export async function logout(): Promise<void> {
   const refresh = tokens.refresh;
   try {
-    if (refresh) await apiFetch("/auth/logout/", { method: "POST", body: JSON.stringify({ refresh }) });
+    // Révoque le jeton (cookie HttpOnly et, pour une ancienne session, copie lisible) ; l'API efface le cookie.
+    await apiFetch("/auth/logout/", { method: "POST", body: JSON.stringify(refresh ? { refresh } : {}), headers: AUTH_TRANSPORT,
+      credentials: "include" }, false);
   } catch {
     /* best-effort */
   }
   tokens.clear();
+  clearSessionHint();
   // Déconnexion VOLONTAIRE : brouillons, file hors ligne et dernier état des activités sont effacés de cet appareil.
   // (Une session expirée ne purge rien : l'utilisateur retrouve ses brouillons à la reconnexion.)
   wipeContinuity();

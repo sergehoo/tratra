@@ -3,7 +3,7 @@ import Link from "next/link";
 import { Suspense, useEffect, useId, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { ArrowRight, CalendarCheck, LockKeyhole, Mail, Search, TimerReset } from "lucide-react";
-import { Alert, Button, ButtonLink, Field, Input, PasswordInput, PhoneField, Skeleton } from "@/components/ds";
+import { Alert, Button, ButtonLink, Checkbox, Field, Input, PasswordInput, PhoneField, Skeleton } from "@/components/ds";
 import { AuthFrame } from "@/components/auth/AuthFrame";
 import { useAuth } from "@/lib/auth";
 import { ApiError } from "@/lib/api";
@@ -56,6 +56,8 @@ function LoginForm() {
   const [phone, setPhone] = useState<PhoneValue>({ country: DEFAULT_COUNTRY, national: "" });
   const [phoneErr, setPhoneErr] = useState("");
   const [password, setPassword] = useState("");
+  // « Se souvenir de moi » : coché par défaut ; décoché, la session s'arrête avec la fermeture du navigateur.
+  const [remember, setRemember] = useState(true);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   // Blocage après trop de tentatives : fin (horloge locale) et adresse du support ; le serveur reste l'autorité à la fin du décompte.
@@ -91,7 +93,7 @@ function LoginForm() {
     setPhoneErr("");
     setBusy(true);
     try {
-      await login(identifier, password, next);
+      await login(identifier, password, next, remember);
       // Succès : la redirection est en cours, le bouton reste désactivé.
     } catch (err) {
       const blocked = parseLoginLock(err);
@@ -203,7 +205,14 @@ function LoginForm() {
           )}
         </Field>
 
-        <div className="-mt-2 text-right">
+        <div className="-mt-2 flex flex-wrap items-center justify-between gap-3">
+          <Checkbox
+            name="remember_me"
+            label="Se souvenir de moi"
+            checked={remember}
+            onChange={(e) => setRemember(e.target.checked)}
+            data-testid="login-remember"
+          />
           <Link href="/forgot-password" className="text-sm font-semibold text-primaryDark underline-offset-2 hover:underline">
             Mot de passe oublié ?
           </Link>

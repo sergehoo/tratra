@@ -21,6 +21,7 @@ from drf_spectacular.utils import extend_schema_field
 from drf_spectacular.types import OpenApiTypes
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
+from handy.auth_tokens import SessionAwareRefreshToken, apply_remember, wants_remember
 from handy.api.errors import CodedAPIException, field_error
 from handy.api.staff_access import staff_may
 from handy.auth_lockout import countdown, remaining_lock_seconds
@@ -449,7 +450,9 @@ def resolve_login_identifier(raw, region=None) -> str:
 
 class EmailOrUsernameTokenObtainPairSerializer(TokenObtainPairSerializer):
     """Connexion : `phone` (ou `username`/`email`) + `password`. Le champ historique `username` accepte
-    aussi un numéro de téléphone ; les anciens comptes gardent leur identifiant ou leur e-mail."""
+    aussi un numéro de téléphone ; les anciens comptes gardent leur identifiant ou leur e-mail.
+    `remember_me` (défaut : vrai) fixe la durée de la session (handy/auth_tokens.py) ; aucun mot de passe n'est conservé."""
+    token_class = SessionAwareRefreshToken
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -457,8 +460,13 @@ class EmailOrUsernameTokenObtainPairSerializer(TokenObtainPairSerializer):
         self.fields[self.username_field].allow_blank = True
         for name in ("phone", "email", "phone_country"):
             self.fields[name] = serializers.CharField(required=False, allow_blank=True, write_only=True)
+        self.fields["remember_me"] = serializers.BooleanField(required=False, default=True, write_only=True)
+
+    def get_token(self, user):
+        return apply_remember(super().get_token(user), getattr(self, "_remember", True))
 
     def validate(self, attrs):
+        self._remember = wants_remember(attrs.get("remember_me"))
         raw = attrs.get("username") or attrs.get("phone") or attrs.get("email")
         request = self.context.get("request")
         password = attrs.get("password")

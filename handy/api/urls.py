@@ -10,14 +10,14 @@ from handy.api import messaging as msg_api
 from handy.api.account import me_account_deletion
 from handy.api.addresses import geo_reverse, geo_search, me_address_detail, me_address_set_primary, me_addresses
 from handy.api.recovery import password_reset_confirm, password_reset_request
-from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView, TokenBlacklistView
 
 from .views import (
     UserViewSet, HandymanProfileViewSet, ServiceCategoryViewSet, ServiceViewSet, ServiceImageViewSet,
     BookingViewSet, PaymentViewSet, PaymentLogViewSet, PayoutViewSet, ReviewViewSet, ConversationViewSet,
     MessageViewSet, HandymanDocumentViewSet, ReportViewSet, DeviceViewSet, DisputeViewSet,
     TimeOffViewSet, SubscriptionPlanViewSet, SubscriptionViewSet,
-    price_estimate, payment_initiate, match, PaymentWebhook, EmailOrUsernameTokenObtainPairView, HeroSlideViewSet,
+    price_estimate, payment_initiate, match, PaymentWebhook, EmailOrUsernameTokenObtainPairView, SessionLogoutView, SessionTokenRefreshView,
+    HeroSlideViewSet,
     otp_request, otp_verify, coupon_validate, payout_account, company_profile, public_stats
 )
 
@@ -54,8 +54,8 @@ urlpatterns = [
     # `payments/{pk}/` (route détail générée) masque `payments/initiate/`
     # et `payments/webhook/...` (résolus en pk="initiate"/"webhook" -> 405).
     path('auth/login/', EmailOrUsernameTokenObtainPairView.as_view(), name='jwt-login'),
-    path('auth/refresh/', TokenRefreshView.as_view(), name='jwt-refresh'),
-    path('auth/logout/', TokenBlacklistView.as_view(), name='jwt-logout'),
+    path('auth/refresh/', SessionTokenRefreshView.as_view(), name='jwt-refresh'),
+    path('auth/logout/', SessionLogoutView.as_view(), name='jwt-logout'),
     path('price/estimate/', price_estimate, name='price-estimate'),
     path('payments/initiate/', payment_initiate, name='payment-initiate'),
     path('payments/cash/<int:pk>/respond/', cash_api.cash_respond, name='cash-respond'),

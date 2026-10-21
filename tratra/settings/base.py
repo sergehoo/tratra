@@ -148,7 +148,7 @@ CORS_ALLOW_CREDENTIALS = True
 # engagements) ou conditionnelle (`If-Match`). `Idempotent-Replay` est exposé pour savoir qu'une réponse a été rejouée.
 from corsheaders.defaults import default_headers  # noqa: E402
 
-CORS_ALLOW_HEADERS = (*default_headers, "idempotency-key", "if-match")
+CORS_ALLOW_HEADERS = (*default_headers, "idempotency-key", "if-match", "x-auth-transport")
 CORS_EXPOSE_HEADERS = ["Idempotent-Replay"]
 
 MIDDLEWARE = [
@@ -265,11 +265,17 @@ SPECTACULAR_SETTINGS = {
 # === JWT (durci) ===
 SIMPLE_JWT = {
     'ACCESS_TOKEN_LIFETIME': timedelta(minutes=30),
-    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),          # jetons sans choix « se souvenir de moi » (sessions antérieures, MFA)
     'ROTATE_REFRESH_TOKENS': True,
     'BLACKLIST_AFTER_ROTATION': True,
     'UPDATE_LAST_LOGIN': True,
 }
+# « Se souvenir de moi » (handy/auth_tokens.py) : durée du jeton de rafraîchissement selon le choix fait à la connexion ; la rotation
+# la conserve. Site web : jeton dans un cookie HttpOnly + SameSite=Lax limité aux routes d'authentification.
+JWT_REMEMBER_REFRESH_LIFETIME = timedelta(days=int(os.getenv("JWT_REMEMBER_DAYS", "30")))
+JWT_SESSION_REFRESH_LIFETIME = timedelta(hours=int(os.getenv("JWT_SESSION_HOURS", "12")))
+JWT_REFRESH_COOKIE_PATH = os.getenv("JWT_REFRESH_COOKIE_PATH", "/handy/auth/")
+JWT_REFRESH_COOKIE_DOMAIN = os.getenv("JWT_REFRESH_COOKIE_DOMAIN") or None
 # Password validation
 # https://docs.djangoproject.com/en/4.2/ref/settings/#auth-password-validators
 

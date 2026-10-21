@@ -18,7 +18,7 @@ from django.conf import settings
 from django.contrib.gis.db.models.functions import Distance
 from django.contrib.gis.geos import Point
 from django.core.cache import cache
-from django.core.exceptions import ValidationError as DjangoValidationError
+from django.core.exceptions import ObjectDoesNotExist, ValidationError as DjangoValidationError
 from django.db import transaction, models
 from django.db.models import Avg, Count, Exists, F, OuterRef, Q
 from django.db.models.functions import Trim
@@ -40,17 +40,20 @@ from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from rest_framework.exceptions import PermissionDenied
+from rest_framework.exceptions import AuthenticationFailed, PermissionDenied, ValidationError
 from django.shortcuts import get_object_or_404
 
 from rest_framework.pagination import PageNumberPagination
 
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from rest_framework_simplejwt.views import TokenObtainPairView
+from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
+from rest_framework_simplejwt.serializers import TokenRefreshSerializer
+from rest_framework_simplejwt.views import TokenBlacklistView, TokenObtainPairView, TokenRefreshView
 from rest_framework_simplejwt.authentication import JWTAuthentication
 
 from continuity.idempotency import run_idempotent
+from handy import auth_tokens
 from handy.api.errors import CodedAPIException
 from handy.api.staff_access import staff_may
 from handy.media.sanitize import sanitize_image
@@ -389,9 +392,64 @@ from .serializers import (
     PublicArtisanSerializer, PublicReviewSerializer,
 )
 
+class SessionTokenRefreshSerializer(TokenRefreshSerializer):
+    token_class = auth_tokens.SessionAwareRefreshToken      # la rotation garde la durée choisie à la connexion
+
+
 class EmailOrUsernameTokenObtainPairView(TokenObtainPairView):
     serializer_class = EmailOrUsernameTokenObtainPairSerializer
     throttle_scope = "login"  # limite anti-bruteforce (cf. DEFAULT_THROTTLE_RATES)
+
+    def post(self, request, *args, **kwargs):
+        response = super().post(request, *args, **kwargs)
+        # Site web : le jeton de rafraîchissement part dans un cookie HttpOnly, jamais lisible par le JavaScript de la page.
+        if response.status_code == 200 and auth_tokens.wants_cookie(request) and response.data.get("refresh"):
+            auth_tokens.set_refresh_cookie(response, response.data.pop("refresh"))
+        return response
+
+
+class SessionTokenRefreshView(TokenRefreshView):
+    """Renouvellement : jeton dans le corps (application, anciennes sessions web) ou dans le cookie HttpOnly (site, en-tête
+    `X-Auth-Transport: cookie`). Rotation et liste noire inchangées ; la durée suit le choix « se souvenir de moi »."""
+    serializer_class = SessionTokenRefreshSerializer
+
+    def post(self, request, *args, **kwargs):
+        refresh = auth_tokens.refresh_from(request)
+        serializer = self.get_serializer(data={"refresh": refresh or ""})
+        try:
+            serializer.is_valid(raise_exception=True)
+        except (TokenError, InvalidToken, ValidationError, AuthenticationFailed, ObjectDoesNotExist) as exc:   # compte supprimé : session close
+            detail = getattr(exc, "detail", None) or (exc.args[0] if exc.args else "Session expirée.")
+            response = Response({"detail": detail if isinstance(detail, str) else "Session expirée ou révoquée.",
+                                 "code": "token_not_valid"}, status=status.HTTP_401_UNAUTHORIZED)
+            if auth_tokens.wants_cookie(request):
+                auth_tokens.clear_refresh_cookie(response)    # session révoquée ou expirée : le navigateur l'oublie
+            return response
+        data = dict(serializer.validated_data)
+        response = Response(data, status=status.HTTP_200_OK)
+        if auth_tokens.wants_cookie(request) and data.get("refresh"):
+            auth_tokens.set_refresh_cookie(response, response.data.pop("refresh"))
+        return response
+
+
+class SessionLogoutView(TokenBlacklistView):
+    """Déconnexion : le jeton de rafraîchissement (corps ou cookie) est révoqué, le cookie effacé. Toujours idempotente."""
+
+    def post(self, request, *args, **kwargs):
+        # Corps ET cookie : une session web en cours de migration vers le cookie peut porter les deux ; tous deux sont révoqués.
+        candidates = {auth_tokens.refresh_from(request)}
+        if auth_tokens.wants_cookie(request):
+            candidates.add(request.COOKIES.get(auth_tokens.COOKIE_NAME))
+        for refresh in filter(None, candidates):
+            serializer = self.get_serializer(data={"refresh": refresh})
+            try:
+                serializer.is_valid(raise_exception=True)
+            except (TokenError, InvalidToken, ValidationError):
+                pass                                          # déjà expiré ou révoqué : rien de plus à faire
+        response = Response({}, status=status.HTTP_200_OK)
+        if auth_tokens.wants_cookie(request):
+            auth_tokens.clear_refresh_cookie(response)
+        return response
 # ---- Users ----
 class UserViewSet(viewsets.ModelViewSet):
     queryset = User.objects.all().only("id", "email", "first_name", "last_name", "user_type", "is_verified")

@@ -9,7 +9,7 @@ interface AuthState {
   user: User | null;
   loading: boolean;
   /** `next` : page de retour après connexion (validée par safeNext, sinon espace du rôle). */
-  login: (u: string, p: string, next?: string | null) => Promise<User>;
+  login: (u: string, p: string, next?: string | null, remember?: boolean) => Promise<User>;
   register: (payload: Parameters<typeof api.register>[0], next?: string | null) => Promise<User>;
   logout: () => Promise<void>;
   /** Recharge le profil (ex. `is_verified` après une vérification par code). */
@@ -37,7 +37,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const restoreSession = async () => {
       api.tokens.migrateLegacy();
-      if (api.tokens.access || api.tokens.refresh) {
+      // Jetons de l'onglet, sinon session restaurable par le cookie HttpOnly (« Se souvenir de moi », nouvel onglet).
+      if (await api.resumeSession().catch(() => false)) {
         try {
           const currentUser = await api.me();
           if (active) setUser(currentUser);
@@ -57,8 +58,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, [router]);
 
-  async function login(u: string, p: string, next?: string | null) {
-    const me = await api.login(u, p);
+  async function login(u: string, p: string, next?: string | null, remember = true) {
+    const me = await api.login(u, p, remember);
     setUser(me);
     router.push(safeNext(next, me.user_type));
     return me;
