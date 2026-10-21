@@ -63,6 +63,15 @@ export default async function TradesPage() {
                     </div>
                   </div>
                   {t.blurb && t.prestations.length === 0 ? <p className="mt-3 text-sm leading-relaxed text-ash">{t.blurb}</p> : null}
+                  {/* Hybrid Matching : après le métier, Tratra trouve le professionnel ou le client le choisit. */}
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    <Link href={`/dashboard/commander?category=${t.id}&matching=auto`} className="inline-flex min-h-[40px] items-center rounded-full bg-primary px-4 text-sm font-semibold text-white hover:bg-primaryDark focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
+                      Trouvez-moi un professionnel
+                    </Link>
+                    <Link href={`/dashboard/commander?category=${t.id}&matching=direct`} className="inline-flex min-h-[40px] items-center rounded-full border border-line px-4 text-sm font-semibold text-ink hover:border-primary/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
+                      Choisir mon professionnel
+                    </Link>
+                  </div>
                   {t.prestations.length ? (
                     <ul aria-label={`Prestations : ${t.label}`} className="mt-4 flex flex-wrap gap-2">
                       {t.prestations.map((p) => (

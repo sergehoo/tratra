@@ -68,6 +68,12 @@ export function notificationHref(n: Pick<Notif, "data">): string | null {
       return "/dashboard/engagements/replacements";
     case "announcement":
       return id != null ? `/dashboard/announcements?a=${id}` : "/dashboard/announcements";
+    case "flash_offer":
+      return id != null ? `/dashboard/flash/offres/${id}` : null;
+    case "flash_request":
+      return id != null ? `/dashboard/demandes/${id}` : "/dashboard/demandes";
+    case "trust_penalty":
+      return "/dashboard/reputation";
     default:
       return null;
   }

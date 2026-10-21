@@ -454,6 +454,19 @@ export default function DashboardHome() {
       {/* Inscription professionnelle commencée et pas encore publiée : progression et UN bouton « Continuer » (rien sinon) */}
       <BeginnerCard />
 
+      {/* Hybrid Matching : un besoin → Tratra trouve le professionnel, ou le client le choisit (favoris en un geste). */}
+      <section aria-label="Trouver un professionnel" className="flex flex-col gap-3 rounded-card border border-line bg-white p-5 shadow-soft sm:flex-row sm:items-center">
+        <div className="min-w-0 flex-1">
+          <p className="font-display text-lg font-bold text-ink">Besoin d’un professionnel ?</p>
+          <p className="text-sm text-ash">Laissez Tratra trouver un pro vérifié et disponible, ou choisissez-le vous-même sur ses avis et ses badges.</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <ButtonLink href="/dashboard/commander?matching=auto" size="sm">Trouvez-moi un professionnel</ButtonLink>
+          <ButtonLink href="/dashboard/commander?matching=direct" size="sm" variant="outline">Choisir mon professionnel</ButtonLink>
+          <ButtonLink href="/dashboard/favoris" size="sm" variant="ghost">Mes favoris</ButtonLink>
+        </div>
+      </section>
+
       {/* Annonces Tratra (rien si aucune) */}
       <AnnouncementsBanner />
 

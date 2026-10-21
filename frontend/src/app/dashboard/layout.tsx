@@ -18,6 +18,8 @@ import {
   ShieldCheck,
   Star,
   Wallet,
+  Heart,
+  Zap,
 } from "lucide-react";
 import { RoleGuard } from "@/components/RoleGuard";
 import { AppShell, type NavItem } from "@/components/ds";
@@ -67,6 +69,8 @@ function Shell({ children }: { children: ReactNode }) {
       { href: "/dashboard", label: "Tableau de bord", short: "Accueil", icon: LayoutDashboard, primary: true },
       { href: "/dashboard/services", label: "Explorer les services", short: "Explorer", icon: Compass, primary: true },
       { href: "/dashboard/bookings", label: "Mes réservations", short: "Réservations", icon: CalendarCheck, primary: true },
+      { href: "/dashboard/demandes", label: "Mes demandes de professionnel", icon: Zap },
+      { href: "/dashboard/favoris", label: "Mes professionnels favoris", icon: Heart },
     ];
     if (provider) {
       items.push({ href: "/dashboard/provider", label: "Mes prestations", short: "Prestations", icon: Briefcase, primary: true });

@@ -50,7 +50,9 @@ def _pro_card(user, request) -> dict:
 
     profile = getattr(user, "handyman_profile", None)
     rep = provider_score(user)
-    return {"id": user.pk, "name": _first(user), "photo": absolute_media_url(request, profile.photo) if profile else None,
+    first, last = (user.first_name or "").strip(), (user.last_name or "").strip()
+    name = f"{first} {last[0]}." if first and last else _first(user)        # « Prénom N. », comme partout ailleurs
+    return {"id": user.pk, "name": name, "photo": absolute_media_url(request, profile.photo) if profile else None,
             "trust_score": profile.trust_score if profile else None, "badges": profile.trust_badges if profile else [],
             "rating": rep["average"], "reviews": rep["count"], "verified": bool(profile and is_publishable(profile))}
 
