@@ -73,3 +73,19 @@ iOS sans notification → clé APNs absente de Firebase ou identifiant de bundle
 Charge utile exacte (priorité haute Android, canal, APNs priority 10, badge, `collapse_key`), jeton OAuth mis en cache, jetons morts supprimés, échecs transitoires comptés pour reprise,
 préférences par catégorie, une seule notification par événement (idempotence), cycle de vie d'une mission, annonces planifiées livrées une fois, échéances mensuelles
 (tick → notification → push avec lien profond du contrat), liens profonds et reprise à froid côté Flutter. **Non vérifiable sans compte Firebase réel : la remise effective par Google/Apple.**
+
+## 7. Activation réelle (21 oct. 2026) — projet Firebase « Tratra »
+
+- Projet `tratra-380c5` (expéditeur 386488746571), API Firebase Cloud Messaging (V1) activée, ancienne API désactivée.
+- Applications Android enregistrées : `com.tratra` (Play Store) et `com.tratra.recette` (recette, installable à côté). Un seul
+  `google-services.json` contient les deux ; il va dans `flutter_tratra/android/app/` (ignoré par Git) et le plugin Google Services
+  s'applique alors automatiquement au build.
+- Compte de service `firebase-adminsdk-fbsvc` : clé privée gardée hors Git (poste de développement : `~/.tratra-firebase/`,
+  droits 600) ; en production, la déposer sur le serveur et renseigner `FCM_CREDENTIALS_FILE`. Ne jamais la committer ni l'afficher.
+- **Qualifié sur Galaxy S10+ (Android 12)**, backend local + FCM réel, événements réels (client qui réserve et écrit) :
+  nouvelle demande de réservation/mission (app en arrière-plan), nouveau message (app FERMÉE, processus tué), app ouverte
+  (bandeau « Voir » + pastille d'onglet), téléphone en veille ; canal `tratra_default` importance haute (bannière), visibilité
+  PRIVATE (rien sur l'écran verrouillé, texte du message jamais envoyé), compteur de pastille, regroupement par conversation ;
+  toucher → conversation ou détail de la mission ; préférence « Messages » coupée → aucun push (`skipped: disabled`).
+- Restent à qualifier : permission Android 13+ (le S10+ est en Android 12), iOS (APNs), déconnexion sur l'appareil (couverte par
+  les tests automatisés).
