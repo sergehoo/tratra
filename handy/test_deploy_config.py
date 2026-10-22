@@ -548,3 +548,11 @@ def test_production_refuses_biometrics_without_an_encryption_key_or_with_an_inco
     assert r.returncode != 0 and "https BIOMETRIC_API_URL" in r.stderr
     r = _load_prod_settings(PUBLIC_WEB_URL="https://app.example.test", BIOMETRIC_ENABLED="true", BIOMETRIC_ENCRYPTION_KEY="k")
     assert r.returncode == 0, r.stderr[-300:]
+
+
+def test_production_web_and_worker_can_read_the_firebase_service_account():
+    """Le push FCM part du worker (tâche Celery) et, sans broker, du serveur web : les deux montent ./secrets en lecture seule.
+    Sans ce montage, FCM_CREDENTIALS_FILE ne peut pas être lu et le Back-Office affiche « Firebase non configuré »."""
+    services = _compose("docker-compose.yml")["services"]
+    for name in ("tratraweb", "worker"):
+        assert "./secrets:/run/tratra-secrets:ro" in services[name].get("volumes", []), name

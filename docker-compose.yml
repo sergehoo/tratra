@@ -159,6 +159,9 @@ services:
     volumes:
       - static_volume:/app/staticfiles
       - media_volume:/app/media
+      # Compte de service Firebase (push FCM) : ./secrets/fcm-service-account.json, hors Git et hors image, lecture seule.
+      # Sans fichier : aucun push, aucune erreur (le Back-Office affiche « Firebase non configuré »). Voir docs/push-fcm.md.
+      - ./secrets:/run/tratra-secrets:ro
     # L'adresse PUBLIQUE de MinIO (https://${MINIO_API_HOST}, celle des liens signés) doit aussi être joignable DEPUIS les conteneurs : depuis un
     # conteneur, l'IP publique du serveur n'est souvent pas atteignable (hairpin / pare-feu) et chaque opération sur un fichier expire
     # (« Connection to minioapi… timed out »). Ce nom pointe donc vers la passerelle de l'hôte, où Traefik écoute sur 443 (même certificat).
@@ -210,6 +213,9 @@ services:
       dockerfile: Dockerfile
     env_file: .env
     command: celery -A tratra worker -l info --prefetch-multiplier=1 --max-tasks-per-child=200 --queues=default,notifications
+    # Le worker ENVOIE les push (tâche send_notification_push) : il doit lire le même compte de service Firebase.
+    volumes:
+      - ./secrets:/run/tratra-secrets:ro
     depends_on:
       tratradb:
         condition: service_healthy

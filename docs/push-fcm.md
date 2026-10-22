@@ -89,3 +89,23 @@ préférences par catégorie, une seule notification par événement (idempotenc
   toucher → conversation ou détail de la mission ; préférence « Messages » coupée → aucun push (`skipped: disabled`) ;
   déconnexion dans l'application → appareil supprimé côté serveur, plus aucun push vers ce téléphone (`no_device`).
 - Restent à qualifier : permission Android 13+ (le S10+ est en Android 12), iOS (APNs).
+
+## 8. Production (constat du 22 oct. 2026 : Back-Office « Firebase non configuré »)
+
+Cause : la production n'a ni le fichier du compte de service, ni (jusqu'au commit qui ajoute ce paragraphe) le montage `./secrets` dans
+`tratraweb` et `worker`. Le compte de service doit venir du **même** projet que le `google-services.json` des bundles Play (`tratra-380c5`).
+
+Sur le serveur, dans le dossier du compose de production, après le déploiement de ce commit :
+
+```bash
+mkdir -p secrets && sudo chown 10001:10001 secrets && sudo chmod 500 secrets          # uid 10001 = utilisateur des conteneurs
+# depuis le poste qui détient la clé : scp ~/.tratra-firebase/fcm-service-account.json <serveur>:/tmp/
+sudo install -o 10001 -g 10001 -m 400 /tmp/fcm-service-account.json secrets/ && shred -u /tmp/fcm-service-account.json
+grep -q '^FCM_CREDENTIALS_FILE=' .env && sed -i 's|^FCM_CREDENTIALS_FILE=.*|FCM_CREDENTIALS_FILE=/run/tratra-secrets/fcm-service-account.json|' .env \
+  || echo 'FCM_CREDENTIALS_FILE=/run/tratra-secrets/fcm-service-account.json' >> .env
+docker compose up -d tratraweb worker beat                                              # recharge .env et le montage
+docker compose exec tratraweb python manage.py push_check --token                      # « configuré » + jeton OAuth obtenu
+docker compose exec tratraweb python manage.py push_check --user <ID> --validate        # appareils du compte validés par FCM, sans remise
+```
+
+Les notifications déjà créées avec l'état « Firebase non configuré » ne sont pas renvoyées (état final) : seules les suivantes partent.
