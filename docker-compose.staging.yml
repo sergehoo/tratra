@@ -175,6 +175,8 @@ services:
         NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL:-https://${FRONTEND_HOST}}
         NEXT_PUBLIC_MEDIA_ORIGINS: ${AWS_S3_ENDPOINT_URL:-},${NEXT_PUBLIC_MEDIA_ORIGINS:-}
         NEXT_PUBLIC_ESCROW_ENABLED: ${NEXT_PUBLIC_ESCROW_ENABLED:-false}
+        # Anti-robot Cloudflare Turnstile (clé PUBLIQUE ; vide = désactivé) — la clé secrète va dans .env (TURNSTILE_SECRET_KEY).
+        NEXT_PUBLIC_TURNSTILE_SITE_KEY: ${NEXT_PUBLIC_TURNSTILE_SITE_KEY:-}
     depends_on:
       tratraweb-stg:
         condition: service_healthy
