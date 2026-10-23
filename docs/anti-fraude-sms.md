@@ -59,7 +59,8 @@ peut être exigé partout (`TURNSTILE_MODE=all`) le jour où l'application l'int
    Rien n'est supprimé. Un compte vérifié ou ayant une activité réelle n'est jamais désactivé (revérifié au moment de l'action).
 6. **Comptes historiques non vérifiés** (clients réels du pilote) : poser `UNVERIFIED_RESTRICTIONS_SINCE` à la date du déploiement
    pour ne pas bloquer leurs réservations.
-7. Configurer `ADMINS` (e-mail) et Sentry pour recevoir les alertes de quota.
+7. Configurer `ADMINS` (« Nom <adresse>, adresse2 ») et un SMTP réel (`EMAIL_*`, `SERVER_EMAIL`), ainsi que Sentry, pour recevoir
+   les alertes de quota. Sans `ADMINS`, aucune alerte ne part par e-mail (seulement le journal critique).
 
 ## Réglages par défaut (pilote)
 
@@ -96,3 +97,16 @@ Préparé le 23 oct. 2026, **sans effet tant que les serveurs DNS ne sont pas ba
 5. Après activation : tester le site, l'application mobile (connexion, réservation, notifications, images), le Back-Office.
 6. Ensuite seulement : n'autoriser que les adresses Cloudflare sur les ports 80/443 du serveur (pare-feu), pour qu'on ne puisse plus
    contourner Cloudflare en appelant l'IP 147.93.84.26 directement.
+
+### E-mail du domaine et adresse du serveur (recommandations Cloudflare)
+
+- **Recevoir `support@tratra.net`** (affichée dans l'application, les pages légales et Google Play) : Cloudflare → Email → Email
+  Routing → activer, puis règle `support@` → boîte de l'équipe (adresse à confirmer depuis l'e-mail de vérification). Cloudflare
+  ajoute lui-même les MX, le SPF (`include:_spf.mx.cloudflare.net`) et la clé DKIM de routage.
+- **DMARC** : Email → DMARC Management → activer (rapports agrégés chez Cloudflare), d'abord `p=quarantine`, puis `p=reject` après
+  deux semaines de rapports propres. Si le serveur envoie un jour en `@tratra.net` (alertes, SMTP), ajouter son fournisseur au SPF
+  et publier sa clé DKIM AVANT de durcir DMARC.
+- **IP d'origine** : `minioapi` passé en « Proxied » (règle de cache « jamais en cache » déjà en place pour cet hôte : toutes les URL
+  de médias sont signées et privées). Limite Cloudflare Free : 100 Mo par requête (pièces KYC limitées à 10 Mo). Retour arrière :
+  repasser l'enregistrement en « DNS only ». L'IP 147.93.84.26 reste connue de l'historique DNS : seul un pare-feu n'acceptant que
+  les adresses Cloudflare sur 80/443 la protège vraiment (attention aux autres sites hébergés sur ce serveur).

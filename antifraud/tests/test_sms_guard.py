@@ -117,6 +117,19 @@ def test_global_quota_blocks_and_alerts_once(antifraud_on, caplog):
     assert len(sms.outbox) == 2
 
 
+def test_quota_alert_is_emailed_to_admins(antifraud_on, mailoutbox):
+    antifraud_on.SMS_GLOBAL_HOURLY_LIMIT = 1
+    antifraud_on.ADMINS = [("Equipe Tratra", "alertes@tratra.test")]
+    antifraud_on.SERVER_EMAIL = "alertes@tratra.test"
+    sms.send_sms("+2250700000016", "x", purpose="otp_signup")
+    with pytest.raises(sms.SMSBlocked):
+        sms.send_sms("+2250700000017", "x", purpose="otp_signup")
+    assert {tuple(m.to) for m in mailoutbox} == {("alertes@tratra.test",)}
+    bodies = [m.body for m in mailoutbox]
+    assert sum("seuil d'alerte" in b for b in bodies) == 1 and sum("QUOTA ATTEINT" in b for b in bodies) == 1
+    assert not any("+225" in b for b in bodies)             # ni numéro ni code dans l'alerte
+
+
 def test_blocked_attempts_do_not_consume_the_global_quota(antifraud_on):
     antifraud_on.SMS_GLOBAL_HOURLY_LIMIT = 1
     for _ in range(5):                                      # numéro étranger : refusé avant tout quota

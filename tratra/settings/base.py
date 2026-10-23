@@ -785,6 +785,10 @@ EMAIL_USE_TLS = env_bool("EMAIL_USE_TLS", True)
 EMAIL_HOST_USER = config("EMAIL_HOST_USER", default='')
 EMAIL_HOST_PASSWORD = config("EMAIL_HOST_PASSWORD", default='')
 DEFAULT_FROM_EMAIL = config("DEFAULT_FROM_EMAIL", default='no-reply@tratra.invalid')
+SERVER_EMAIL = config("SERVER_EMAIL", default="") or DEFAULT_FROM_EMAIL
+# Destinataires des alertes (quotas SMS, erreurs 500) : « Nom <adresse>, adresse2 ». Vide = aucun e-mail d'alerte.
+from email.utils import parseaddr as _parseaddr
+ADMINS = [(_name or _addr, _addr) for _name, _addr in (_parseaddr(_a) for _a in config('ADMINS', default='').split(',')) if '@' in _addr]
 
 # Contact du support affiché à l'utilisateur (ex. connexion temporairement bloquée).
 SUPPORT_EMAIL = config('SUPPORT_EMAIL', default='support@tratra.net')
