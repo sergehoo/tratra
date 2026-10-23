@@ -12,6 +12,7 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from handy import sms
+from antifraud.models import SmsLog
 from handy.models import OTPCode, User
 
 pytestmark = pytest.mark.django_db
@@ -96,17 +97,16 @@ def test_resend_cooldown_and_single_valid_code():
     assert c.post(reverse("otp-request")).status_code == 201
     r = c.post(reverse("otp-request"))
     assert r.status_code == 429 and "Patientez" in r.json()["detail"] and r["Retry-After"]
-    OTPCode.objects.filter(user=user).update(created_at=timezone.now() - timedelta(minutes=2))
+    SmsLog.objects.filter(user=user).update(created_at=timezone.now() - timedelta(minutes=2))   # envoi d'il y a 2 min
     assert c.post(reverse("otp-request")).status_code == 201
     assert OTPCode.objects.filter(user=user, used=False).count() == 1
 
 
 def test_hourly_quota():
     user, c = _client()
-    for _ in range(5):
-        OTPCode.objects.create(user=user, code="000000", expires_at=timezone.now() + timedelta(minutes=5),
-                               used=True)
-    OTPCode.objects.filter(user=user).update(created_at=timezone.now() - timedelta(minutes=30))
+    for _ in range(5):   # 5 SMS envoyés dans l'heure (journal des envois : source du délai et du quota)
+        SmsLog.objects.create(user=user, purpose="otp_signup", status="sent")
+    SmsLog.objects.filter(user=user).update(created_at=timezone.now() - timedelta(minutes=30))
     r = c.post(reverse("otp-request"))
     assert r.status_code == 429 and "Trop de codes" in r.json()["detail"]
 

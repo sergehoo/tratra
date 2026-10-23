@@ -101,6 +101,7 @@ INSTALLED_APPS = [
     'biometrics',
     'statuses',
     'flash',
+    'antifraud',
     'backoffice',
     # Libs
     'allauth',
@@ -153,6 +154,7 @@ CORS_ALLOW_HEADERS = (*default_headers, "idempotency-key", "if-match", "x-auth-t
 CORS_EXPOSE_HEADERS = ["Idempotent-Replay"]
 
 MIDDLEWARE = [
+    'handy.security.CloudflareClientIPMiddleware',   # adresse réelle du visiteur derrière Cloudflare (CLOUDFLARE_PROXY)
     'django.middleware.security.SecurityMiddleware',
     "whitenoise.middleware.WhiteNoiseMiddleware",
     'corsheaders.middleware.CorsMiddleware',
@@ -239,6 +241,8 @@ REST_FRAMEWORK = {
         'user': config('THROTTLE_USER', default='1000/hour'),
         'login': config('THROTTLE_LOGIN', default='10/min'),
         'recovery': config('THROTTLE_RECOVERY', default='20/hour'),
+        'otp': config('THROTTLE_OTP', default='10/hour'),  # demandes de code SMS (en plus des quotas SMS d'antifraud)
+        'otp_verify': config('THROTTLE_OTP_VERIFY', default='30/hour'),  # saisies de code (en plus du verrou par compte)
         'webhook': config('THROTTLE_WEBHOOK', default='120/min'),
         'biometric': config('THROTTLE_BIOMETRIC', default='60/min'),  # sessions et captures de vérification faciale
         'messaging': config('THROTTLE_MESSAGING', default='60/min'),  # envoi de messages (texte et médias)
@@ -558,6 +562,64 @@ TAILWIND_APP_NAME = 'theme'
 INTERNAL_IPS = ['127.0.0.1']
 # === CELERY ===
 CELERY_BROKER_URL = config('REDIS_URL', default='redis://redis:6379/0')
+
+# === CACHE PARTAGÉ (limites de débit, quotas SMS, verrous d'essais) ===
+# Sans cache partagé, chaque processus compte de son côté : les limites ne valent rien avec plusieurs workers. Redis dès qu'il est
+# configuré (CACHE_URL, sinon REDIS_URL sur la base n° 1 — jamais celle de Celery : un vidage du cache viderait les files) ;
+# la production l'exige (tratra/settings/prod.py). Sans Redis (poste de développement, tests) : cache local du processus.
+def _cache_url():
+    explicit = config('CACHE_URL', default='')
+    if explicit:
+        return explicit
+    redis_url = config('REDIS_URL', default='')
+    if not redis_url:
+        return ''
+    from urllib.parse import urlsplit, urlunsplit
+    parts = urlsplit(redis_url)
+    return urlunsplit((parts.scheme, parts.netloc, '/1', parts.query, parts.fragment))
+
+
+CACHE_URL = _cache_url()
+CACHES = {
+    'default': ({'BACKEND': 'django.core.cache.backends.redis.RedisCache', 'LOCATION': CACHE_URL, 'KEY_PREFIX': 'tratra',
+                 'OPTIONS': {'socket_connect_timeout': 2, 'socket_timeout': 2}}
+                if CACHE_URL else {'BACKEND': 'django.core.cache.backends.locmem.LocMemCache', 'LOCATION': 'tratra'}),
+}
+
+# === ANTI-FRAUDE : SMS (« SMS pumping ») et inscriptions — app `antifraud` ===
+# Interrupteurs (false = aucun SMS de ce type, aucune dépense ; réponse claire 503 aux utilisateurs).
+SMS_ENABLED = env_bool('SMS_ENABLED', True)                        # TOUS les SMS
+SMS_OTP_SIGNUP_ENABLED = env_bool('SMS_OTP_SIGNUP_ENABLED', True)  # codes de vérification du téléphone (inscription)
+SMS_RECOVERY_ENABLED = env_bool('SMS_RECOVERY_ENABLED', True)      # codes de récupération du compte
+SMS_ALERTS_ENABLED = env_bool('SMS_ALERTS_ENABLED', True)          # alertes de service (« votre artisan arrive »)
+# Destinations : indicatifs autorisés (225 = Côte d'Ivoire), numéros mobiles uniquement.
+SMS_ALLOWED_COUNTRY_CODES = config('SMS_ALLOWED_COUNTRY_CODES', default='225')
+# Quotas (0 = sans limite). Le global n'est consommé que par un envoi qui a passé les autres contrôles.
+SMS_GLOBAL_HOURLY_LIMIT = config('SMS_GLOBAL_HOURLY_LIMIT', default=30, cast=int)
+SMS_GLOBAL_DAILY_LIMIT = config('SMS_GLOBAL_DAILY_LIMIT', default=150, cast=int)
+SMS_PER_NUMBER_HOURLY_LIMIT = config('SMS_PER_NUMBER_HOURLY_LIMIT', default=3, cast=int)
+SMS_PER_NUMBER_DAILY_LIMIT = config('SMS_PER_NUMBER_DAILY_LIMIT', default=6, cast=int)
+SMS_PER_IP_HOURLY_LIMIT = config('SMS_PER_IP_HOURLY_LIMIT', default=5, cast=int)
+SMS_PER_IP_DAILY_LIMIT = config('SMS_PER_IP_DAILY_LIMIT', default=15, cast=int)
+SMS_PER_USER_DAILY_LIMIT = config('SMS_PER_USER_DAILY_LIMIT', default=8, cast=int)
+SMS_ALERT_RATIO = config('SMS_ALERT_RATIO', default=0.8, cast=float)   # alerte (journal critique + e-mail ADMINS) à 80 %
+# Inscriptions publiques.
+SIGNUP_PER_IP_HOURLY_LIMIT = config('SIGNUP_PER_IP_HOURLY_LIMIT', default=5, cast=int)
+SIGNUP_PER_IP_DAILY_LIMIT = config('SIGNUP_PER_IP_DAILY_LIMIT', default=20, cast=int)
+SIGNUP_PER_DEVICE_DAILY_LIMIT = config('SIGNUP_PER_DEVICE_DAILY_LIMIT', default=3, cast=int)
+SIGNUP_GLOBAL_HOURLY_LIMIT = config('SIGNUP_GLOBAL_HOURLY_LIMIT', default=60, cast=int)
+SIGNUP_SAME_NAME_DAILY_LIMIT = config('SIGNUP_SAME_NAME_DAILY_LIMIT', default=3, cast=int)
+SIGNUP_PHONE_BLOCK_HOURLY_LIMIT = config('SIGNUP_PHONE_BLOCK_HOURLY_LIMIT', default=3, cast=int)
+PHONE_CHANGES_DAILY_LIMIT = config('PHONE_CHANGES_DAILY_LIMIT', default=3, cast=int)   # changements de numéro par compte et par jour
+# Cloudflare Turnstile (anti-robot du site) : clé secrète ; mode web (navigateurs) | all | off.
+TURNSTILE_SECRET_KEY = config('TURNSTILE_SECRET_KEY', default='')
+TURNSTILE_MODE = config('TURNSTILE_MODE', default='web')
+# Site derrière le proxy Cloudflare : l'adresse du visiteur est lue dans CF-Connecting-IP (seulement depuis une adresse Cloudflare).
+CLOUDFLARE_PROXY = env_bool('CLOUDFLARE_PROXY', False)
+# Comptes au téléphone NON vérifié : actions sensibles refusées (réservation, commande, messages, offres, paiement…).
+UNVERIFIED_RESTRICTIONS = env_bool('UNVERIFIED_RESTRICTIONS', True)
+# Comptes créés AVANT cette date (AAAA-MM-JJ) : exemptés (clients historiques du pilote). Vide = tous les comptes.
+UNVERIFIED_RESTRICTIONS_SINCE = config('UNVERIFIED_RESTRICTIONS_SINCE', default='')
 CELERY_RESULT_BACKEND = CELERY_BROKER_URL
 # File par défaut des tâches : DOIT figurer dans --queues du worker (docker-compose*.yml). Sans cette ligne, Celery
 # publie dans la file « celery » que le worker (--queues=default,notifications) n'écoute pas : aucune tâche ne

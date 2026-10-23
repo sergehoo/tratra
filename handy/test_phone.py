@@ -122,8 +122,15 @@ def test_accounts_created_before_libphonenumber_still_log_in_and_recover():
     assert sms.outbox and sms.outbox[-1][0] == old.phone
 
 
-def test_recovery_with_national_number_and_country():
+def test_recovery_with_national_number_and_country(settings):
     u = User.objects.create_user(username="rec", password="pass1234", phone="+33612345678")
+    # Destinations SMS restreintes (anti « SMS pumping ») : la France doit être autorisée explicitement.
+    r = APIClient().post("/handy/auth/password-reset/request/", {"phone": "06 12 34 56 78", "phone_country": "FR"}, format="json")
+    assert r.status_code == 400 and not sms.outbox
+    settings.SMS_ALLOWED_COUNTRY_CODES = "225,33"
+    from django.core.cache import cache
+
+    cache.clear()
     r = APIClient().post("/handy/auth/password-reset/request/", {"phone": "06 12 34 56 78", "phone_country": "FR"}, format="json")
     assert r.status_code == 202 and sms.outbox[-1][0] == u.phone
 

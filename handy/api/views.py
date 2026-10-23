@@ -30,7 +30,10 @@ from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import serializers as drf_serializers
 from rest_framework import generics, viewsets, permissions, status, mixins
 from rest_framework.authentication import SessionAuthentication
-from rest_framework.decorators import action, api_view, authentication_classes, permission_classes
+from rest_framework.decorators import action, api_view, authentication_classes, permission_classes, throttle_classes
+from rest_framework.throttling import ScopedRateThrottle
+
+from antifraud.permissions import ensure_verified
 from drf_spectacular.utils import (
     extend_schema, extend_schema_view, inline_serializer, OpenApiParameter, OpenApiResponse,
 )
@@ -472,6 +475,25 @@ class UserViewSet(viewsets.ModelViewSet):
             if not staff_may(user, needed):
                 return qs.filter(pk=user.pk)
         return qs
+
+    def create(self, request, *args, **kwargs):
+        """Inscription publique : champs validés, puis garde anti-fraude (anti-robot du site, limites par IP / appareil / global,
+        motifs de rafale) AVANT toute création ; chaque décision est journalisée avec l'IP (antifraud.SignupLog)."""
+        from antifraud import signup_guard
+
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        ctx, refusal = signup_guard.check(request, serializer.validated_data)
+        if refusal is not None:
+            signup_guard.record(ctx, refusal=refusal)
+            logger.warning("Inscription refusée (%s).", refusal.reason)
+            response = Response({"code": f"signup_{refusal.reason}", "detail": refusal.message}, status=refusal.http_status)
+            if refusal.retry_after:
+                response["Retry-After"] = str(refusal.retry_after)
+            return response
+        self.perform_create(serializer)
+        signup_guard.record(ctx, user=serializer.instance)
+        return Response(serializer.data, status=status.HTTP_201_CREATED, headers=self.get_success_headers(serializer.data))
 
     def get_permissions(self):
         if self.action in ['create']:  # inscription
@@ -939,7 +961,8 @@ class BookingViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
 
     def create(self, request, *args, **kwargs):
         """Création idempotente : avec `Idempotency-Key`, un double appui ou un renvoi après coupure/crash retrouve la
-        même réservation au lieu d'en créer une seconde (continuity.idempotency)."""
+        même réservation au lieu d'en créer une seconde (continuity.idempotency). Téléphone vérifié exigé (anti-fraude)."""
+        ensure_verified(request.user)
         return run_idempotent(request, "booking.create", lambda: super(BookingViewSet, self).create(request, *args, **kwargs))
 
     def perform_create(self, serializer):
@@ -1284,6 +1307,10 @@ class ReviewViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
             raise PermissionDenied("Seul l'auteur de l'avis peut le modifier ou le supprimer.")
         return review
 
+    def create(self, request, *args, **kwargs):
+        ensure_verified(request.user)               # anti-fraude : avant toute validation
+        return super().create(request, *args, **kwargs)
+
     def perform_create(self, serializer):
         booking = serializer.validated_data["booking"]
         user = self.request.user
@@ -1435,6 +1462,7 @@ class MessageViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
     def create(self, request, *args, **kwargs):
         from handy import messaging
 
+        ensure_verified(request.user)
         conv = Conversation.objects.filter(pk=request.data.get("conversation")).first()
         if conv is None or not conv.participants.filter(pk=request.user.pk).exists():
             raise PermissionDenied("Vous ne participez pas à cette conversation.")
@@ -1579,6 +1607,7 @@ def payment_initiate(request):
     A method without a configured live provider returns 503; no placeholder
     transaction or predictable provider reference is created.
     """
+    ensure_verified(request.user)
     from handy.services.gateway import PaymentProviderError, PaymentProviderUnavailable
 
     ser = PaymentInitSerializer(data=request.data, context={"request": request})
@@ -1624,59 +1653,89 @@ def match(request):
 
 # ---- OTP (vérification de compte) ----
 OTP_TTL_MINUTES = 10            # durée de validité d'un code
-OTP_RESEND_COOLDOWN_S = 60      # délai minimal entre deux codes
-OTP_MAX_PER_HOUR = 5            # codes émis par compte et par heure
+OTP_RESEND_COOLDOWN_S = 60      # délai minimal entre deux codes (premier renvoi)
+OTP_COOLDOWNS = (60, 120, 300, 600)   # délai croissant selon le nombre de codes déjà envoyés dans l'heure
+OTP_MAX_PER_HOUR = 5            # codes envoyés par compte et par heure
 OTP_MAX_FAILURES = 5            # essais invalides avant invalidation du code
+OTP_REUSE_MIN_REMAINING_S = 120  # un code encore valide au moins 2 min est RENVOYÉ tel quel (pas de nouveau code)
 
 
-def _otp_error(detail, http_status):
-    # Corps {"detail"} seul : les clients affichent le message tel quel (aucun champ technique).
-    return Response({"detail": detail}, status=http_status)
+def _otp_error(detail, http_status, **extra):
+    # Corps {"detail"} (+ code éventuel) : les clients affichent le message tel quel (aucun champ technique).
+    return Response({"detail": detail, **extra}, status=http_status)
+
+
+def _sms_blocked_response(exc):
+    resp = _otp_error(str(exc), exc.http_status, code=f"sms_{exc.reason}")
+    if exc.retry_after:
+        resp["Retry-After"] = str(exc.retry_after)
+    return resp
 
 
 @extend_schema(request=None, responses=OpenApiTypes.OBJECT,
                tags=["OTP"], summary="Envoyer un code OTP de vérification par SMS")
 @api_view(["POST"])
 @permission_classes([permissions.IsAuthenticated])
+@throttle_classes([ScopedRateThrottle])
 def otp_request(request):
-    """Génère un code OTP et l'envoie par SMS via le fournisseur configuré (handy/sms.py).
+    """Envoie par SMS le code de vérification du téléphone du compte (handy/sms.py, garde anti-fraude antifraud.sms_guard).
 
-    Jamais de faux succès : sans numéro, sans fournisseur ou si l'envoi échoue, une erreur est
-    renvoyée et le code créé est invalidé. Un seul code valide à la fois ; délai et quota
-    d'émission par compte (calculés en base : valables quel que soit le nombre de processus).
-    """
+    Jamais de faux succès : sans numéro, sans fournisseur, envoi bloqué ou en échec, une erreur est renvoyée. Un seul code valide
+    à la fois ; un code encore valide est RENVOYÉ plutôt que remplacé. Délai croissant entre deux envois (60 s, 2, 5 puis 10 min),
+    5 envois par heure et par compte (comptés en base sur le journal des SMS), quotas par IP, numéro, compte et global (Redis).
+    Numéro déjà vérifié : aucun SMS. Anti-robot (Turnstile) exigé pour le site quand il est configuré."""
+    from antifraud import turnstile
+    from antifraud.models import SmsLog
     from handy import sms
+    from handy.security import client_ip
 
     user = request.user
     if not (user.phone or "").strip():
         return _otp_error("Ajoutez un numéro de téléphone à votre compte pour recevoir un code.", status.HTTP_400_BAD_REQUEST)
+    if user.is_verified:
+        return _otp_error("Votre numéro est déjà vérifié.", status.HTTP_409_CONFLICT, code="already_verified")
+    ip = client_ip(request)
+    if turnstile.check(request, ip) == "failed":
+        return _otp_error("Vérification anti-robot requise : rechargez la page et réessayez.", status.HTTP_400_BAD_REQUEST,
+                          code="captcha")
     now = timezone.now()
-    recent = OTPCode.objects.filter(user=user, created_at__gte=now - timedelta(hours=1))
-    last = recent.order_by("-created_at").first()
-    if last and (now - last.created_at).total_seconds() < OTP_RESEND_COOLDOWN_S:
-        wait = OTP_RESEND_COOLDOWN_S - int((now - last.created_at).total_seconds())
-        resp = _otp_error(f"Patientez {wait} s avant de demander un nouveau code.", status.HTTP_429_TOO_MANY_REQUESTS)
-        resp["Retry-After"] = str(wait)
-        return resp
-    if recent.count() >= OTP_MAX_PER_HOUR:
+    sent = SmsLog.objects.filter(user=user, purpose="otp_signup", status="sent", created_at__gte=now - timedelta(hours=1))
+    count = sent.count()
+    last = sent.order_by("-created_at").first()
+    if last:
+        cooldown = OTP_COOLDOWNS[min(count, len(OTP_COOLDOWNS)) - 1]
+        elapsed = int((now - last.created_at).total_seconds())
+        if elapsed < cooldown:
+            resp = _otp_error(f"Patientez {cooldown - elapsed} s avant de demander un nouveau code.", status.HTTP_429_TOO_MANY_REQUESTS)
+            resp["Retry-After"] = str(cooldown - elapsed)
+            return resp
+    if count >= OTP_MAX_PER_HOUR:
         return _otp_error("Trop de codes demandés. Réessayez dans une heure.", status.HTTP_429_TOO_MANY_REQUESTS)
 
-    OTPCode.objects.filter(user=user, used=False).update(used=True)  # un seul code valide
-    otp = OTPCode.issue(user, purpose="signup", ttl_minutes=OTP_TTL_MINUTES)
+    current = OTPCode.objects.filter(user=user, purpose="signup", used=False).order_by("-created_at").first()
+    reused = bool(current and current.is_valid() and (current.expires_at - now).total_seconds() >= OTP_REUSE_MIN_REMAINING_S)
+    if reused:
+        otp = current
+    else:
+        OTPCode.objects.filter(user=user, used=False).update(used=True)  # un seul code valide
+        otp = OTPCode.issue(user, purpose="signup", ttl_minutes=OTP_TTL_MINUTES)
     try:
-        backend = sms.send_sms(user.phone, f"Votre code de vérification Tratra : {otp.code}")
+        backend = sms.send_sms(user.phone, f"Votre code de vérification Tratra : {otp.code}", purpose="otp_signup", ip=ip,
+                               user_id=user.pk)
     except sms.SMSError as exc:
-        otp.used = True
-        otp.save(update_fields=["used"])
+        if not reused:
+            otp.used = True
+            otp.save(update_fields=["used"])
+        if isinstance(exc, sms.SMSBlocked):
+            return _sms_blocked_response(exc)
         if isinstance(exc, sms.SMSNotConfigured):
             logger.error("OTP non envoyé (user=%s) : fournisseur SMS indisponible ou mal configuré — %s", user.pk, exc)
-        else:
-            logger.warning("OTP non envoyé (user=%s) : %s", user.pk, exc)
-        if isinstance(exc, sms.SMSNotConfigured):
             return _otp_error("L'envoi de SMS n'est pas disponible pour le moment.", status.HTTP_503_SERVICE_UNAVAILABLE)
+        logger.warning("OTP non envoyé (user=%s) : %s", user.pk, exc)
         return _otp_error("Le SMS n'a pas pu être envoyé. Vérifiez votre numéro puis réessayez.", status.HTTP_502_BAD_GATEWAY)
+    next_wait = OTP_COOLDOWNS[min(count + 1, len(OTP_COOLDOWNS)) - 1]
     payload = {"sent": True, "phone": sms.mask(sms.normalize_msisdn(user.phone)),
-               "expires_in": OTP_TTL_MINUTES * 60, "resend_in": OTP_RESEND_COOLDOWN_S}
+               "expires_in": max(0, round((otp.expires_at - timezone.now()).total_seconds())), "resend_in": next_wait}
     if settings.DEBUG and getattr(backend, "exposes_code", False):
         payload["code"] = otp.code  # développement avec le backend « console » uniquement
     return Response(payload, status=status.HTTP_201_CREATED)
@@ -1686,21 +1745,26 @@ def otp_request(request):
                tags=["OTP"], summary="Vérifier un code OTP")
 @api_view(["POST"])
 @permission_classes([permissions.IsAuthenticated])
+@throttle_classes([ScopedRateThrottle])
 def otp_verify(request):
     """Vérifie le code OTP -> marque le compte comme vérifié.
 
     Après OTP_MAX_FAILURES essais invalides, les codes en cours sont invalidés : il faut en
     redemander un (soumis au délai et au quota d'émission) — pas de force brute des 10^6 codes.
     """
+    from antifraud import limits
+
     user = request.user
     fail_key = f"otp:fail:{user.pk}"
-    if (cache.get(fail_key) or 0) >= OTP_MAX_FAILURES:
+    try:
+        failures = limits.attempt(fail_key, 600)      # essai compté AVANT la vérification : atomique, même en parallèle
+    except limits.LimitUnavailable:
+        return _otp_error("La vérification est momentanément indisponible. Réessayez dans un instant.", status.HTTP_503_SERVICE_UNAVAILABLE)
+    if failures > OTP_MAX_FAILURES:
         return _otp_error("Trop d'essais. Demandez un nouveau code.", status.HTTP_429_TOO_MANY_REQUESTS)
     code = str(request.data.get("code") or "").strip()
     otp = (OTPCode.objects.filter(user=user, used=False).order_by("-created_at").first())
     if not otp or not otp.is_valid() or not secrets.compare_digest(otp.code, code):
-        failures = (cache.get(fail_key) or 0) + 1
-        cache.set(fail_key, failures, timeout=600)
         if failures >= OTP_MAX_FAILURES:
             OTPCode.objects.filter(user=user, used=False).update(used=True)
             return _otp_error("Code invalide. Trop d'essais : demandez un nouveau code.",
@@ -1708,12 +1772,16 @@ def otp_verify(request):
         left = OTP_MAX_FAILURES - failures
         return Response({"detail": f"Code invalide ou expiré. Il vous reste {left} essai{'s' if left > 1 else ''}."},
                         status=status.HTTP_400_BAD_REQUEST)
-    cache.delete(fail_key)
+    limits.reset(fail_key)
     otp.used = True
     otp.save(update_fields=["used"])
     user.is_verified = True
     user.save(update_fields=["is_verified"])
     return Response({"verified": True})
+
+
+otp_request.cls.throttle_scope = "otp"
+otp_verify.cls.throttle_scope = "otp_verify"
 
 
 # ---- Coupons ----

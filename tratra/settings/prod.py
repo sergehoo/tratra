@@ -137,3 +137,16 @@ DATABASES = {
         'PORT': os.getenv('DB_PORT'),
     }
 }
+
+# Cache PARTAGÉ obligatoire : limites de débit, quotas SMS et verrous d'essais doivent valoir pour tous les processus et serveurs
+# (un cache local par processus laisserait passer N fois la limite). À défaut de CACHE_URL / REDIS_URL : le Redis de Celery,
+# base n° 1 (jamais celle des files de tâches).
+if not CACHE_URL:
+    from urllib.parse import urlsplit as _split_cache, urlunsplit as _join_cache
+
+    _broker = _split_cache(CELERY_BROKER_URL)
+    CACHE_URL = _join_cache((_broker.scheme, _broker.netloc, '/1', '', ''))
+    CACHES = {'default': {'BACKEND': 'django.core.cache.backends.redis.RedisCache', 'LOCATION': CACHE_URL, 'KEY_PREFIX': 'tratra',
+                          'OPTIONS': {'socket_connect_timeout': 2, 'socket_timeout': 2}}}
+if not CACHES['default']['BACKEND'].endswith('RedisCache'):
+    raise ImproperlyConfigured('A shared Redis cache (CACHE_URL or REDIS_URL) is required in production.')

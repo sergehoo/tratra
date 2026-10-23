@@ -104,7 +104,10 @@ def me_conversation_messages(request, pk):
 @parser_classes([JSONParser, MultiPartParser, FormParser])
 @throttle_classes([MessagingThrottle])
 def me_conversation_send(request, pk):
+    from antifraud.permissions import ensure_verified
+
     user = request.user
+    ensure_verified(user)
     try:
         conv = messaging.get_conversation(user, pk)
         message, created = messaging.send(user, conv, request.data.get("content", ""), upload=request.FILES.get("file"),

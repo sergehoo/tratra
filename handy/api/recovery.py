@@ -79,23 +79,37 @@ def password_reset_request(request):
     phone, bad = _phone_or_error(request)
     if bad:
         return bad
+    from antifraud import limits, sms_guard, turnstile
+    from handy.security import client_ip
+
+    ip = client_ip(request)
+    if turnstile.check(request, ip) == "failed":
+        return _error("Vérification anti-robot requise : rechargez la page et réessayez.", status.HTTP_400_BAD_REQUEST)
     try:
         sms.get_backend()  # fournisseur absent/mal configuré : 503 pour tous les numéros (aucune fuite)
     except sms.SMSNotConfigured as exc:
         logger.error("Récupération : fournisseur SMS indisponible — %s", exc)
         return _error("L'envoi de SMS n'est pas disponible pour le moment.", status.HTTP_503_SERVICE_UNAVAILABLE)
 
-    # Délai et quota par numéro, appliqués UNIFORMÉMENT (compte existant ou non).
-    cool, quota = _key("cool", phone), _key("hour", phone)
-    if cache.get(cool):
-        resp = _error(f"Patientez {RESEND_COOLDOWN_S} s avant de demander un nouveau code.",
-                      status.HTTP_429_TOO_MANY_REQUESTS)
-        resp["Retry-After"] = str(RESEND_COOLDOWN_S)
+    # Délai, quota par numéro et garde anti-fraude (interrupteur, destination, quotas IP / numéro / global) appliqués
+    # UNIFORMÉMENT, AVANT de savoir si le compte existe : même réponse dans les deux cas, aucune énumération possible.
+    try:
+        if not cache.add(_key("cool", phone), 1, timeout=RESEND_COOLDOWN_S):
+            resp = _error(f"Patientez {RESEND_COOLDOWN_S} s avant de demander un nouveau code.",
+                          status.HTTP_429_TOO_MANY_REQUESTS)
+            resp["Retry-After"] = str(RESEND_COOLDOWN_S)
+            return resp
+        if not limits.hit(f"recovery_number:h:{limits.digest(phone)}", MAX_PER_HOUR, 3600)[0]:
+            return _error("Trop de codes demandés. Réessayez dans une heure.", status.HTTP_429_TOO_MANY_REQUESTS)
+    except limits.LimitUnavailable:
+        return _error("L'envoi de SMS n'est pas disponible pour le moment.", status.HTTP_503_SERVICE_UNAVAILABLE)
+    try:
+        sms_guard.admit(phone, "otp_recovery", ip=ip)
+    except sms.SMSBlocked as exc:
+        resp = _error(str(exc), exc.http_status)
+        if exc.retry_after:
+            resp["Retry-After"] = str(exc.retry_after)
         return resp
-    if (cache.get(quota) or 0) >= MAX_PER_HOUR:
-        return _error("Trop de codes demandés. Réessayez dans une heure.", status.HTTP_429_TOO_MANY_REQUESTS)
-    cache.set(cool, 1, timeout=RESEND_COOLDOWN_S)
-    cache.set(quota, (cache.get(quota) or 0) + 1, timeout=3600)
 
     accepted = Response({"sent": True, "phone": sms.mask(phone), "expires_in": TTL_MINUTES * 60,
                          "resend_in": RESEND_COOLDOWN_S}, status=status.HTTP_202_ACCEPTED)
@@ -108,7 +122,8 @@ def password_reset_request(request):
     OTPCode.objects.filter(user=user, purpose="recovery", used=False).update(used=True)
     otp = OTPCode.issue(user, purpose="recovery", ttl_minutes=TTL_MINUTES)
     try:
-        sms.send_sms(user.phone, f"Tratra : code de récupération de votre compte {otp.code}. Valable {TTL_MINUTES} minutes.")
+        sms.send_sms(user.phone, f"Tratra : code de récupération de votre compte {otp.code}. Valable {TTL_MINUTES} minutes.",
+                     purpose="otp_recovery", ip=ip, user_id=user.pk, admitted=True)
     except sms.SMSError as exc:
         otp.used = True
         otp.save(update_fields=["used"])
@@ -129,16 +144,20 @@ def password_reset_confirm(request):
         return bad
     code = str(request.data.get("code") or "").strip()
     password = request.data.get("password")
+    from antifraud import limits
+
     fail_key = _key("fail", phone)
-    if (cache.get(fail_key) or 0) >= MAX_FAILURES:
+    try:
+        failures = limits.attempt(fail_key, 600)      # essai compté AVANT la vérification : atomique, même en parallèle
+    except limits.LimitUnavailable:
+        return _error("La vérification est momentanément indisponible. Réessayez dans un instant.", status.HTTP_503_SERVICE_UNAVAILABLE)
+    if failures > MAX_FAILURES:
         return _error("Trop d'essais. Demandez un nouveau code.", status.HTTP_429_TOO_MANY_REQUESTS)
 
     user = _account(request, phone)
     otp = (OTPCode.objects.filter(user=user, purpose="recovery", used=False).order_by("-created_at").first()
            if user else None)
     if not (user and otp and otp.is_valid() and secrets.compare_digest(otp.code, code)):
-        failures = (cache.get(fail_key) or 0) + 1
-        cache.set(fail_key, failures, timeout=600)
         if failures >= MAX_FAILURES and user:
             OTPCode.objects.filter(user=user, purpose="recovery", used=False).update(used=True)
             return _error("Code invalide. Trop d'essais : demandez un nouveau code.", status.HTTP_400_BAD_REQUEST)
@@ -149,12 +168,13 @@ def password_reset_confirm(request):
     try:  # le code n'est consommé qu'une fois le mot de passe accepté
         validate_password(password or "", user=user)
     except DjangoValidationError as exc:
+        limits.reset(fail_key)        # bon code, mot de passe refusé : ce n'est pas un essai de code raté
         return Response({"password": list(exc.messages)}, status=status.HTTP_400_BAD_REQUEST)
     user.set_password(password)
     user.is_verified = True  # la possession du téléphone vient d'être prouvée par le code
     user.save(update_fields=["password", "is_verified"])
     OTPCode.objects.filter(user=user, purpose="recovery", used=False).update(used=True)
-    cache.delete(fail_key)
+    limits.reset(fail_key)
     _blacklist_sessions(user)
     try:  # lève un éventuel verrouillage Axes (échecs de connexion antérieurs)
         from axes.utils import reset

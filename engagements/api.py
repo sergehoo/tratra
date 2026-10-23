@@ -43,11 +43,17 @@ def error_response(exc: EngagementError) -> Response:
     return Response({"code": exc.code, "detail": exc.message, **exc.extra}, status=exc.status)
 
 
-def endpoint(methods, summary, *, idempotent=None, files=False):
-    """Vue de fonction authentifiée : refus métier → JSON `{code, detail, ...}` ; `Idempotency-Key` honorée sur les POST."""
+def endpoint(methods, summary, *, idempotent=None, files=False, verified=False):
+    """Vue de fonction authentifiée : refus métier → JSON `{code, detail, ...}` ; `Idempotency-Key` honorée sur les POST.
+    `verified=True` : écriture réservée aux comptes au téléphone vérifié (anti-fraude)."""
     def decorate(fn):
         @functools.wraps(fn)
         def inner(request, *args, **kwargs):
+            if verified and request.method not in ("GET", "HEAD", "OPTIONS"):
+                from antifraud.permissions import ensure_verified
+
+                ensure_verified(request.user)
+
             def call():
                 try:
                     return fn(request, *args, **kwargs)
@@ -156,7 +162,7 @@ def me_replacements(request):
 
 # ── Besoins ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-@endpoint(["GET", "POST"], "Besoins publiés (parcourir) / publier un besoin", idempotent="posting.create")
+@endpoint(["GET", "POST"], "Besoins publiés (parcourir) / publier un besoin", idempotent="posting.create", verified=True)
 def postings(request):
     if request.method == "POST":
         p = posting_svc.create_posting(request.user, request.data)
@@ -213,7 +219,7 @@ def posting_close(request, pk):
     return Response(S.posting(posting_svc.close_posting(p, request.user, cancel=bool(request.data.get("cancel"))), request.user, detail=True))
 
 
-@endpoint(["POST"], "Postuler à un besoin", idempotent="application.create")
+@endpoint(["POST"], "Postuler à un besoin", idempotent="application.create", verified=True)
 def posting_apply(request, pk):
     p = posting_or_404(request, pk)
     a = posting_svc.apply(p, request.user, request.data)
@@ -272,7 +278,7 @@ def interview_respond(request, pk):
 
 # ── Contrats ────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-@endpoint(["GET", "POST"], "Mes contrats / créer un brouillon de contrat", idempotent="contract.create")
+@endpoint(["GET", "POST"], "Mes contrats / créer un brouillon de contrat", idempotent="contract.create", verified=True)
 def contracts(request):
     if request.method == "POST":
         c = contract_svc.create_draft(request.user, request.data)

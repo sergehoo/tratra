@@ -62,6 +62,15 @@ class SMSProviderUnavailable(SMSError):
     """Le fournisseur lui-même est en cause (injoignable, erreur serveur, quota) — pas ce numéro ni ce message."""
 
 
+class SMSBlocked(SMSError):
+    """Envoi refusé AVANT toute dépense par la garde anti-fraude (antifraud.sms_guard) : interrupteur, destination ou quota.
+    `http_status` et `retry_after` sont destinés à la réponse de l'API ; le message est affichable tel quel."""
+
+    def __init__(self, message: str, *, reason: str, http_status: int = 429, retry_after: Optional[int] = None):
+        super().__init__(message)
+        self.reason, self.http_status, self.retry_after = reason, http_status, retry_after
+
+
 def _setting(name: str, default: str = "") -> str:
     value = getattr(settings, name, None)
     if value in (None, ""):
@@ -397,15 +406,33 @@ def get_backend():
     return providers[0][1] if len(providers) == 1 else FailoverBackend(providers)
 
 
-def send_sms(msisdn: Optional[str], message: str):
-    """Envoie un SMS ; lève SMSError (ou SMSNotConfigured) en cas d'échec. Renvoie le fournisseur qui a livré."""
+def send_sms(msisdn: Optional[str], message: str, *, purpose: str = "alert", ip: Optional[str] = None,
+             user_id: Optional[int] = None, admitted: bool = False):
+    """Envoie un SMS ; lève SMSError (ou SMSNotConfigured, SMSBlocked) en cas d'échec. Renvoie le fournisseur qui a livré.
+
+    Chaque envoi passe d'abord par la garde anti-fraude (interrupteurs, destination autorisée, quotas par IP / numéro / compte /
+    global) puis est journalisé (`antifraud.SmsLog`, sans texte ni code). `purpose` : otp_signup | otp_recovery | alert.
+    `admitted=True` : la garde a déjà été appliquée par l'appelant (récupération : avant même de savoir si le compte existe)."""
+    from antifraud import sms_guard
+
     number = normalize_msisdn(msisdn)
-    backend = get_backend()
+    if not admitted:
+        sms_guard.admit(number, purpose, ip=ip, user_id=user_id)    # SMSBlocked : rien n'est dépensé
     try:
+        backend = get_backend()
         delivered_by = backend.send(number, message)
-    except SMSError:
+    except SMSError as exc:
+        sms_guard.log(number, purpose, "failed", reason=type(exc).__name__, ip=ip, user_id=user_id)
         raise
     except Exception as exc:  # noqa: BLE001 - 502 propre (et code OTP invalidé) plutôt qu'un 500 qui laisserait le code valide
         logger.error("SMS : erreur inattendue d'un fournisseur (%s).", type(exc).__name__)
+        sms_guard.log(number, purpose, "failed", reason=type(exc).__name__, ip=ip, user_id=user_id)
         raise SMSProviderUnavailable(f"Erreur inattendue du fournisseur SMS ({type(exc).__name__}).") from None
-    return delivered_by if delivered_by is not None else backend
+    delivered = delivered_by if delivered_by is not None else backend
+    sms_guard.log(number, purpose, "sent", provider=_provider_name(delivered), ip=ip, user_id=user_id)
+    return delivered
+
+
+def _provider_name(backend) -> str:
+    return {TwilioBackend: "twilio", OrangeBackend: "orange", AfricasTalkingBackend: "africastalking",
+            ConsoleBackend: "console", LocmemBackend: "locmem"}.get(type(backend), type(backend).__name__.lower())

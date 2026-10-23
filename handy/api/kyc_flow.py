@@ -66,6 +66,9 @@ def me_kyc_capture(request):
 @permission_classes([permissions.IsAuthenticated])
 @throttle_classes([KycFlowThrottle])
 def me_kyc_send(request):
+    from antifraud.permissions import ensure_verified
+
+    ensure_verified(request.user)
     return _run(kyc_flow.send, request.user)
 
 

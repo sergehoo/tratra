@@ -107,6 +107,9 @@ def requests_view(request):
     if request.method == "GET":
         qs = MissionRequest.objects.filter(client=request.user).select_related("category", "assigned_to", "booking", "target", "service")[:30]
         return Response({"results": [request_payload(r, request) for r in qs]})
+    from antifraud.permissions import ensure_verified
+
+    ensure_verified(request.user)        # anti-fraude : commande réservée aux numéros prouvés
     d = request.data
     category = ServiceCategory.objects.filter(pk=d.get("category")).first() if str(d.get("category") or "").isdigit() else None
     if category is None:
