@@ -429,6 +429,15 @@ class UserSerializer(serializers.ModelSerializer):
         if "email" in validated_data:
             validated_data["email"] = validated_data["email"] or None
         if "phone" in validated_data and validated_data["phone"] != instance.phone:
+            # Anti-fraude : changer de numéro en boucle permettrait d'envoyer des codes SMS à une série de numéros depuis un seul compte.
+            from antifraud import limits
+
+            try:
+                allowed, _ = limits.hit(f"phone_change:d:{instance.pk}", int(getattr(settings, "PHONE_CHANGES_DAILY_LIMIT", 3)), 86400)
+            except limits.LimitUnavailable:
+                allowed = True                      # les SMS restent protégés par leurs propres quotas
+            if not allowed:
+                raise serializers.ValidationError({"phone": ["Trop de changements de numéro aujourd’hui. Réessayez demain."]})
             instance.is_verified = False  # un nouveau numéro doit être prouvé à son tour
         return super().update(instance, validated_data)
 
@@ -1091,7 +1100,8 @@ class ReportSerializer(serializers.ModelSerializer):
 
 
 class DeviceSerializer(serializers.ModelSerializer):
-    KNOWN_CAPABILITIES = ("flash1",)
+    # flash1 : alerte Tratra Flash construite par l'application ; rich1 : annonce avec grande image (handy.push.RICH_CAPABILITY).
+    KNOWN_CAPABILITIES = ("flash1", "rich1")
     user_detail = UserMiniSerializer(source="user", read_only=True)
     capabilities = serializers.ListField(child=serializers.CharField(max_length=20), required=False, max_length=10)
 

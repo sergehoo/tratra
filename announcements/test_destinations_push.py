@@ -205,3 +205,14 @@ def test_preview_shows_exactly_what_the_phone_receives():
     assert p["action"]["web"] == f"/artisans/{pro.handyman_profile.pk}"
     Announcement.objects.filter(pk=created["id"]).update(to_clients=False)
     assert c.get(f"{BASE}{created['id']}/preview/").json()["errors"]          # plus aucun destinataire : publication impossible
+
+
+def test_the_app_registers_its_rich_capability_through_the_api():
+    """La capacité « rich1 » annoncée par l'application est CONSERVÉE à l'enregistrement de l'appareil (sinon les annonces
+    repartiraient en notification classique, sans logo ni bouton)."""
+    u = account("rich_reg")
+    r = api(u).post("/handy/devices/", {"device_token": "tok-reg", "device_type": "android", "capabilities": ["flash1", "rich1", "inconnue"]},
+                    format="json")
+    assert r.status_code in (200, 201)
+    assert Device.objects.get(device_token="tok-reg").capabilities == ["flash1", "rich1"]
+
