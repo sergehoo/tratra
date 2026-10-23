@@ -4,6 +4,7 @@ import FinalCta from "@/components/landing/FinalCta";
 import Hero from "@/components/landing/Hero";
 import HowItWorks from "@/components/landing/HowItWorks";
 import { LandingDataProvider, type LandingEndpoints } from "@/components/landing/LandingData";
+import LandingStoreBadges from "@/components/landing/LandingStoreBadges";
 import LatestServices from "@/components/landing/LatestServices";
 import ReviewsSection from "@/components/landing/ReviewsSection";
 import StatsBand from "@/components/landing/StatsBand";
@@ -13,6 +14,7 @@ import UrgencySection from "@/components/landing/UrgencySection";
 import SiteFooter from "@/components/site/SiteFooter";
 import SiteHeader from "@/components/site/SiteHeader";
 import { SHARE } from "@/lib/config";
+import type { PublicMobileApps } from "@/lib/mobileApps";
 import { publicGet, resultsOf } from "@/lib/public";
 import { featuredTrades, resolveTrades } from "@/lib/trades";
 import type {
@@ -58,6 +60,8 @@ const ENDPOINTS: LandingEndpoints = {
   reviews: "/reviews/public/?limit=6",
   services: "/services/?is_active=true&page_size=6&sort=recent",
   plans: "/subscription-plans/?audience=business",
+  // Badges Google Play / App Store : liens configurés dans l'administration Django (null = badge masqué).
+  apps: "/public/mobile-apps/",
 };
 
 /** Données structurées (Organization + WebSite/SearchAction), « < » échappé. */
@@ -92,13 +96,14 @@ function jsonLd(): string {
 
 export default async function HomePage() {
   const opts = { revalidate: 300, timeoutMs: 3500 };
-  const [stats, categories, featured, reviews, services, plans] = await Promise.all([
+  const [stats, categories, featured, reviews, services, plans, apps] = await Promise.all([
     publicGet<PublicStats>(ENDPOINTS.stats, opts),
     publicGet<Paginated<Category> | Category[]>(ENDPOINTS.categories, opts),
     publicGet<FeaturedArtisansResponse>(ENDPOINTS.featured, opts),
     publicGet<PublicReviewsResponse>(ENDPOINTS.reviews, opts),
     publicGet<Paginated<Service> | Service[]>(ENDPOINTS.services, opts),
     publicGet<Paginated<SubscriptionPlan> | SubscriptionPlan[]>(ENDPOINTS.plans, opts),
+    publicGet<PublicMobileApps>(ENDPOINTS.apps, opts),
   ]);
 
   // Liens « Métiers » du pied de page : métiers mis en avant du catalogue
@@ -116,7 +121,7 @@ export default async function HomePage() {
           __html: '<style>[style*="opacity:0"]{opacity:1!important;transform:none!important}</style>',
         }}
       />
-      <LandingDataProvider endpoints={ENDPOINTS} initial={{ stats, categories, featured, reviews, services, plans }}>
+      <LandingDataProvider endpoints={ENDPOINTS} initial={{ stats, categories, featured, reviews, services, plans, apps }}>
         <SiteHeader variant="overlay" />
         <main id="contenu" tabIndex={-1} className="overflow-x-clip bg-white outline-none">
           <Hero />
@@ -131,7 +136,10 @@ export default async function HomePage() {
           <BusinessSection />
           <FinalCta />
         </main>
-        <SiteFooter trades={footerTrades.length ? [...footerTrades, { label: "Tous les métiers", href: "/metiers" }] : undefined} />
+        <SiteFooter
+          trades={footerTrades.length ? [...footerTrades, { label: "Tous les métiers", href: "/metiers" }] : undefined}
+          apps={<LandingStoreBadges placement="footer" />}
+        />
       </LandingDataProvider>
     </>
   );

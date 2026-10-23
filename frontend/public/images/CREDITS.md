@@ -22,3 +22,17 @@ ni retrait de contenu, aucune inversion). Profil couleur : sRGB.
 Licences :
 - Pexels License : https://www.pexels.com/license/
 - Unsplash License : https://unsplash.com/license
+
+## Badges des stores (`images/stores/`)
+
+Visuels officiels, utilisés uniquement pour renvoyer vers la fiche de l'application Tratra. Ne jamais les recolorer, les déformer,
+les animer ni en modifier le texte ; les deux badges s'affichent à la même hauteur (40 px minimum).
+
+| Fichier | Contenu | Source | Retouche |
+|---|---|---|---|
+| `images/stores/google-play-badge-fr.png` (646x192) | « Disponible sur Google Play » (français) | https://play.google.com/intl/en_us/badges/ (fr_badge_web_generic.png, 646x250) | Marges transparentes du haut et du bas retirées (rognage sans perte) ; badge inchangé |
+| `images/stores/app-store-badge-fr.svg` (126,5x40) | « Télécharger dans l’App Store » (français, noir) | https://toolbox.marketingtools.apple.com (badge download-on-the-app-store, black, fr-fr) | Aucune |
+
+Chartes : Google Play — https://partnermarketinghub.withgoogle.com/brands/google-play/visual-identity/badge-guidelines/ ;
+Apple — https://developer.apple.com/app-store/marketing/guidelines/. Google Play et le logo Google Play sont des marques de
+Google LLC ; App Store et le logo Apple sont des marques d'Apple Inc.

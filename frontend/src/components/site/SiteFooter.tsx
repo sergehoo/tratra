@@ -1,5 +1,6 @@
 import Image from "next/image";
 import Link from "next/link";
+import type { ReactNode } from "react";
 import { BadgeCheck, Navigation, ShieldCheck, Wallet } from "lucide-react";
 import { BrandWordmark } from "@/components/ds/BrandWordmark";
 import { CONTAINER } from "@/components/ds/layout";
@@ -52,8 +53,11 @@ function Column({ title, links, id }: { title: string; links: FooterLink[]; id: 
   );
 }
 
-/** Pied de page public (landing, recherche). Compatible Server Component. */
-export default function SiteFooter({ trades }: { trades?: FooterLink[] }) {
+/**
+ * Pied de page public (landing, recherche). Compatible Server Component.
+ * `apps` : badges Google Play / App Store (la landing transmet les siens ; rien ne s'affiche sans badge publié).
+ */
+export default function SiteFooter({ trades, apps }: { trades?: FooterLink[]; apps?: ReactNode }) {
   const tradeLinks = (trades && trades.length ? trades : DEFAULT_TRADES).slice(0, 8);
   const year = new Date().getFullYear();
 
@@ -99,6 +103,7 @@ export default function SiteFooter({ trades }: { trades?: FooterLink[] }) {
               <Navigation aria-hidden className="h-4 w-4 text-accent" /> Suivi en temps réel
             </li>
           </ul>
+          {apps}
         </div>
 
         <div className="grid grid-cols-2 gap-x-6 gap-y-10 sm:grid-cols-3 lg:col-span-8 lg:pl-10">

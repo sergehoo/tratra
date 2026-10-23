@@ -21,6 +21,7 @@ import { ESCROW_ENABLED } from "@/lib/config";
 import { formatCount } from "@/lib/format";
 import { qs } from "@/lib/public";
 import { byServicesCount, useLanding, useTrades } from "./LandingData";
+import LandingStoreBadges from "./LandingStoreBadges";
 import { CONTAINER, btn } from "./kit";
 import { Float } from "./Reveal";
 
@@ -364,6 +365,9 @@ export default function Hero() {
               </li>
             ))}
           </ul>
+
+          {/* Badges Google Play / App Store : seulement ceux publiés dans l'administration */}
+          <LandingStoreBadges placement="hero" />
         </div>
 
         {/* Collage décoratif (bureau) — aucune information inventée superposée */}

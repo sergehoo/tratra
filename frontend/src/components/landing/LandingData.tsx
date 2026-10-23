@@ -1,5 +1,6 @@
 "use client";
 import { createContext, useContext, useMemo, type ReactNode } from "react";
+import type { PublicMobileApps } from "@/lib/mobileApps";
 import { resultsOf } from "@/lib/public";
 import { resolveTrades, type ResolvedTrade } from "@/lib/trades";
 import { usePublicData } from "@/lib/usePublic";
@@ -31,6 +32,8 @@ export interface LandingInitial {
   reviews: PublicReviewsResponse | null;
   services: Paginated<Service> | Service[] | null;
   plans: Paginated<SubscriptionPlan> | SubscriptionPlan[] | null;
+  /** Liens Google Play / App Store (badges), configurés dans l'administration. */
+  apps: PublicMobileApps | null;
 }
 
 export type LandingKey = keyof LandingInitial;
@@ -78,8 +81,9 @@ export function LandingDataProvider({
   const reviews = useResource(endpoints.reviews, initial.reviews);
   const services = useResource(endpoints.services, initial.services, true);
   const plans = useResource(endpoints.plans, initial.plans);
+  const apps = useResource(endpoints.apps, initial.apps);
 
-  return <Ctx.Provider value={{ stats, categories, featured, reviews, services, plans }}>{children}</Ctx.Provider>;
+  return <Ctx.Provider value={{ stats, categories, featured, reviews, services, plans, apps }}>{children}</Ctx.Provider>;
 }
 
 export function useLanding<K extends LandingKey>(key: K): LandingValue[K] {
