@@ -13,11 +13,14 @@ class Announcement(models.Model):
     STATUS_CHOICES = [("draft", "Brouillon"), ("scheduled", "Programmée"), ("published", "Publiée"),
                       ("expired", "Expirée"), ("cancelled", "Annulée")]
     ACTION_CHOICES = [("none", "Aucune action"), ("link", "Lien web (https)"), ("deeplink", "Écran de l'application")]
-    DEEPLINK_KINDS = ["booking", "mission", "reviews", "kyc", "business_request", "notifications", "announcement"]
+    # Écrans de l'application : registre central `handy.destinations` (rôles, paramètres, équivalent web).
 
     title = models.CharField(max_length=140)
     body = models.TextField(max_length=2000)
     image = models.ImageField(upload_to="announcements/", blank=True, null=True)
+    # Variante de l'image pour les notifications push : JPEG 2:1 (1024 x 512 au plus), légère, générée à la diffusion.
+    push_image = models.ImageField(upload_to="announcements/push/", blank=True, null=True, editable=False)
+    push_image_source = models.CharField(max_length=255, blank=True, default="", editable=False)   # image d'origine de la variante
     kind = models.CharField(max_length=12, choices=KIND_CHOICES, default="service", db_index=True)
 
     action_kind = models.CharField(max_length=10, choices=ACTION_CHOICES, default="none")

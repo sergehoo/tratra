@@ -3,6 +3,7 @@ from rest_framework import serializers
 
 from announcements import services
 from announcements.models import Announcement
+from handy import destinations
 from handy.api.serializers import PublicImageField, absolute_media_url
 
 
@@ -15,7 +16,10 @@ class FeedAnnouncementSerializer(serializers.Serializer):
         return {
             "id": a.pk, "title": a.title, "body": a.body, "kind": a.kind,
             "image": absolute_media_url(request, a.image),
-            "action": None if a.action_kind == "none" else {"kind": a.action_kind, "label": a.action_label or "Voir", "value": a.action_value},
+            "action": None if a.action_kind == "none" else {
+                "kind": a.action_kind, "label": a.action_label or "Voir", "value": a.action_value,
+                # Équivalent sur le site (registre central) ; null = pas de page web pour cet écran.
+                **({"web": destinations.web_href(a.action_value)} if a.action_kind == "deeplink" else {})},
             "delivered_at": delivery.delivered_at, "expires_at": a.expires_at,
             "seen_at": delivery.seen_at, "opened_at": delivery.opened_at,
         }
@@ -51,8 +55,9 @@ class AnnouncementAdminSerializer(serializers.ModelSerializer):
         value = attrs.get("action_value", getattr(self.instance, "action_value", ""))
         if kind == "none":
             attrs["action_value"], attrs["action_label"] = "", ""
+        roles = services.roles_of({f: attrs.get(f, getattr(self.instance, f, False)) for f in ("to_clients", "to_artisans", "to_companies")})
         try:
-            services.validate_action(kind, value)
+            services.validate_action(kind, value, roles)
         except DjangoValidationError as exc:
             raise serializers.ValidationError({"action_value": exc.messages})
         publish_at = attrs.get("publish_at", getattr(self.instance, "publish_at", None))

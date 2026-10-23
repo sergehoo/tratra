@@ -25,6 +25,8 @@ ANDROID_CHANNEL = "tratra_activity"
 # Son de la marque (« Ta – Tra – Tra ! ») : fichier res/raw/<nom>.ogg sur Android (le canal porte le son à partir d'Android 8),
 # <nom>.caf dans l'application iOS. Un fichier absent fait jouer le son système par défaut.
 DEFAULT_SOUND = "tratra_notification"
+# Appareils Android qui construisent eux-mêmes l'alerte d'une annonce (grande image téléchargée, logo, bouton d'action).
+RICH_CAPABILITY = "rich1"
 TIMEOUT = 5
 _lock = threading.Lock()
 _token: Dict[str, object] = {"value": None, "exp": 0.0}
@@ -92,7 +94,8 @@ def _stringify(data: Optional[Dict]) -> Dict[str, str]:
 def send_to_user(user_id: int, title: str, body: str, data: Optional[Dict] = None, *, channel: Optional[str] = None,
                  collapse_key: Optional[str] = None, badge: Optional[int] = None, ttl_seconds: int = 86400,
                  validate_only: bool = False, private: bool = False, sound: str = DEFAULT_SOUND,
-                 apns_category: Optional[str] = None, data_only_capability: Optional[str] = None) -> Dict:
+                 apns_category: Optional[str] = None, data_only_capability: Optional[str] = None,
+                 image: Optional[str] = None) -> Dict:
     """Envoie la notification à TOUS les appareils mobiles du compte. Ne lève jamais d'exception.
 
     Retour : {"sent": n, "removed": n, "failed": n, "devices": n, "skipped": None|"not_configured"|"no_device"|"no_access_token"}.
@@ -104,7 +107,8 @@ def send_to_user(user_id: int, title: str, body: str, data: Optional[Dict] = Non
     contrôle de configuration (`manage.py push_check`).
     `sound` : son de la marque ; `apns_category` : actions iOS (ex. « NEW_MISSION » : Accepter / Refuser / Voir).
     `data_only_capability` : les appareils Android qui annoncent cette capacité reçoivent un message de DONNÉES (priorité haute) et
-    affichent eux-mêmes l'alerte (actions, arrêt à l'échéance) ; les autres reçoivent une notification classique."""
+    affichent eux-mêmes l'alerte (actions, arrêt à l'échéance) ; les autres reçoivent une notification classique.
+    `image` : adresse publique HTTPS d'une image (notification déroulée) ; les messages de données la portent dans `data`."""
     result = {"sent": 0, "removed": 0, "failed": 0, "devices": 0, "skipped": None}
     try:
         if not is_configured():
@@ -135,7 +139,12 @@ def send_to_user(user_id: int, title: str, body: str, data: Optional[Dict] = Non
         aps = {"sound": f"{sound}.caf" if sound else "default", **({"badge": int(badge)} if badge is not None else {})}
         if apns_category:
             aps["category"] = apns_category
+        if image:
+            aps["mutable-content"] = 1             # iOS : image affichée par une extension de notification, sinon texte seul
         apns = {"headers": {"apns-priority": "10", "apns-expiration": str(int(time.time()) + int(ttl_seconds))}, "payload": {"aps": aps}}
+        if image:
+            apns["fcm_options"] = {"image": image}
+        notification = {"title": title, "body": body, **({"image": image} if image else {})}
         if collapse_key:
             apns["headers"]["apns-collapse-id"] = collapse_key[:64]
         for device in devices:
@@ -145,7 +154,7 @@ def send_to_user(user_id: int, title: str, body: str, data: Optional[Dict] = Non
                                        "android": {"priority": "high", "ttl": f"{int(ttl_seconds)}s",
                                                    **({"collapse_key": collapse_key} if collapse_key else {})}}}
             else:
-                message = {"message": {"token": device.device_token, "notification": {"title": title, "body": body},
+                message = {"message": {"token": device.device_token, "notification": notification,
                                        "data": _stringify(data), "android": android, "apns": apns}}
             if validate_only:
                 message["validate_only"] = True

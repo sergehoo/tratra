@@ -518,6 +518,9 @@ STATUS_ROW_RETENTION_DAYS = config('STATUS_ROW_RETENTION_DAYS', default=30, cast
 
 # Origine publique de l'API, pour les URLs de médias relatives (stockage local de développement) diffusées par WebSocket.
 API_PUBLIC_URL = config('API_PUBLIC_URL', default='')
+# Image des notifications push (annonces) : adresse publique HTTPS exigée par défaut ; « False » seulement pour une recette locale
+# (téléphone de test relié en USB, API en http).
+PUSH_IMAGE_REQUIRE_HTTPS = config('PUSH_IMAGE_REQUIRE_HTTPS', default=True, cast=bool)
 
 BIOMETRIC_ENABLED = config('BIOMETRIC_ENABLED', default=False, cast=bool)
 BIOMETRIC_PROVIDER = config('BIOMETRIC_PROVIDER', default='none')          # none | http (contrat générique, voir docs/kyc-biometrique.md)

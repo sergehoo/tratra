@@ -224,7 +224,7 @@ def test_feed_events_stats_and_isolation_between_users(publish_now):
     ann = draft(to_clients=True, action_kind="deeplink", action_value="reviews", action_label="Voir mes avis")
     publish_now(ann)
     feed = api(a_user).get("/handy/me/announcements/").json()["results"]
-    assert feed[0]["action"] == {"kind": "deeplink", "label": "Voir mes avis", "value": "reviews"}
+    assert feed[0]["action"] == {"kind": "deeplink", "label": "Voir mes avis", "value": "reviews", "web": "/dashboard/reviews"}
     assert "cities" not in feed[0] and "to_clients" not in feed[0]                  # aucune donnée de ciblage côté utilisateur
     ca, cb = api(a_user), api(b_user)
     assert ca.post(f"/handy/me/announcements/{ann.pk}/seen/", {}, format="json").status_code == 200

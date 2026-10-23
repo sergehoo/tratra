@@ -10,8 +10,9 @@ from django.db.models import Count, Q
 from django.db.models.functions import Lower
 from django.utils import timezone
 
+from announcements import push_image
 from announcements.models import Announcement, AnnouncementDelivery
-from handy import notifications
+from handy import destinations, notifications
 from trust.models import audit
 
 logger = logging.getLogger(__name__)
@@ -22,8 +23,16 @@ BATCH = 500
 
 # ------------------------------------------------------------------------------------------------------ validation
 
-def validate_action(kind: str, value: str) -> None:
-    """Action d'une annonce : jamais d'URL autre que https, jamais d'écran inconnu (pas de lien arbitraire, pas de javascript:)."""
+def roles_of(a) -> List[str]:
+    """Rôles destinataires d'une annonce (ou d'un dictionnaire de champs du formulaire)."""
+    get = a.get if isinstance(a, dict) else (lambda k, d=None: getattr(a, k, d))
+    return [r for flag, r in (("to_clients", destinations.CLIENTS), ("to_artisans", destinations.ARTISANS),
+                              ("to_companies", destinations.COMPANIES)) if get(flag, False)]
+
+
+def validate_action(kind: str, value: str, roles=()) -> None:
+    """Action d'une annonce : jamais d'URL autre que https ; écran de l'application pris dans le registre central
+    (`handy.destinations`), paramètre public existant, accessible à TOUS les destinataires (`roles`)."""
     if kind == "none":
         return
     if not value:
@@ -33,11 +42,7 @@ def validate_action(kind: str, value: str) -> None:
         if parsed.scheme != "https" or not parsed.netloc:
             raise ValidationError("Le lien doit être une adresse https valide.")
     elif kind == "deeplink":
-        name, _, ident = value.partition("/")
-        if name not in Announcement.DEEPLINK_KINDS or (ident and not ident.isdigit()):
-            raise ValidationError("Écran de l'application inconnu.")
-        if name in ("booking", "mission") and not ident:
-            raise ValidationError("Un identifiant est requis pour cet écran.")
+        destinations.validate_for_announcement(value, roles)
     else:
         raise ValidationError("Action inconnue.")
 
@@ -47,7 +52,7 @@ def validate_for_publication(a: Announcement) -> None:
         raise ValidationError("Titre et contenu sont obligatoires.")
     if not (a.to_clients or a.to_artisans or a.to_companies):
         raise ValidationError("Choisissez au moins une audience (clients, artisans ou entreprises).")
-    validate_action(a.action_kind, a.action_value)
+    validate_action(a.action_kind, a.action_value, roles_of(a))
     if a.expires_at and a.publish_at and a.expires_at <= a.publish_at:
         raise ValidationError("L'expiration doit suivre la publication.")
     if a.expires_at and a.expires_at <= timezone.now():
@@ -150,6 +155,8 @@ def deliver(announcement_id: int) -> int:
     a = Announcement.objects.filter(pk=announcement_id, status="published").first()
     if a is None:
         return 0
+    if a.send_push and a.image:
+        push_image.ensure(a)          # variante 2:1 légère ; en cas d'échec, notification texte seul
     created = 0
     ids = list(audience_queryset(a).values_list("pk", flat=True))
     for start in range(0, len(ids), BATCH):
@@ -167,6 +174,35 @@ def deliver(announcement_id: int) -> int:
                 delivery.save(update_fields=["notification"])
             created += 1
     return created
+
+
+def push_link(a: Announcement) -> str:
+    """Lien ouvert en touchant la notification : l'écran de l'action quand c'en est un (registre central, déjà validé à la
+    publication), sinon l'annonce elle-même dans l'application (texte complet, image, bouton d'action)."""
+    if a.action_kind == "deeplink":
+        dest, _, error = destinations.parse(a.action_value)
+        if dest is not None and dest.announce and not error:
+            return f"tratra://{a.action_value.strip()}"
+    return f"tratra://announcement/{a.pk}"
+
+
+def push_preview(a: Announcement) -> dict:
+    """Ce que recevra le téléphone (aperçu du Back-Office, aligné sur l'envoi réel) : texte, image, lien, bouton."""
+    from handy.models import Notification
+
+    title, body = notifications.push_text(Notification(notification_type="announcement", category="announcement",
+                                                       title=a.title[:140], message=a.body[:200]))
+    action = None
+    if a.action_kind == "deeplink":
+        action = {"kind": "deeplink", "label": a.action_label or "Voir", "destination": destinations.describe(a.action_value),
+                  "web": destinations.web_href(a.action_value)}
+    elif a.action_kind == "link":
+        action = {"kind": "link", "label": a.action_label or "Voir", "url": a.action_value}
+    return {
+        "title": title, "body": body, "channel": notifications.CHANNEL_BY_CATEGORY["announcement"],
+        "deeplink": push_link(a), "image": bool(a.image), "image_ratio": "2:1",
+        "push": a.send_push, "action": action, "roles": roles_of(a), "cities": a.cities, "kind": a.kind,
+    }
 
 
 def tick(now=None) -> dict:

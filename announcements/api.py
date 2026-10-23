@@ -11,6 +11,7 @@ from announcements import services
 from announcements.models import Announcement, AnnouncementDelivery
 from announcements.serializers import AnnouncementAdminSerializer, FeedAnnouncementSerializer
 from backoffice.permissions import HasBackOfficePermission
+from handy import destinations
 from handy.api.views import DefaultPageNumberPagination
 from trust.models import audit
 
@@ -125,6 +126,35 @@ class AnnouncementAdminViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["get"])
     def stats(self, request, pk=None):
         return Response(services.stats(self.get_object()))
+
+    @action(detail=True, methods=["get"])
+    def preview(self, request, pk=None):
+        """Ce que recevront les téléphones (texte, image 2:1, lien ouvert, bouton) et l'annonce dans l'application."""
+        a = self.get_object()
+        data = services.push_preview(a)
+        data["image_url"] = AnnouncementAdminSerializer(a, context={"request": request}).data["image_url"]
+        try:
+            services.validate_for_publication(a)
+            data["errors"] = []
+        except DjangoValidationError as exc:
+            data["errors"] = exc.messages
+        return Response(data)
+
+    @action(detail=False, methods=["get"])
+    def destinations(self, request):
+        """Registre central des écrans de l'application proposables dans une annonce (rôles, paramètre attendu). Avec
+        `?value=clé[/id]&roles=clients,artisans` : vérifie aussi une destination précise (même contrôle qu'à la publication)."""
+        body = {"results": destinations.catalog()}
+        value = request.query_params.get("value")
+        if value is not None:
+            roles = [r for r in (request.query_params.get("roles") or "").split(",") if r]
+            try:
+                destinations.validate_for_announcement(value, roles)
+                error = ""
+            except DjangoValidationError as exc:
+                error = " ".join(exc.messages)
+            body["check"] = {**destinations.describe(value), "error": error, "web": destinations.web_href(value)}
+        return Response(body)
 
 
 class ConflictError(Exception):

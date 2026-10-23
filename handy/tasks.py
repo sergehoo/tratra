@@ -71,7 +71,21 @@ def send_notification_push(self, notification_id, collapse_key=None):
             return {"skipped": "announcement_not_deliverable"}
     payload = {"t": n.notification_type, "cat": n.category, "nid": n.pk, "deeplink": notifications.deeplink(n.data), **(n.data or {})}
     title, body = notifications.push_text(n)          # texte neutre pour les catégories sensibles (écran verrouillé)
-    ttl, flash = notifications.TTL_BY_CATEGORY.get(n.category, 86400), {}
+    ttl, extra = notifications.TTL_BY_CATEGORY.get(n.category, 86400), {}
+    if n.notification_type == "announcement":
+        # Annonce : le toucher ouvre l'écran de son action (registre central) ; image 2:1 publique si disponible. Les appareils qui
+        # savent construire l'alerte eux-mêmes (« rich1 » : grande image téléchargée, logo, bouton d'action) reçoivent un message de
+        # DONNÉES ; les autres une notification classique avec la même image (affichée par Firebase).
+        from announcements import push_image as announcement_image
+        from announcements import services as announcement_services
+
+        payload["deeplink"] = announcement_services.push_link(a)
+        if a.action_kind == "deeplink" and a.action_label:
+            payload["cta"] = a.action_label
+        image = announcement_image.public_url(a)
+        if image:
+            payload["image"] = image
+        extra = {"image": image, "data_only_capability": push.RICH_CAPABILITY}
     if n.notification_type == "new_mission":
         # Tratra Flash : jamais d'alerte pour une proposition déjà attribuée, retirée ou expirée ; durée de vie = délai de réponse restant.
         from flash.notify import FLASH_CAPABILITY, deliverable_ttl
@@ -80,14 +94,14 @@ def send_notification_push(self, notification_id, collapse_key=None):
         if ttl is None:
             Notification.objects.filter(pk=n.pk).update(push_status='obsolete')
             return {"skipped": "obsolete"}
-        flash = {"sound": notifications.FLASH_SOUND, "apns_category": notifications.FLASH_IOS_CATEGORY,
+        extra = {"sound": notifications.FLASH_SOUND, "apns_category": notifications.FLASH_IOS_CATEGORY,
                  "data_only_capability": FLASH_CAPABILITY}
         payload["expires_in"] = ttl   # délai RELATIF à l'envoi : l'alerte se retire à l'échéance sans dépendre de l'horloge du téléphone
     result = push.send_to_user(
         n.user_id, title, body, payload,
         channel=notifications.CHANNEL_BY_CATEGORY.get(n.category), collapse_key=collapse_key,
         badge=notifications.unread_count(n.user_id), ttl_seconds=ttl,
-        private=n.category in notifications.SENSITIVE_PUSH_CATEGORIES or n.category == "flash", **flash)
+        private=n.category in notifications.SENSITIVE_PUSH_CATEGORIES or n.category == "flash", **extra)
     if result["skipped"] == "not_configured":
         status = "unconfigured"
     elif result["sent"]:

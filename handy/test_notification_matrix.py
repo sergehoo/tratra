@@ -17,6 +17,7 @@ from announcements.models import Announcement
 from engagements import tasks as engagement_tasks
 from engagements.testing import make_contract, person, pro
 from handy import push
+from handy.destinations import BY_KEY
 from handy.models import Booking, CashDeclaration, Conversation, Device, Message, Notification, User
 from handy.notifications import CATEGORY_BY_TYPE, CHANNEL_BY_CATEGORY, deeplink
 from handy.services import cash as cash_svc
@@ -26,7 +27,7 @@ from handy.test_push import FakeHTTP, service_account  # noqa: F401  (fixture pa
 pytestmark = pytest.mark.django_db
 
 # Types d'objets que l'application mobile sait ouvrir (miroir de `_kind` dans lib/core/deep_links.dart).
-APP_DEEPLINK_KINDS = {"booking", "mission", "conversation", "reviews", "kyc", "business_request", "announcement", "contract", "posting", "replacements", "notifications"}
+APP_DEEPLINK_KINDS = set(BY_KEY)   # registre central des destinations (même liste que l'application)
 # Types réservés : déclarés mais volontairement jamais émis aujourd'hui.
 RESERVED_TYPES = {"profile_completed"}
 
