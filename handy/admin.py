@@ -523,3 +523,50 @@ class ProOnboardingAdmin(admin.ModelAdmin):
 
     def has_change_permission(self, request, obj=None):
         return False
+
+
+# ---- Badges Google Play / App Store du site ----
+from django.http import HttpResponseRedirect  # noqa: E402
+
+from .models import MobileAppLinks  # noqa: E402
+from .store_links import safe_store_url  # noqa: E402
+
+
+@admin.register(MobileAppLinks)
+class MobileAppLinksAdmin(admin.ModelAdmin):
+    """Liens des applications mobiles (configuration unique) : un badge apparaît sur le site seulement s'il est activé et que son
+    lien est une fiche officielle Google Play / App Store ; vider le lien ou décocher la case le retire."""
+    fieldsets = (
+        ("Google Play (Android)", {"fields": ("android_store_url", "android_enabled", "android_status")}),
+        ("App Store (iPhone)", {"fields": ("ios_store_url", "ios_enabled", "ios_status")}),
+        (None, {"fields": ("updated_at",)}),
+    )
+    readonly_fields = ("android_status", "ios_status", "updated_at")
+
+    @staticmethod
+    def _status(enabled, kind, url):
+        if not (url or "").strip():
+            return "Masqué : aucun lien"
+        if not enabled:
+            return "Masqué : badge désactivé"
+        return "Affiché sur le site" if safe_store_url(kind, url) else "Masqué : lien non conforme"
+
+    @admin.display(description="État sur le site")
+    def android_status(self, obj):
+        return self._status(obj.android_enabled, "android", obj.android_store_url)
+
+    @admin.display(description="État sur le site")
+    def ios_status(self, obj):
+        return self._status(obj.ios_enabled, "ios", obj.ios_store_url)
+
+    def has_add_permission(self, request):
+        return not MobileAppLinks.objects.exists()
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+    def changelist_view(self, request, extra_context=None):
+        if not self.has_view_or_change_permission(request):
+            return super().changelist_view(request, extra_context)
+        obj = MobileAppLinks.get_solo()
+        return HttpResponseRedirect(f"{request.path}{obj.pk}/change/")

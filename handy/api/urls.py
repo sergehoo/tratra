@@ -5,6 +5,7 @@ from handy.api import cash as cash_api
 from handy.api.catalog import public_catalog
 from handy.api.kyc_flow import me_kyc, me_kyc_capture, me_kyc_restart, me_kyc_send
 from handy.api.phone_api import phone_defaults
+from handy.api.mobile_apps import public_mobile_apps
 from handy.api.onboarding import me_onboarding, me_onboarding_apply, onboarding_config
 from handy.api import messaging as msg_api
 from handy.api.account import me_account_deletion
@@ -73,6 +74,8 @@ urlpatterns = [
     path('companies/me/', company_profile, name='company-profile'),
     # Public (landing) : chiffres réels, sans authentification.
     path('public/stats/', public_stats, name='public-stats'),
+    # Badges Google Play / App Store du site : liens configurés dans l'administration, lecture seule.
+    path('public/mobile-apps/', public_mobile_apps, name='public-mobile-apps'),
     # Catalogue unique des métiers (public, ETag) : web, application mobile, administration partagent cette source.
     path('catalog/', public_catalog, name='public-catalog'),
     # Compte unifié : tableau de bord agrégé + création du profil professionnel du compte courant.

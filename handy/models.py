@@ -18,6 +18,8 @@ from django.contrib.gis.db import models as gis_models
 from django.contrib.postgres.indexes import GistIndex
 
 from handy.storage import KycPrivateStorage
+from handy.store_links import (APPLE_EXAMPLE, PLAY_EXAMPLE, normalize_app_store_url, normalize_play_store_url,
+                               validate_app_store_url, validate_play_store_url)
 
 # Create your models here.
 
@@ -1651,3 +1653,57 @@ class UserAddress(models.Model):
 
     def __str__(self):
         return f"Adresse #{self.pk} de {self.user_id}"
+
+
+class MobileAppLinks(models.Model):
+    """Liens des applications mobiles sur les stores (badges « Disponible sur Google Play » / « Télécharger dans l'App Store »
+    du site). Une seule ligne (pk=1), modifiable en administration. Un badge n'est publié que s'il est activé ET que son lien
+    est une fiche officielle valide (`handy.store_links`) ; sinon il est masqué partout."""
+    android_store_url = models.URLField(
+        "Lien Google Play", max_length=500, blank=True, default="", validators=[validate_play_store_url],
+        help_text=f"Fiche de l'application sur Google Play, par exemple {PLAY_EXAMPLE}. Réécrit sous sa forme officielle.")
+    android_enabled = models.BooleanField("Afficher le badge Google Play", default=False)
+    ios_store_url = models.URLField(
+        "Lien App Store", max_length=500, blank=True, default="", validators=[validate_app_store_url],
+        help_text=f"Fiche de l'application sur l'App Store, par exemple {APPLE_EXAMPLE}. Réécrit sous sa forme officielle.")
+    ios_enabled = models.BooleanField("Afficher le badge App Store", default=False)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Liens des applications mobiles"
+        verbose_name_plural = "Liens des applications mobiles"
+
+    def __str__(self):
+        return "Liens des applications mobiles"
+
+    def clean(self):
+        super().clean()
+        errors = {}
+        for field, enabled, normalize, store in (
+            ("android_store_url", self.android_enabled, normalize_play_store_url, "Google Play"),
+            ("ios_store_url", self.ios_enabled, normalize_app_store_url, "App Store"),
+        ):
+            value = (getattr(self, field) or "").strip()
+            if value:
+                try:
+                    setattr(self, field, normalize(value))
+                except ValidationError as exc:
+                    errors[field] = exc.messages
+            elif enabled:
+                errors[field] = [f"Renseignez le lien {store} avant d'afficher son badge."]
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        self.pk = 1  # configuration unique
+        super().save(*args, **kwargs)
+
+    @classmethod
+    def get_solo(cls) -> "MobileAppLinks":
+        obj, _ = cls.objects.get_or_create(pk=1)
+        return obj
+
+    @classmethod
+    def current(cls) -> "MobileAppLinks":
+        """Lecture sans écriture (API publique) : valeurs par défaut — aucun badge — tant que rien n'est enregistré."""
+        return cls.objects.filter(pk=1).first() or cls()
