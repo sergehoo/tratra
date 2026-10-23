@@ -7,7 +7,8 @@ export interface FeedAnnouncement {
   body: string;
   kind: "service" | "promotion";
   image: string | null;
-  action: { kind: "link" | "deeplink"; label: string; value: string } | null;
+  /** `web` : équivalent sur le site d'un écran de l'application (registre central du serveur) ; null = pas de page web. */
+  action: { kind: "link" | "deeplink"; label: string; value: string; web?: string | null } | null;
   delivered_at: string;
   expires_at: string | null;
   seen_at: string | null;
@@ -37,6 +38,9 @@ export function resolveAnnouncementAction(a: Pick<FeedAnnouncement, "action">): 
     }
   }
   if (action.kind === "deeplink") {
+    // Chemin du site fourni par le serveur : relatif au site uniquement (jamais « //autre-site », « /\autre-site » ni une adresse complète).
+    if (typeof action.web === "string" && /^\/(?![\/\\])/.test(action.web)) return { external: false, href: action.web, label };
+    if (action.web === null) return null;
     const [kind, rawId] = action.value.trim().split("/");
     const id = rawId !== undefined && /^\d+$/.test(rawId) ? Number(rawId) : undefined;
     const href = notificationHref({ data: { kind, id } });

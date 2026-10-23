@@ -11,7 +11,7 @@
     "verify": "npm run ds:check && npm run typecheck && npm run build",
     "ds:build": "node design-system/build.mjs",
     "ds:check": "node design-system/build.mjs --check",
-    "test:bo": "node --test src/lib/boNavModel.test.ts src/lib/assistantUi.test.ts src/lib/trades.test.ts src/lib/phone.test.ts src/lib/onboarding.test.ts src/lib/kycFlow.test.ts src/lib/proStatus.test.ts src/lib/session.test.ts src/lib/flash.test.ts src/lib/mobileApps.test.ts"
+    "test:bo": "node --test src/lib/boNavModel.test.ts src/lib/assistantUi.test.ts src/lib/trades.test.ts src/lib/phone.test.ts src/lib/onboarding.test.ts src/lib/kycFlow.test.ts src/lib/proStatus.test.ts src/lib/session.test.ts src/lib/flash.test.ts src/lib/mobileApps.test.ts src/lib/announcementPreview.test.ts"
   },
   "dependencies": {
     "framer-motion": "^11.18.2",

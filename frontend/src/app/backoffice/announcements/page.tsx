@@ -2,9 +2,13 @@
 import { useEffect, useState } from "react";
 import { BarChart3, Megaphone, Pencil, Plus, Send, Trash2, XCircle } from "lucide-react";
 import { Alert, Badge, Button, Checkbox, ConfirmDialog, Input, Modal, PageHeader, Select, TextField, TextareaField } from "@/components/ds";
-import { ApiError, apiFetch, upload } from "@/lib/api";
+import { AnnouncementPreview } from "./AnnouncementPreview";
+import { ApiError, apiFetch, get, upload } from "@/lib/api";
+import { allowedFor, groupedDestinations, joinValue, previewNotes, rolesOf, splitValue, type AppDestination, type DestinationCheck, type Role } from "@/lib/announcementPreview";
 import { bo, boError, fieldErrors } from "@/lib/bo";
 import { useBo } from "@/lib/BoProvider";
+import { resolveTrades, type ResolvedTrade } from "@/lib/trades";
+import type { Category, Paginated } from "@/lib/types";
 import { patchForm } from "@/lib/uploadPatch";
 import { useCounts, useManagedList } from "@/lib/useBoList";
 import { Drawer, FilterBar, FilterSelect, KV, ListView, SearchBox, StatusChips, Tag, dd, dt, useNotice, type BoColumn, type RowAction } from "../_components/ui";
@@ -14,11 +18,15 @@ interface Announcement {
   to_clients: boolean; to_artisans: boolean; to_companies: boolean; cities: string[]; audience: string[]; send_push: boolean; publish_at: string | null; expires_at: string | null;
   status: string; published_at: string | null; created_at: string; version: number;
 }
+/** Ce que recevront les téléphones (GET /announcements/<id>/preview/) : même calcul que l'envoi réel. */
+interface ServerPreview {
+  title: string; body: string; deeplink: string; image_url: string | null; push: boolean; kind: string; roles: Role[]; errors: string[];
+  action: null | { kind: "deeplink"; label: string; destination: { label: string; detail: string }; web: string | null } | { kind: "link"; label: string; url: string };
+}
 interface Stats { status: string; audience_estimate: number; delivered: number; push: Record<string, number>; seen: number; opened: number; dismissed: number; seen_rate: number | null; open_rate: number | null }
 
 const STATUS_FR: Record<string, string> = { draft: "Brouillon", scheduled: "Programmée", published: "Publiée", expired: "Expirée", cancelled: "Annulée" };
 const STATUS_TONE: Record<string, "gray" | "info" | "success" | "warning" | "danger"> = { draft: "gray", scheduled: "info", published: "success", expired: "warning", cancelled: "danger" };
-const SCREENS: [string, string][] = [["reviews", "Mes avis"], ["notifications", "Notifications"], ["kyc", "Vérification d’identité"], ["announcement", "Annonces"]];
 const localInput = (iso: string | null) => (iso ? new Date(new Date(iso).getTime() - new Date(iso).getTimezoneOffset() * 60000).toISOString().slice(0, 16) : "");
 const toIso = (local: string) => (local ? new Date(local).toISOString() : null);
 
@@ -29,6 +37,35 @@ function Form({ open, item, onClose, onSaved }: { open: boolean; item: Announcem
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [failure, setFailure] = useState("");
   const [busy, setBusy] = useState(false);
+  // Écrans de l'application : registre central du serveur (rôles, paramètre attendu) ; catalogue pour choisir un métier.
+  const [dests, setDests] = useState<AppDestination[]>([]);
+  const [trades, setTrades] = useState<ResolvedTrade[]>([]);
+  const [check, setCheck] = useState<DestinationCheck | null>(null);
+  const [localImage, setLocalImage] = useState<string | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    bo.get<{ results: AppDestination[] }>("/announcements/destinations/").then((r) => setDests(r.results)).catch(() => setDests([]));
+    get<Paginated<Category> | Category[]>("/catalog/").then((d) => setTrades(resolveTrades(Array.isArray(d) ? d : d.results ?? []))).catch(() => setTrades([]));
+  }, [open]);
+  useEffect(() => {
+    if (!file) { setLocalImage(null); return; }
+    const url = URL.createObjectURL(file);
+    setLocalImage(url);
+    return () => URL.revokeObjectURL(url);
+  }, [file]);
+  const roles = rolesOf(f);
+  const { key: destKey, id: destId } = splitValue(f.action_value);
+  const dest = dests.find((d) => d.key === destKey) ?? null;
+  // Vérification serveur de la destination (même contrôle qu'à la publication : objet public, rôles des destinataires).
+  useEffect(() => {
+    if (!open || f.action_kind !== "deeplink" || !f.action_value) { setCheck(null); return; }
+    const t = setTimeout(() => {
+      bo.get<{ check: DestinationCheck }>(`/announcements/destinations/?value=${encodeURIComponent(f.action_value)}&roles=${roles.join(",")}`)
+        .then((r) => setCheck(r.check)).catch(() => setCheck(null));
+    }, 300);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, f.action_kind, f.action_value, roles.join(",")]);
   useEffect(() => {
     if (!open) return;
     setFile(null);
@@ -98,14 +135,43 @@ function Form({ open, item, onClose, onSaved }: { open: boolean; item: Announcem
           {f.action_kind !== "none" ? <TextField label="Libellé du bouton" value={f.action_label} onChange={(e) => setF({ ...f, action_label: e.target.value })} /> : null}
           {f.action_kind === "link" ? <TextField label="Adresse https" value={f.action_value} error={errors.action_value} onChange={(e) => setF({ ...f, action_value: e.target.value })} placeholder="https://tratra.net/…" /> : null}
           {f.action_kind === "deeplink" ? (
-            <label className="block text-sm font-semibold text-ink">Écran
-              <Select className="mt-1.5" value={f.action_value} onChange={(e) => setF({ ...f, action_value: e.target.value })}><option value="">Choisir…</option>{SCREENS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</Select>
-              {errors.action_value ? <span role="alert" className="text-xs text-dangerInk">{errors.action_value}</span> : null}</label>
+            <label className="block text-sm font-semibold text-ink">Écran de l’application
+              <Select className="mt-1.5" value={destKey} onChange={(e) => setF({ ...f, action_value: joinValue(e.target.value, "") })} data-testid="screen-select">
+                <option value="">Choisir…</option>
+                {groupedDestinations(dests, roles).map(([group, items]) => (
+                  <optgroup key={group} label={group}>{items.map((d) => <option key={d.key} value={d.key}>{d.label}</option>)}</optgroup>
+                ))}
+                {dest && !allowedFor(dest, roles) ? <option value={dest.key}>{dest.label} (pas pour tous les destinataires)</option> : null}
+              </Select>
+              {errors.action_value || check?.error ? <span role="alert" className="text-xs text-dangerInk">{errors.action_value ?? check?.error}</span>
+                : <span className="text-xs font-normal text-ash">Seuls les écrans ouverts à tous les destinataires cochés sont proposés.</span>}</label>
           ) : null}
         </div>
+        {f.action_kind === "deeplink" && dest?.param === "category" ? (
+          <label className="block text-sm font-semibold text-ink">Métier ou prestation
+            <Select className="mt-1.5" value={destId} onChange={(e) => setF({ ...f, action_value: joinValue(destKey, e.target.value) })}>
+              <option value="">Choisir…</option>
+              {trades.map((t) => (
+                <optgroup key={t.id} label={t.label}>
+                  <option value={t.id}>{t.label} (tout le métier)</option>
+                  {t.prestations.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </optgroup>
+              ))}
+            </Select></label>
+        ) : null}
+        {f.action_kind === "deeplink" && dest?.param === "service" ? (
+          <TextField label="Numéro de l’offre" inputMode="numeric" value={destId} placeholder="Ex. 42 (visible dans l’adresse de l’offre)"
+            onChange={(e) => setF({ ...f, action_value: joinValue(destKey, e.target.value.replace(/\D/g, "")) })}
+            hint={check?.detail ? `Offre : ${check.detail}` : "Seule une offre publiée (active, artisan vérifié) est acceptée."} />
+        ) : null}
         <label className="block text-sm font-semibold text-ink">Image <span className="text-xs font-normal text-ash">(facultatif — ré-encodée, sans métadonnées)</span>
           <Input className="mt-1.5" type="file" accept="image/jpeg,image/png,image/webp" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />{errors.image ? <span role="alert" className="text-xs text-dangerInk">{errors.image}</span> : null}</label>
         <Checkbox label="Envoyer aussi une notification push" checked={f.send_push} onChange={(e) => setF({ ...f, send_push: e.target.checked })} />
+        <AnnouncementPreview title={f.title} body={f.body} imageSrc={localImage ?? item?.image_url ?? null} sendPush={f.send_push}
+          actionKind={f.action_kind} actionLabel={f.action_label} linkUrl={f.action_kind === "link" ? f.action_value : undefined}
+          destination={check ? { label: check.label, detail: check.detail } : dest ? { label: dest.label } : null} webHref={check?.web}
+          notes={previewNotes({ title: f.title, body: f.body, kind: f.kind, send_push: f.send_push, hasImage: Boolean(localImage ?? item?.image_url),
+            action_kind: f.action_kind, action_label: f.action_label, roles, destinationError: f.action_kind === "deeplink" ? check?.error : undefined })} />
         {failure ? <Alert tone="danger">{failure}</Alert> : null}
       </div>
     </Drawer>
@@ -119,7 +185,7 @@ export default function AnnouncementsAdminPage() {
   const { values: f, list } = m;
   const counts = useCounts("/announcements/", { _all: "", draft: "status=draft", scheduled: "status=scheduled", published: "status=published", expired: "status=expired", cancelled: "status=cancelled" }, list.version);
   const [form, setForm] = useState<{ open: boolean; item: Announcement | null }>({ open: false, item: null });
-  const [confirm, setConfirm] = useState<{ op: "publish" | "cancel" | "delete"; item: Announcement; estimate?: number } | null>(null);
+  const [confirm, setConfirm] = useState<{ op: "publish" | "cancel" | "delete"; item: Announcement; estimate?: number; preview?: ServerPreview } | null>(null);
   const [schedule, setSchedule] = useState<Announcement | null>(null);
   const [when, setWhen] = useState("");
   const [stats, setStats] = useState<{ item: Announcement; data: Stats } | null>(null);
@@ -130,10 +196,12 @@ export default function AnnouncementsAdminPage() {
   async function ask(op: "publish" | "cancel" | "delete", item: Announcement) {
     setFailure("");
     let estimate: number | undefined;
+    let preview: ServerPreview | undefined;
     if (op === "publish") {
       try { estimate = (await bo.get<Stats>(`/announcements/${item.id}/stats/`)).audience_estimate; } catch { /* estimation facultative */ }
+      try { preview = await bo.get<ServerPreview>(`/announcements/${item.id}/preview/`); } catch { /* aperçu facultatif : le serveur revalide à la publication */ }
     }
-    setConfirm({ op, item, estimate });
+    setConfirm({ op, item, estimate, preview });
   }
   async function run() {
     if (!confirm) return;
@@ -211,7 +279,23 @@ export default function AnnouncementsAdminPage() {
         rowActions={rowActions} pageSize={m.pageSize} onPageSize={(n) => m.set({ size: String(n) })} />
 
       <Form open={form.open} item={form.item} onClose={() => setForm({ open: false, item: null })} onSaved={() => { setForm({ open: false, item: null }); setNotice("Brouillon enregistré."); void list.reload(); }} />
-      <ConfirmDialog open={Boolean(confirm)} onClose={() => setConfirm(null)} loading={busy} onConfirm={() => void run()}
+      <Modal open={confirm?.op === "publish"} onClose={() => setConfirm(null)} dismissible={!busy} size="lg" title={`Publier « ${confirm?.item.title ?? ""} » ?`}
+        description={confirm?.op === "publish" ? `${confirm.estimate !== undefined ? `Environ ${confirm.estimate} compte(s) seront destinataires. ` : ""}La diffusion démarre immédiatement et ne peut plus être modifiée : on peut seulement l’annuler.` : undefined}
+        footer={<><Button variant="outline" onClick={() => setConfirm(null)} disabled={busy}>Annuler</Button>
+          <Button loading={busy} disabled={Boolean(confirm?.preview?.errors.length)} onClick={() => void run()} data-testid="confirm-publish">Publier maintenant</Button></>}>
+        {confirm?.op === "publish" && confirm.preview ? (
+          <AnnouncementPreview title={confirm.preview.title} body={confirm.item.body} imageSrc={confirm.preview.image_url} sendPush={confirm.preview.push}
+            actionKind={confirm.preview.action?.kind ?? "none"} actionLabel={confirm.preview.action?.label ?? ""}
+            linkUrl={confirm.preview.action?.kind === "link" ? confirm.preview.action.url : undefined}
+            destination={confirm.preview.action?.kind === "deeplink" ? confirm.preview.action.destination : null}
+            webHref={confirm.preview.action?.kind === "deeplink" ? confirm.preview.action.web : undefined}
+            notes={[...confirm.preview.errors.map((text) => ({ tone: "danger" as const, text })),
+              ...previewNotes({ title: confirm.preview.title, body: confirm.item.body, kind: confirm.preview.kind, send_push: confirm.preview.push,
+                hasImage: Boolean(confirm.preview.image_url), action_kind: confirm.preview.action?.kind ?? "none", action_label: confirm.preview.action?.label ?? "",
+                roles: confirm.preview.roles }).filter((n) => n.tone !== "danger")]} />
+        ) : confirm?.op === "publish" ? <p className="text-sm text-inkSoft">Aperçu indisponible : le serveur vérifie de toute façon l’annonce à la publication.</p> : null}
+      </Modal>
+      <ConfirmDialog open={Boolean(confirm) && confirm?.op !== "publish"} onClose={() => setConfirm(null)} loading={busy} onConfirm={() => void run()}
         tone={confirm?.op === "publish" ? "primary" : "danger"} confirmLabel={confirm?.op === "publish" ? "Publier maintenant" : confirm?.op === "cancel" ? "Annuler l’annonce" : "Supprimer le brouillon"}
         title={confirm?.op === "publish" ? `Publier « ${confirm.item.title} » ?` : confirm?.op === "cancel" ? `Annuler « ${confirm?.item.title} » ?` : `Supprimer « ${confirm?.item.title} » ?`}
         description={confirm?.op === "publish" ? `${confirm.estimate !== undefined ? `Environ ${confirm.estimate} compte(s) seront destinataires. ` : ""}La diffusion démarre immédiatement et ne peut plus être modifiée : on peut seulement l’annuler.${confirm.item.kind === "promotion" ? " Seuls les comptes ayant donné leur consentement marketing la recevront." : ""}` : confirm?.op === "cancel" ? "Elle disparaît des flux des utilisateurs ; les notifications déjà reçues restent dans leur historique." : "Cette action est définitive."} />
