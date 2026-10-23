@@ -4,6 +4,7 @@ import { Suspense, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { ArrowRight, CalendarCheck } from "lucide-react";
 import { Alert, Button, ButtonLink, Checkbox, Field, PasswordInput, PhoneField, Skeleton, TextField } from "@/components/ds";
+import { useTurnstile } from "@/components/security/Turnstile";
 import { AuthFrame } from "@/components/auth/AuthFrame";
 import { useAuth } from "@/lib/auth";
 import { ApiError } from "@/lib/api";
@@ -106,6 +107,7 @@ function RegisterForm() {
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const captcha = useTurnstile();
 
   const set = <K extends FieldKey>(k: K, value: FormState[K]) => {
     setF((s) => ({ ...s, [k]: value }));
@@ -121,6 +123,10 @@ function RegisterForm() {
       setError("Veuillez corriger les champs indiqués.");
       return;
     }
+    if (captcha.required && !captcha.token) {
+      setError("Cochez la vérification anti-robot avant de créer votre compte.");
+      return;
+    }
     setBusy(true);
     try {
       await register(
@@ -131,6 +137,7 @@ function RegisterForm() {
           phone_country: f.phone.country,
           password: f.password,
           accept_terms: f.accept_terms,
+          turnstile_token: captcha.token,
         },
         next,
       );
@@ -140,6 +147,7 @@ function RegisterForm() {
       setFieldErrors(fields);
       setError(general);
       setBusy(false);
+      captcha.reset();                       // jeton à usage unique : un nouveau pour la tentative suivante
     }
   }
 
@@ -247,7 +255,8 @@ function RegisterForm() {
         {/* role="alert" (Alert danger) : l'erreur est annoncée dès son apparition. */}
         {error ? <Alert tone="danger">{error}</Alert> : null}
 
-        <Button type="submit" size="lg" block loading={busy} rightIcon={<ArrowRight aria-hidden className="h-5 w-5" />}>
+        {captcha.widget}
+        <Button type="submit" size="lg" block loading={busy} disabled={captcha.required && !captcha.token} rightIcon={<ArrowRight aria-hidden className="h-5 w-5" />}>
           {busy ? "Création…" : "Créer mon compte"}
         </Button>
         <p className="text-center text-xs text-ash">

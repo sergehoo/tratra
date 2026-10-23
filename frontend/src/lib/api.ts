@@ -335,8 +335,11 @@ export async function register(payload: {
   phone_country?: string;
   password: string;
   accept_terms: boolean;
+  /** Jeton anti-robot Turnstile (vérifié par le serveur quand il est configuré). */
+  turnstile_token?: string | null;
 }): Promise<User> {
-  await apiJson("/users/", { method: "POST", body: JSON.stringify(payload) });
+  const { turnstile_token, ...fields } = payload;
+  await apiJson("/users/", { method: "POST", body: JSON.stringify(turnstile_token ? { ...fields, turnstile_token } : fields) });
   return login(payload.phone, payload.password);
 }
 

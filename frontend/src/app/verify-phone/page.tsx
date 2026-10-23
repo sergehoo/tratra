@@ -5,6 +5,7 @@ import { MessageSquareText } from "lucide-react";
 import { AuthFrame } from "@/components/auth/AuthFrame";
 import { Alert, Button, ButtonLink, OtpInput, Skeleton } from "@/components/ds";
 import { RoleGuard } from "@/components/RoleGuard";
+import { useTurnstile } from "@/components/security/Turnstile";
 import { apiErrorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { homeFor, isSafeInternalPath } from "@/lib/links";
@@ -52,12 +53,17 @@ function VerifyPhone() {
   const [resendIn, startResend] = useCountdown();
   const [expiresIn, startExpiry] = useCountdown();
   const autoSent = useRef(false);
+  const captcha = useTurnstile();
 
   async function send() {
+    if (captcha.required && !captcha.token) {
+      setError("Cochez la vérification anti-robot pour recevoir le code.");
+      return;
+    }
     setBusy(true);
     setError("");
     try {
-      const r = await requestOtp();
+      const r = await requestOtp(captcha.token);
       setSent(true);
       setCode("");
       startResend(r.resend_in ?? OTP_RESEND_SECONDS);
@@ -67,17 +73,19 @@ function VerifyPhone() {
       setError(apiErrorMessage(e, "L’envoi du code a échoué. Réessayez dans un instant."));
     } finally {
       setBusy(false);
+      captcha.reset();                       // jeton à usage unique : un nouveau pour un éventuel renvoi
     }
   }
 
-  // Après l'inscription (?auto=1) : le code est envoyé une seule fois, à l'arrivée sur l'écran.
+  // Après l'inscription (?auto=1) : le code est envoyé une seule fois, à l'arrivée sur l'écran (après la vérification anti-robot
+  // si elle est active).
   useEffect(() => {
-    if (auto && user?.phone && !user.is_verified && !autoSent.current) {
+    if (auto && user?.phone && !user.is_verified && !autoSent.current && (!captcha.required || captcha.token)) {
       autoSent.current = true;
       void send();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [auto, user?.phone, user?.is_verified]);
+  }, [auto, user?.phone, user?.is_verified, captcha.token]);
 
   async function verify(value = code) {
     if (value.length !== OTP_LENGTH || busy || expiresIn === 0) return;
@@ -160,6 +168,7 @@ function VerifyPhone() {
             </>
           ) : null}
 
+          {resendIn === 0 || !sent ? captcha.widget : null}
           <div id="otp-error" aria-live="polite">
             {error ? <Alert tone="danger">{error}</Alert> : null}
             {expired && !error ? <Alert tone="warning">Le code a expiré : demandez-en un nouveau.</Alert> : null}

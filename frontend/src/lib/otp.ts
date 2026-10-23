@@ -1,4 +1,4 @@
-import { post } from "./api";
+import { apiJson, post } from "./api";
 import { maskPhone } from "./phone";
 
 export { maskPhone };
@@ -20,8 +20,8 @@ export interface OtpSent {
 
 /** POST /auth/otp/request/ — envoie un code SMS au téléphone du compte connecté. En cas d'échec
  *  d'envoi l'API répond 502/503 avec un message clair (jamais de faux succès). */
-export function requestOtp(): Promise<OtpSent> {
-  return post<OtpSent>("/auth/otp/request/");
+export function requestOtp(turnstileToken?: string | null): Promise<OtpSent> {
+  return apiJson<OtpSent>("/auth/otp/request/", { method: "POST", ...(turnstileToken ? { headers: { "X-Turnstile-Token": turnstileToken } } : {}) });
 }
 
 /** POST /auth/otp/verify/ — marque le compte comme vérifié (400 : code invalide/expiré, essais restants ;
@@ -31,8 +31,8 @@ export async function verifyOtp(code: string): Promise<void> {
 }
 
 /** POST /auth/password-reset/request/ — code de récupération par SMS (202 identique que le numéro soit inscrit ou non). */
-export function requestPasswordReset(phone: string): Promise<OtpSent> {
-  return post<OtpSent>("/auth/password-reset/request/", { phone });
+export function requestPasswordReset(phone: string, turnstileToken?: string | null): Promise<OtpSent> {
+  return post<OtpSent>("/auth/password-reset/request/", turnstileToken ? { phone, turnstile_token: turnstileToken } : { phone });
 }
 
 /** POST /auth/password-reset/confirm/ — nouveau mot de passe si le code est valide. */

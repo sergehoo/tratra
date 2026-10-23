@@ -8,6 +8,7 @@ import { Alert, Button, ButtonLink, Field, OtpInput, PasswordInput } from "@/com
 import { apiErrorMessage } from "@/lib/api";
 import { DEFAULT_COUNTRY, lookupE164, phoneError, type PhoneValue } from "@/lib/phone";
 import { confirmPasswordReset, maskPhone, OTP_LENGTH, OTP_RESEND_SECONDS, requestPasswordReset } from "@/lib/otp";
+import { useTurnstile } from "@/components/security/Turnstile";
 
 function useCountdown() {
   const [left, setLeft] = useState(0);
@@ -34,9 +35,14 @@ function ForgotPassword() {
   const [error, setError] = useState("");
   const [fieldError, setFieldError] = useState("");
   const [resendIn, startResend] = useCountdown();
+  const captcha = useTurnstile();
 
   async function sendCode(e?: React.FormEvent) {
     e?.preventDefault();
+    if (captcha.required && !captcha.token) {
+      setError("Cochez la vérification anti-robot pour recevoir le code.");
+      return;
+    }
     const normalized = phone ?? lookupE164(phoneInput);
     if (!normalized) {
       setFieldError(phoneError(phoneInput) ?? "Saisissez votre numéro de téléphone.");
@@ -46,7 +52,7 @@ function ForgotPassword() {
     setError("");
     setBusy(true);
     try {
-      const r = await requestPasswordReset(normalized);
+      const r = await requestPasswordReset(normalized, captcha.token);
       setPhone(normalized);
       setCode("");
       startResend(r.resend_in ?? OTP_RESEND_SECONDS);
@@ -54,6 +60,7 @@ function ForgotPassword() {
       setError(apiErrorMessage(err, "L’envoi du code a échoué. Réessayez dans un instant."));
     } finally {
       setBusy(false);
+      captcha.reset();
     }
   }
 
@@ -87,6 +94,7 @@ function ForgotPassword() {
         Saisissez le numéro de votre compte : nous vous enverrons un code par SMS pour définir un nouveau mot de passe.
       </p>
       <PhoneField label="Numéro de votre compte" value={phoneInput} onChange={(v) => { setPhoneInput(v); if (fieldError) setFieldError(""); }} error={fieldError || undefined} autoFocus />
+      {captcha.widget}
       {error ? <Alert tone="danger">{error}</Alert> : null}
       <Button type="submit" size="lg" block loading={busy} leftIcon={<MessageSquareText aria-hidden className="h-4 w-4" />}>
         Recevoir le code
@@ -123,7 +131,8 @@ function ForgotPassword() {
       >
         Définir le nouveau mot de passe
       </Button>
-      <Button type="button" variant="ghost" block disabled={busy || resendIn > 0} onClick={() => void sendCode()}>
+      {resendIn === 0 ? captcha.widget : null}
+      <Button type="button" variant="ghost" block disabled={busy || resendIn > 0 || (captcha.required && !captcha.token)} onClick={() => void sendCode()}>
         {resendIn > 0 ? `Renvoyer le code (${resendIn} s)` : "Renvoyer le code"}
       </Button>
       <Button type="button" variant="ghost" block disabled={busy} onClick={() => { setPhone(null); setError(""); }}>

@@ -38,11 +38,15 @@ const wsOrigin = apiOrigin.replace(/^http/, "ws");
 // sans lui aucune page n'hydrate en développement. Jamais en production.
 const isDev = process.env.NODE_ENV !== "production";
 
+// Anti-robot Cloudflare Turnstile (inscription, codes SMS) : script et cadre autorisés seulement si la clé du site est configurée.
+const turnstile = (process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY ?? "").trim() ? " https://challenges.cloudflare.com" : "";
+
 const contentSecurityPolicy = [
   "default-src 'self'",
   // Next.js injecte des scripts de démarrage ; un nonce par requête est l'étape
   // suivante lorsqu'un BFF/cookies HttpOnly sera introduit.
-  `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""}`,
+  `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""}${turnstile}`,
+  ...(turnstile ? [`frame-src${turnstile}`] : []),
   "style-src 'self' 'unsafe-inline'",
   `img-src ${imgSources.join(" ")}`,
   "font-src 'self' data:",
