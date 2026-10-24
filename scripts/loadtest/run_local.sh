@@ -8,7 +8,8 @@
 #
 # Variables : OUT (dossier des résultats, défaut ./loadtest-results), WORKERS (gunicorn, défaut 4), CONCURRENCY (« 8 32 64 »),
 # SCENARIOS (« mix » par défaut ; ou un écran seul : catalog, nearby, notifications, unread, bookings, dashboard, flash_pros…),
-# DURATION (s, défaut 20), LOADTEST_REDIS_PORT (Redis DÉDIÉ lancé ici, défaut 6391 ; jamais celui d'un autre projet).
+# DURATION (s, défaut 20), LOADTEST_REDIS_PORT (Redis DÉDIÉ lancé ici, défaut 6391 ; jamais celui d'un autre projet),
+# SERVERS (« daphne gunicorn »), GUNICORN_CONF (ex. docker/gunicorn.conf.py : configuration de production), LABEL (étiquette des mesures).
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/../.."
 
@@ -17,6 +18,8 @@ OUT="${OUT:-$PWD/loadtest-results}"
 WORKERS="${WORKERS:-4}"
 CONCURRENCY="${CONCURRENCY:-8 32 64}"
 SCENARIOS="${SCENARIOS:-mix}"
+SERVERS="${SERVERS:-daphne gunicorn}"
+LABEL="${LABEL:-$(git rev-parse --short HEAD 2>/dev/null || echo local)}"
 DURATION="${DURATION:-20}"
 RPORT="${LOADTEST_REDIS_PORT:-6391}"
 mkdir -p "$OUT"
@@ -44,6 +47,33 @@ rss_mb() {
 tree_rss_mb() { ps -o rss=,ppid=,pid= -A | awk -v p="$1" '$3==p || $2==p {s+=$1} END {printf "%.1f", s/1024}'; }
 top_category() { $PY manage.py shell -c "from django.db.models import Count; from handy.models import ServiceCategory as C; print(C.objects.filter(parent__isnull=True).annotate(n=Count('handymen')).order_by('-n').first().pk)" 2>/dev/null | tail -1; }
 
+# Un tir : charge + CPU (serveur, générateur, machine), mémoire du serveur, activité SQL ; une ligne JSON dans $OUT/runs.jsonl.
+run_one() {
+  local server="$1" pid="$2" port="$3" scenario="$4" c="$5" tmp
+  tmp="$(mktemp -d)"
+  $PY scripts/loadtest/probe.py pg >"$tmp/pg0.json" 2>/dev/null
+  local cpu0; cpu0="$($PY scripts/loadtest/probe.py cpu "$pid")"
+  iostat -w 1 >"$tmp/iostat.txt" 2>/dev/null & local IO=$!
+  $PY scripts/loadtest/http_load.py --target "http://127.0.0.1:$port" --tokens "$OUT/tokens.json" --scenario "$scenario" \
+    --category "$CAT" --concurrency "$c" --duration "$DURATION" >"$tmp/http.json"
+  kill "$IO" 2>/dev/null; wait "$IO" 2>/dev/null || true
+  local cpu1; cpu1="$($PY scripts/loadtest/probe.py cpu "$pid")"
+  $PY scripts/loadtest/probe.py pg >"$tmp/pg1.json" 2>/dev/null
+  $PY - "$tmp" "$server" "$cpu0" "$cpu1" "$LABEL" "$($PY scripts/loadtest/probe.py mem "$pid")" "$($PY scripts/loadtest/probe.py iostat "$tmp/iostat.txt")" <<'PYEOF' >>"$OUT/runs.jsonl"
+import json, subprocess, sys
+tmp, server, cpu0, cpu1, label, mem, machine = sys.argv[1:8]
+http = json.load(open(f"{tmp}/http.json"))
+sql = json.loads(subprocess.run([sys.executable, "scripts/loadtest/probe.py", "summary", f"{tmp}/pg0.json", f"{tmp}/pg1.json",
+                                 str(http["seconds"]), str(http["requests"])], capture_output=True, text=True).stdout or "{}")
+row = {"label": label, "server": server, **{k: http[k] for k in ("scenario", "concurrency", "seconds", "requests", "rps", "p50_ms", "p95_ms",
+       "p99_ms", "errors", "codes", "loadgen_cpu_pct")}, "server_cpu_pct": round(100 * (float(cpu1) - float(cpu0)) / http["seconds"], 1),
+       "server_mem": json.loads(mem), **json.loads(machine), **sql, "by_scenario": http.get("by_scenario")}
+print(json.dumps(row, ensure_ascii=False))
+PYEOF
+  rm -rf "$tmp"
+  $PY scripts/loadtest/probe.py line "$OUT/runs.jsonl"
+}
+
 case "${1:-}" in
   seed)
     $PY manage.py migrate --noinput >/dev/null
@@ -56,19 +86,22 @@ case "${1:-}" in
     redis_up
     $PY manage.py loadtest_tokens --count 400 --out "$OUT/tokens.json" >/dev/null
     CAT="$(top_category)"
-    for server in daphne gunicorn; do
+    for server in $SERVERS; do
       if [ "$server" = daphne ]; then
         venv/bin/daphne -b 127.0.0.1 -p 8101 tratra.asgi:application >"$OUT/daphne.log" 2>&1 & PID=$!; PORT=8101
       else
-        LOADTEST_CONN_MAX_AGE=60 venv/bin/gunicorn tratra.wsgi:application -w "$WORKERS" -b 127.0.0.1:8102 --timeout 120 \
-          >"$OUT/gunicorn.log" 2>&1 & PID=$!; PORT=8102
+        if [ -n "${GUNICORN_CONF:-}" ]; then   # configuration de production (docker/gunicorn.conf.py : processus × fils gthread)
+          LOADTEST_CONN_MAX_AGE=60 venv/bin/gunicorn tratra.wsgi:application -c "$GUNICORN_CONF" --bind 127.0.0.1:8102 \
+            --access-logfile /dev/null >"$OUT/gunicorn.log" 2>&1 & PID=$!; PORT=8102
+        else
+          LOADTEST_CONN_MAX_AGE=60 venv/bin/gunicorn tratra.wsgi:application -w "$WORKERS" -b 127.0.0.1:8102 --timeout 120 \
+            >"$OUT/gunicorn.log" 2>&1 & PID=$!; PORT=8102
+        fi
       fi
       wait_http "$PORT" || { echo "Serveur $server injoignable" >&2; kill "$PID"; exit 1; }
       for scenario in $SCENARIOS; do
         for c in $CONCURRENCY; do
-          $PY scripts/loadtest/http_load.py --target "http://127.0.0.1:$PORT" --tokens "$OUT/tokens.json" --scenario "$scenario" \
-            --category "$CAT" --concurrency "$c" --duration "$DURATION" --out "$OUT/http-$server.jsonl" >/dev/null
-          echo "$server ($([ "$server" = gunicorn ] && echo "$WORKERS processus" || echo "1 processus")), $scenario, $c utilisateurs : $(tail -1 "$OUT/http-$server.jsonl")"
+          run_one "$server" "$PID" "$PORT" "$scenario" "$c"
         done
       done
       echo "$server mémoire : $(tree_rss_mb "$PID") Mo"

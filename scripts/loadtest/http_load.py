@@ -10,6 +10,7 @@ débit, latences p50/p95/p99, erreurs par code. Cible locale par défaut ; un en
 import argparse
 import asyncio
 import json
+import os
 import random
 import statistics
 import sys
@@ -90,7 +91,7 @@ async def http_run(args, tokens):
                 continue
             lat_by[name].append(time.perf_counter() - t)
 
-    started = time.monotonic()
+    started, cpu0 = time.monotonic(), sum(os.times()[:2])
     async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
         await asyncio.gather(*(user(session) for _ in range(args.concurrency)))
     elapsed = time.monotonic() - started
@@ -102,6 +103,8 @@ async def http_run(args, tokens):
     report = {"target": args.target, "scenario": args.scenario, "concurrency": args.concurrency, "seconds": round(elapsed, 1),
               "requests": total, "rps": round(total / elapsed, 1), "codes": dict(codes),
               "p50_ms": pct(all_lat, 0.5), "p95_ms": pct(all_lat, 0.95), "p99_ms": pct(all_lat, 0.99),
+              "errors": sum(n for code, n in codes.items() if not (isinstance(code, int) and code < 500)),
+              "loadgen_cpu_pct": round(100 * (sum(os.times()[:2]) - cpu0) / elapsed, 1),
               "by_scenario": {n: {"n": len(v), "p50_ms": pct(sorted(v), 0.5), "p95_ms": pct(sorted(v), 0.95)}
                               for n, v in lat_by.items() if v}}
     return report
