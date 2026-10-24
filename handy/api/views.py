@@ -61,6 +61,7 @@ from handy.api.errors import CodedAPIException
 from handy.api.staff_access import staff_may
 from handy.media.sanitize import sanitize_image
 from handy import catalog
+from handy import proximity
 from handy.eligibility import (
     can_receive_missions, not_on_timeoff, publishable, publishable_user_ids, published_services,
     restrict_public_services,
@@ -168,9 +169,16 @@ def update_eta_from_last_point(booking: Booking, avg_kmh=25):
     route.save()
 
 
+# Rayon maximal d'une recherche de proximité (le site propose 50 km au plus, l'application 25 km) : sans plafond, un rayon de
+# 20 000 km ferait examiner toutes les offres du pays à chaque appel anonyme.
+NEARBY_MAX_RADIUS_KM = 50
+
+
 def search_services_nearby_qs(origin_point: Point, category=None, max_km=15):
+    max_km = min(float(max_km), NEARBY_MAX_RADIUS_KM)
     qs = (Service.objects
           .filter(is_active=True)
+          .filter(proximity.near('handyman__handyman_profile__location', origin_point, max_km))   # index spatial (préfiltre)
           .select_related('handyman__handyman_profile', 'category')
           .annotate(distance=Distance('handyman__handyman_profile__location', origin_point))
           .filter(distance__lte=max_km * 1000))
@@ -202,6 +210,7 @@ def suggest_alternatives_qs(booking: Booking, price_tolerance=Decimal('0.15'), k
                 .exclude(pk=booking.service.pk))
 
     return (base.filter(handyman_id__in=publishable_user_ids())
+            .filter(proximity.near('handyman__handyman_profile__location', booking.job_location, km))   # index spatial (préfiltre)
             .select_related('handyman__handyman_profile')
             .annotate(distance=Distance('handyman__handyman_profile__location', booking.job_location))
             .filter(distance__lte=km * 1000)

@@ -214,7 +214,7 @@ services:
       context: .
       dockerfile: Dockerfile
     env_file: .env
-    command: celery -A tratra worker -l info --prefetch-multiplier=1 --max-tasks-per-child=200 --queues=default,notifications
+    command: celery -A tratra worker -l info --prefetch-multiplier=1 --max-tasks-per-child=200 --queues=default,notifications,bulk
     # Le worker ENVOIE les push (tâche send_notification_push) : il doit lire le même compte de service Firebase.
     volumes:
       - ./secrets:/run/tratra-secrets:ro

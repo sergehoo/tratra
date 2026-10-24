@@ -158,22 +158,36 @@ def deliver(announcement_id: int) -> int:
     if a.send_push and a.image:
         push_image.ensure(a)          # variante 2:1 légère ; en cas d'échec, notification texte seul
     created = 0
-    ids = list(audience_queryset(a).values_list("pk", flat=True))
-    for start in range(0, len(ids), BATCH):
-        for user_id in ids[start:start + BATCH]:
+    ids = audience_queryset(a).order_by("pk").values_list("pk", flat=True).iterator(chunk_size=BATCH)   # jamais toute l'audience en mémoire
+    chunk = []
+    for user_id in ids:
+        chunk.append(user_id)
+        if len(chunk) == BATCH:
             if a.expires_at and a.expires_at <= timezone.now():
                 return created
-            delivery, new = AnnouncementDelivery.objects.get_or_create(announcement=a, user_id=user_id)
-            if not new:
-                continue
-            n = notifications.notify(user_id, "announcement", a.body[:200], title=a.title,
-                                     data={"kind": "announcement", "id": a.pk}, dedupe_key=f"announcement:{a.pk}",
-                                     push=a.send_push, collapse_key=f"announcement-{a.pk}")
-            if n is not None:
-                delivery.notification = n
-                delivery.save(update_fields=["notification"])
-            created += 1
+            created += _deliver_chunk(a.pk, chunk)
+            chunk = []
+    if chunk and not (a.expires_at and a.expires_at <= timezone.now()):
+        created += _deliver_chunk(a.pk, chunk)
     return created
+
+
+def _deliver_chunk(announcement_id: int, user_ids: List[int]) -> int:
+    """Un lot de comptes en quelques requêtes (au lieu de huit par compte) : livraisons et notifications insérées en groupe. Le verrou
+    sur l'annonce sérialise les diffusions concurrentes (tâche rejouée) : un compte déjà servi n'est jamais servi deux fois."""
+    with transaction.atomic():
+        a = Announcement.objects.select_for_update().get(pk=announcement_id)
+        if a.status != "published":
+            return 0
+        done = set(AnnouncementDelivery.objects.filter(announcement=a, user_id__in=user_ids).values_list("user_id", flat=True))
+        new = [uid for uid in user_ids if uid not in done]
+        if not new:
+            return 0
+        notified = notifications.notify_bulk(new, "announcement", a.body[:200], title=a.title, data={"kind": "announcement", "id": a.pk},
+                                             dedupe_key=f"announcement:{a.pk}", push=a.send_push, collapse_key=f"announcement-{a.pk}")
+        AnnouncementDelivery.objects.bulk_create([AnnouncementDelivery(announcement=a, user_id=uid, notification=notified.get(uid))
+                                                  for uid in new])
+    return len(new)
 
 
 def push_link(a: Announcement) -> str:

@@ -204,7 +204,7 @@ services:
   worker:
     <<: *backend
     pull_policy: never          # l'image est construite par tratraweb-stg (même tag) ; ne jamais la chercher en ligne
-    command: celery -A tratra worker -l info --prefetch-multiplier=1 --max-tasks-per-child=200 --queues=default,notifications,celery
+    command: celery -A tratra worker -l info --prefetch-multiplier=1 --max-tasks-per-child=200 --queues=default,notifications,celery,bulk
     depends_on:
       tratraweb-stg:
         condition: service_healthy   # migrations terminées
