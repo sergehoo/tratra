@@ -71,17 +71,38 @@ def _public_name(user) -> str:
     return f"{first} {last[0]}." if first and last else (first or "Professionnel")
 
 
-def pro_card(profile: HandymanProfile, *, request=None, category: Optional[ServiceCategory] = None, favorite: bool = False,
-             distance_km=None, detail: Optional[Dict] = None) -> Dict:
-    from handy.api.serializers import absolute_media_url
-    from reputation.services import provider_score
-
-    rep = provider_score(profile.user)
-    services = Service.objects.filter(handyman_id=profile.user_id, is_active=True)
+def _offer_rows(user_ids: List[int], category: Optional[ServiceCategory]) -> Dict[int, List[Dict]]:
+    """Cinq offres actives au plus par professionnel (les moins chères d'abord), pour plusieurs professionnels en une requête."""
+    services = Service.objects.filter(handyman_id__in=user_ids, is_active=True)
     if category is not None:
         services = services.filter(category_id__in=S.category_family(category))
-    offers = [{"id": s.pk, "title": s.title, "price": int(s.price) if s.price is not None else None, "price_type": s.price_type,
-               "category": s.category_id} for s in services.order_by("price", "id")[:5]]
+    rows: Dict[int, List[Dict]] = {}
+    for s in services.order_by("handyman_id", "price", "id").only("handyman_id", "title", "price", "price_type", "category_id"):
+        offers = rows.setdefault(s.handyman_id, [])
+        if len(offers) < 5:
+            offers.append({"id": s.pk, "title": s.title, "price": int(s.price) if s.price is not None else None, "price_type": s.price_type,
+                           "category": s.category_id})
+    return rows
+
+
+def _public_ratings(user_ids: List[int]) -> Dict[int, Dict]:
+    """Note publique (moyenne publiée seulement à partir de `MIN_PUBLIC_COUNT` avis) de plusieurs professionnels en une requête."""
+    from handy.reviews import rating_counts
+    from reputation.services import MIN_PUBLIC_COUNT
+
+    return {uid: {"count": r["count"], "average": r["average"] if r["count"] >= MIN_PUBLIC_COUNT else None}
+            for uid, r in rating_counts(user_ids).items()}
+
+
+def pro_card(profile: HandymanProfile, *, request=None, category: Optional[ServiceCategory] = None, favorite: bool = False,
+             distance_km=None, detail: Optional[Dict] = None, rep: Optional[Dict] = None, offers: Optional[List[Dict]] = None) -> Dict:
+    """Carte d'un professionnel. `rep` et `offers` : déjà lus pour toute une liste (`_public_ratings`, `_offer_rows`)."""
+    from handy.api.serializers import absolute_media_url
+
+    if rep is None:
+        rep = _public_ratings([profile.user_id]).get(profile.user_id, {"count": 0, "average": None})
+    if offers is None:
+        offers = _offer_rows([profile.user_id], category).get(profile.user_id, [])
     return {"id": profile.user_id, "name": _public_name(profile.user), "photo": absolute_media_url(request, profile.photo),
             "commune": profile.commune, "trust_score": profile.trust_score, "badges": profile.trust_badges or [],
             "rating": rep["average"], "reviews": rep["count"], "completed": profile.completed_jobs,
@@ -110,9 +131,13 @@ def direct_pros(client, category: ServiceCategory, *, when=None, lat=None, lng=N
     draft = _draft(client, category, when=when, lat=lat, lng=lng, commune=commune)
     favorites = set(FavoriteHandyman.objects.filter(client=client).values_list("handyman_id", flat=True)) if client else set()
     rows = []
-    for cand in S.candidates(draft, config, now, listing=True):
-        card = pro_card(cand.profile, request=request, category=category, favorite=cand.profile.user_id in favorites,
-                        distance_km=cand.distance_km, detail=cand.detail)
+    cands = S.candidates(draft, config, now, listing=True)
+    ids = [c.profile.user_id for c in cands]
+    reps, offers = _public_ratings(ids), _offer_rows(ids, category)       # deux requêtes pour toute la liste
+    for cand in cands:
+        uid = cand.profile.user_id
+        card = pro_card(cand.profile, request=request, category=category, favorite=uid in favorites, distance_km=cand.distance_km,
+                        detail=cand.detail, rep=reps.get(uid, {"count": 0, "average": None}), offers=offers.get(uid, []))
         if favorites_only and not card["favorite"]:
             continue
         if min_rating is not None and (card["rating"] is None or card["rating"] < float(min_rating)):

@@ -22,11 +22,13 @@ from typing import Dict, List, Optional
 from django.contrib.gis.geos import Point
 from django.db import IntegrityError, transaction
 from django.db.models import Case, IntegerField, Q, Value, When
+from django.db.models.functions import Lower, Trim
 from django.utils import timezone
 
 from flash.models import DispatchConfig, DispatchEvent, MissionOffer, MissionRequest
+from handy import proximity
 from handy.eligibility import is_publishable, publishable
-from handy.models import AvailabilitySlot, Booking, HandymanProfile, Service, ServiceCategory, TimeOff
+from handy.models import AvailabilitySlot, Booking, HandymanProfile, Service, ServiceArea, ServiceCategory, TimeOff
 
 logger = logging.getLogger(__name__)
 
@@ -90,44 +92,81 @@ def window(req: MissionRequest, config: DispatchConfig):
     return start, start + timedelta(minutes=config.mission_duration_minutes)
 
 
-def availability_issue(profile: HandymanProfile, req: MissionRequest, config: DispatchConfig, now=None, *,
-                       check_online: bool = True) -> Optional[str]:
-    """Raison d'indisponibilité (texte) ou None. Règle absolue : aucune proposition immédiate à un professionnel « Indisponible ».
-    `check_online=False` à l'acceptation : une proposition reçue reste acceptable même si le pro s'est mis en pause entre-temps."""
+@dataclass
+class Availability:
+    """Disponibilités de PLUSIEURS professionnels sur le créneau d'une demande, lues en cinq requêtes au plus (au lieu de cinq par
+    professionnel : à Abidjan, des centaines de professionnels d'un même métier sont dans le rayon)."""
+    timeoff: set        # profils absents sur le créneau
+    slots: Dict         # profil → horaires déclarés [(jour, début, fin)]
+    busy: set           # comptes pris par une réservation confirmée ou en cours qui chevauche
+    in_progress: set    # comptes ayant une mission en cours (demandes immédiates)
+    engaged: set        # comptes pris par un engagement longue durée sur le créneau
+
+
+def availability_batch(profiles, req: MissionRequest, config: DispatchConfig) -> Availability:
     start, end = window(req, config)
+    pids, uids = [p.pk for p in profiles], [p.user_id for p in profiles]
+    if not pids:
+        return Availability(set(), {}, set(), set(), set())
+    slots: Dict[int, list] = {}
+    for pid, wd, s, e in AvailabilitySlot.objects.filter(handyman_id__in=pids).values_list("handyman_id", "weekday", "start_time", "end_time"):
+        slots.setdefault(pid, []).append((wd, s, e))
+    return Availability(
+        timeoff=set(TimeOff.objects.filter(handyman_id__in=pids, start__lt=end, end__gt=start).values_list("handyman_id", flat=True)),
+        slots=slots,
+        busy=set(Booking.objects.filter(handyman_id__in=uids, status__in=BUSY_BOOKING_STATUSES, booking_date__lt=end,
+                                        booking_date__gt=start - timedelta(minutes=config.mission_duration_minutes))
+                 .values_list("handyman_id", flat=True)),
+        in_progress=(set(Booking.objects.filter(handyman_id__in=uids, status="in_progress").values_list("handyman_id", flat=True))
+                     if req.is_immediate else set()),
+        engaged=_engaged(uids, timezone.localtime(start), timezone.localtime(end)),
+    )
+
+
+def availability_issue(profile: HandymanProfile, req: MissionRequest, config: DispatchConfig, now=None, *,
+                       check_online: bool = True, batch: Optional[Availability] = None) -> Optional[str]:
+    """Raison d'indisponibilité (texte) ou None. Règle absolue : aucune proposition immédiate à un professionnel « Indisponible ».
+    `check_online=False` à l'acceptation : une proposition reçue reste acceptable même si le pro s'est mis en pause entre-temps.
+    `batch` : lecture groupée déjà faite pour plusieurs professionnels (`availability_batch`)."""
     if check_online and req.is_immediate and not profile.online:
         return "Indisponible (bouton de disponibilité)"
-    if TimeOff.objects.filter(handyman=profile, start__lt=end, end__gt=start).exists():
+    b = batch if batch is not None else availability_batch([profile], req, config)
+    if profile.pk in b.timeoff:
         return "Absence déclarée"
-    local = timezone.localtime(start)
-    slots = list(AvailabilitySlot.objects.filter(handyman=profile).values_list("weekday", "start_time", "end_time"))
+    local = timezone.localtime(window(req, config)[0])
+    slots = b.slots.get(profile.pk) or []
     if slots and not any(wd == local.weekday() and s <= local.time() < e for wd, s, e in slots):
         return "Hors de ses horaires"
-    if Booking.objects.filter(handyman_id=profile.user_id, status__in=BUSY_BOOKING_STATUSES,
-                              booking_date__lt=end, booking_date__gt=start - timedelta(minutes=config.mission_duration_minutes)).exists():
+    if profile.user_id in b.busy:
         return "Autre mission au même moment"
-    if req.is_immediate and Booking.objects.filter(handyman_id=profile.user_id, status="in_progress").exists():
+    if req.is_immediate and profile.user_id in b.in_progress:
         return "Mission en cours"
-    if _engagement_busy(profile.user_id, local, timezone.localtime(end)):
+    if profile.user_id in b.engaged:
         return "Engagement en cours sur ce créneau"
     return None
 
 
-def _engagement_busy(user_id: int, start, end) -> bool:
-    """Planning des engagements longue durée (interventions prévues ou validées d'un contrat en vigueur) qui chevauche le créneau."""
+def _engaged(user_ids: List[int], start, end) -> set:
+    """Comptes dont le planning d'engagement longue durée (interventions prévues ou validées d'un contrat en vigueur) chevauche le créneau."""
     from engagements.models import EngagementContract, ScheduleEvent
 
-    events = ScheduleEvent.objects.filter(contract__worker_id=user_id, contract__status__in=EngagementContract.LIVE,
+    if not user_ids:
+        return set()
+    events = ScheduleEvent.objects.filter(contract__worker_id__in=user_ids, contract__status__in=EngagementContract.LIVE,
                                           kind__in=("shift", "overtime"), status__in=("planned", "approved"),
                                           date__lte=end.date()).filter(Q(end_date__isnull=True, date__gte=start.date()) | Q(end_date__gte=start.date()))
-    for ev in events.only("date", "start_time", "end_time"):
-        if ev.start_time is None or ev.end_time is None:
-            return True   # journée entière
-        ev_start = timezone.make_aware(datetime.combine(ev.date, ev.start_time))
-        ev_end = timezone.make_aware(datetime.combine(ev.date, ev.end_time))
+    busy = set()
+    for worker, day, ev_start_time, ev_end_time in events.values_list("contract__worker_id", "date", "start_time", "end_time"):
+        if worker in busy:
+            continue
+        if ev_start_time is None or ev_end_time is None:
+            busy.add(worker)   # journée entière
+            continue
+        ev_start = timezone.make_aware(datetime.combine(day, ev_start_time))
+        ev_end = timezone.make_aware(datetime.combine(day, ev_end_time))
         if ev_start < end and ev_end > start:
-            return True
-    return False
+            busy.add(worker)
+    return busy
 
 
 # ═══ Classement ═════════════════════════════════════════════════════════════════════════════════════════════════════════
@@ -136,9 +175,35 @@ LABELS = {"distance": "Proximité", "trust": "Score Tratra Trust", "rating": "No
           "reactivity": "Réactivité aux propositions", "fairness": "Répartition équitable"}
 
 
-def _reactivity(user_id: int, config: DispatchConfig, now) -> Dict:
-    rows = list(MissionOffer.objects.filter(handyman_id=user_id, sent_at__gte=now - timedelta(days=30))
-                .exclude(status__in=(MissionOffer.PENDING, MissionOffer.WITHDRAWN)).values_list("status", "response_seconds"))
+@dataclass
+class History:
+    """Historique de classement de PLUSIEURS professionnels, lu en trois requêtes (au lieu de quatre par professionnel)."""
+    ratings: Dict       # compte → {"count", "average"} (avis retenus : le plus récent de chaque client)
+    offers: Dict        # compte → [(statut, secondes de réponse)] des propositions closes sur 30 jours
+    assigned: Dict      # compte → missions Tratra Flash obtenues ces 7 derniers jours
+
+
+def history_batch(user_ids: List[int], now) -> History:
+    from django.db.models import Count
+
+    from handy.reviews import rating_counts
+
+    if not user_ids:
+        return History({}, {}, {})
+    offers: Dict[int, list] = {}
+    for uid, status, seconds in (MissionOffer.objects.filter(handyman_id__in=user_ids, sent_at__gte=now - timedelta(days=30))
+                                 .exclude(status__in=(MissionOffer.PENDING, MissionOffer.WITHDRAWN))
+                                 .values_list("handyman_id", "status", "response_seconds")):
+        offers.setdefault(uid, []).append((status, seconds))
+    assigned = dict(MissionRequest.objects.filter(assigned_to_id__in=user_ids, assigned_at__gte=now - timedelta(days=7)).order_by()
+                    .values("assigned_to_id").annotate(n=Count("id")).values_list("assigned_to_id", "n"))
+    return History(rating_counts(user_ids), offers, assigned)
+
+
+def _reactivity(user_id: int, config: DispatchConfig, now, rows: Optional[list] = None) -> Dict:
+    if rows is None:
+        rows = list(MissionOffer.objects.filter(handyman_id=user_id, sent_at__gte=now - timedelta(days=30))
+                    .exclude(status__in=(MissionOffer.PENDING, MissionOffer.WITHDRAWN)).values_list("status", "response_seconds"))
     answered = [s for st, s in rows if st in (MissionOffer.ACCEPTED, MissionOffer.QUOTED, MissionOffer.DECLINED)]
     if len(rows) < config.min_sample:
         return {"value": None, "detail": f"Historique insuffisant ({len(rows)}/{config.min_sample})"}
@@ -153,29 +218,33 @@ def _reactivity(user_id: int, config: DispatchConfig, now) -> Dict:
             "detail": f"Répond à {round(rate * 100)} % des propositions" + (f", en {int(median(times))} s en médiane" if times else "")}
 
 
-def _rating(user_id: int, config: DispatchConfig) -> Dict:
-    from handy.reviews import review_stats
+def _rating(user_id: int, config: DispatchConfig, s: Optional[Dict] = None) -> Dict:
+    if s is None:
+        from handy.reviews import review_stats
 
-    s = review_stats(user_id)
+        s = review_stats(user_id)
     if s["count"] < config.min_sample or s["average"] is None:
         return {"value": None, "detail": f"Pas encore assez d'avis ({s['count']}/{config.min_sample})"}
     return {"value": round(s["average"] / 5, 3), "detail": f"{str(s['average']).replace('.', ',')}/5 sur {s['count']} avis"}
 
 
-def _fairness(user_id: int, now) -> Dict:
-    recent = MissionRequest.objects.filter(assigned_to_id=user_id, assigned_at__gte=now - timedelta(days=7)).count()
+def _fairness(user_id: int, now, recent: Optional[int] = None) -> Dict:
+    if recent is None:
+        recent = MissionRequest.objects.filter(assigned_to_id=user_id, assigned_at__gte=now - timedelta(days=7)).count()
     return {"value": round(1 / (1 + recent), 3), "detail": f"{recent} mission(s) Tratra Flash obtenue(s) ces 7 derniers jours"}
 
 
-def score(profile: HandymanProfile, distance_km: Optional[float], config: DispatchConfig, now) -> Dict:
+def score(profile: HandymanProfile, distance_km: Optional[float], config: DispatchConfig, now, *, batch: Optional[History] = None) -> Dict:
+    """Classement expliqué. `batch` : historique déjà lu pour plusieurs professionnels (`history_batch`)."""
+    uid = profile.user_id
     measures = {
         "distance": ({"value": round(max(0.0, 1 - distance_km / config.radius_km), 3), "detail": f"{str(distance_km).replace('.', ',')} km"}
                      if distance_km is not None else {"value": None, "detail": "Même commune (distance inconnue)"}),
         "trust": ({"value": round(profile.trust_score / 100, 3), "detail": f"Score {profile.trust_score}/100"}
                   if profile.trust_score is not None else {"value": None, "detail": "Score pas encore publié"}),
-        "rating": _rating(profile.user_id, config),
-        "reactivity": _reactivity(profile.user_id, config, now),
-        "fairness": _fairness(profile.user_id, now),
+        "rating": _rating(uid, config, batch.ratings.get(uid, {"count": 0, "average": None}) if batch else None),
+        "reactivity": _reactivity(uid, config, now, batch.offers.get(uid, []) if batch else None),
+        "fairness": _fairness(uid, now, batch.assigned.get(uid, 0) if batch else None),
     }
     weights = config.weights()
     total_w = sum(w for w in weights.values() if w > 0) or 1
@@ -203,39 +272,80 @@ class Candidate:
         return self.detail["score"]
 
 
+def _zone_filter(req: MissionRequest, config: DispatchConfig) -> Optional[Q]:
+    """Préfiltre SQL de la zone, servi par l'index spatial : SUR-ENSEMBLE de `zone_of` (position du pro, sinon centre de sa zone
+    d'intervention, sinon même commune) ; la règle exacte reste appliquée à chaque profil. None : personne (ni position ni commune)."""
+    commune = (req.commune or "").strip().lower()
+    same_commune = (HandymanProfile.objects.annotate(_c=Lower(Trim("commune")), _q=Lower(Trim("quartier")))
+                    .filter(Q(_c=commune) | Q(_q=commune))) if commune else None
+    if req.location is None:
+        return Q(pk__in=same_commune.values("pk")) if same_commune is not None else None
+    zone = (Q(pk__in=HandymanProfile.objects.filter(proximity.near("location", req.location, config.radius_km)).values("pk"))
+            | Q(pk__in=ServiceArea.objects.filter(proximity.near("center", req.location, config.radius_km), handyman__location__isnull=True)
+                .values("handyman_id")))
+    if same_commune is not None:
+        zone |= Q(pk__in=same_commune.filter(Q(service_area__isnull=True) | Q(service_area__center__isnull=True), location__isnull=True)
+                  .values("pk"))
+    return zone
+
+
+def _early_reason(user_id: int, years, offered: set, busy_elsewhere: set, min_years: int) -> Optional[str]:
+    if user_id in offered:
+        return "Déjà sollicité pour cette demande"
+    if user_id in busy_elsewhere:
+        return "Répond déjà à une autre proposition"
+    if (years or 0) < min_years:
+        return f"Expérience inférieure au minimum du métier ({min_years} an(s))"
+    return None
+
+
 def candidates(req: MissionRequest, config: DispatchConfig, now=None, *, explain: bool = False, listing: bool = False):
     """Professionnels éligibles et disponibles, classés. Avec `explain=True`, renvoie aussi les écartés et pourquoi (Back-Office).
     `listing=True` : liste montrée au CLIENT pour choisir son professionnel (demande pas encore créée) — une proposition en attente
-    ailleurs n'écarte personne (le client choisit ; le pro répondra)."""
+    ailleurs n'écarte personne (le client choisit ; le pro répondra).
+
+    Coût constant : seuls les profils de la zone (index spatial) sont chargés, et leurs disponibilités et historiques sont lus en
+    quelques requêtes groupées, quel que soit leur nombre. Les écartés hors zone (`explain`) viennent d'une seule requête légère."""
     now = now or timezone.now()
     family = category_family(req.category)
     offered = set(req.offers.values_list("handyman_id", flat=True)) if req.pk else set()
     busy_elsewhere = set() if listing else set(
         MissionOffer.objects.filter(status=MissionOffer.PENDING, expires_at__gt=now).exclude(request=req).values_list("handyman_id", flat=True))
-    qs = (publishable(HandymanProfile.objects.select_related("user", "service_area"))
-          .filter(Q(user__services__is_active=True, user__services__category_id__in=family) | Q(skills__id__in=family))
-          .exclude(user_id=req.client_id).distinct())
+    base = (publishable(HandymanProfile.objects.all())
+            .filter(Q(user__services__is_active=True, user__services__category_id__in=family) | Q(skills__id__in=family))
+            .exclude(user_id=req.client_id))
+    zone = _zone_filter(req, config)
+    profiles = list(base.filter(zone).select_related("user", "service_area").distinct()) if zone is not None else []
     min_years = required_experience(req.category)
-    kept, rejected = [], []
-    for profile in qs:
-        reason = None
-        if profile.user_id in offered:
-            reason = "Déjà sollicité pour cette demande"
-        elif profile.user_id in busy_elsewhere:
-            reason = "Répond déjà à une autre proposition"
-        elif (profile.experience_years or 0) < min_years:
-            reason = f"Expérience inférieure au minimum du métier ({min_years} an(s))"
+    reasons: Dict[int, str] = {}
+    in_zone_ok = []
+    for profile in profiles:
+        reason = _early_reason(profile.user_id, profile.experience_years, offered, busy_elsewhere, min_years)
         in_zone, distance = zone_of(profile, req, config)
         if reason is None and not in_zone:
             reason = "Hors zone"
         if reason is None:
-            reason = availability_issue(profile, req, config, now)
-        if reason is not None:
-            rejected.append({"user_id": profile.user_id, "reason": reason})
-            continue
-        kept.append(Candidate(profile, distance, score(profile, distance, config, now)))
+            in_zone_ok.append((profile, distance))
+        else:
+            reasons[profile.user_id] = reason
+    available = []
+    batch = availability_batch([p for p, _ in in_zone_ok if not (req.is_immediate and not p.online)], req, config)
+    for profile, distance in in_zone_ok:
+        reason = availability_issue(profile, req, config, now, batch=batch)
+        if reason is None:
+            available.append((profile, distance))
+        else:
+            reasons[profile.user_id] = reason
+    history = history_batch([p.user_id for p, _ in available], now)
+    kept = [Candidate(profile, distance, score(profile, distance, config, now, batch=history)) for profile, distance in available]
     kept.sort(key=lambda c: (-c.score, c.distance_km if c.distance_km is not None else 1e9, c.profile.user_id))
-    return (kept, rejected) if explain else kept
+    if not explain:
+        return kept
+    rejected = [{"user_id": p.user_id, "reason": reasons[p.user_id]} for p in profiles if p.user_id in reasons]
+    outside = base.exclude(zone) if zone is not None else base
+    for user_id, years in outside.values_list("user_id", "experience_years").distinct():
+        rejected.append({"user_id": user_id, "reason": _early_reason(user_id, years, offered, busy_elsewhere, min_years) or "Hors zone"})
+    return kept, rejected
 
 
 # ═══ Cycle de vie d'une demande ═════════════════════════════════════════════════════════════════════════════════════════

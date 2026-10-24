@@ -31,6 +31,19 @@ def counted(handyman_user_id):
     return Review.objects.filter(id__in=list(ids))
 
 
+def rating_counts(handyman_user_ids) -> Dict[int, Dict]:
+    """{artisan: {"count", "average"}} de PLUSIEURS artisans en une requête — mêmes avis retenus que `review_stats` (le plus récent de
+    chaque client). Les artisans sans avis sont absents du résultat."""
+    rows = (published().filter(booking__handyman_id__in=list(handyman_user_ids))
+            .order_by("booking__handyman_id", "booking__client_id", "-created_at", "-id")
+            .distinct("booking__handyman_id", "booking__client_id")
+            .values_list("booking__handyman_id", "rating"))
+    by_handyman: Dict[int, list] = {}
+    for handyman_id, rating in rows:
+        by_handyman.setdefault(handyman_id, []).append(rating)
+    return {uid: {"count": len(ratings), "average": _avg(ratings)} for uid, ratings in by_handyman.items()}
+
+
 def _avg(values) -> Optional[float]:
     values = [v for v in values if v is not None]
     return round(sum(values) / len(values), 2) if values else None
