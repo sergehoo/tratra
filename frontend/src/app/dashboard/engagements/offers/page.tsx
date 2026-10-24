@@ -6,6 +6,7 @@ import { Alert, Badge, Button, Card, EmptyState, PageHeader, SelectField, Status
 import { MISSION_TYPE_FR, PERIOD_FR, RELATIONSHIP_FR, dateFr, eng, fcfa, scheduleLabel, type Page, type Posting } from "@/lib/engagements";
 import { useDebouncedValue } from "../_components/useDebouncedValue";
 import { LoadState, useLoad } from "../_components/common";
+import { ReceivedInvitations } from "../_components/Invitations";
 import { useTermsContext } from "../_components/useTermsContext";
 
 /** Offres ouvertes : le serveur filtre ; « Postuler » n'apparaît que si le profil est vérifié (sinon la raison est expliquée). */
@@ -28,6 +29,7 @@ export default function OffersPage() {
     <>
       <PageHeader back={{ href: "/dashboard/engagements", label: "Engagements" }} title="Offres de longue durée"
         description="Missions régulières ou sur plusieurs mois. Chaque offre est publiée par un compte Tratra ; postuler exige un profil vérifié." />
+      <ReceivedInvitations />
       <div className="mb-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <TextField label="Recherche" type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Gardien, ménage, jardinier…" leading={<Search className="h-4 w-4" />} />
         <TextField label="Ville" value={city} onChange={(e) => setCity(e.target.value)} />

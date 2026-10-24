@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { ArrowRight, Briefcase, CalendarClock, FilePlus2, FileSignature, ListChecks, Search, Users } from "lucide-react";
 import { Alert, Button, ButtonLink, Card, CardHeader, EmptyState, PageHeader, StatusBadge, Tabs } from "@/components/ds";
 import {
-  PERIOD_FR, dateFr, durationLabel, eng, fcfa, MISSION_TYPE_FR, type Application, type Contract, type Overview, type Page, type Posting,
+  PERIOD_FR, contractStatusKey, dateFr, durationLabel, eng, fcfa, MISSION_TYPE_FR, type Application, type Contract, type Overview, type Page, type Posting,
 } from "@/lib/engagements";
 import { LoadState, useLoad } from "./_components/common";
 import { todoHref } from "./_components/todo";
@@ -48,7 +48,7 @@ function ContractRow({ c }: { c: Contract }) {
               {fcfa(c.amount, c.currency)} {PERIOD_FR[c.period]} · {durationLabel(c)} · dès le {dateFr(c.start_date)}
             </p>
           </div>
-          <StatusBadge kind="contract" status={c.status} />
+          <StatusBadge kind="contract" status={contractStatusKey(c)} />
         </Card>
       </Link>
     </li>

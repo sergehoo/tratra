@@ -11,12 +11,13 @@ export interface TermsValue {
   category: string; title: string; description: string; conditions: string; mission_type: MissionType; work_relationship: Relationship; ack: boolean; city: string; address: string;
   start_date: string; end_date: string; application_deadline: string; schedule: ScheduleSlot[]; amount: string; period: PayPeriod; payment_day: string; auto_renew: boolean;
   renewal_term_months: string; proration_mode: string; overtime_hourly_rate: string; notice_period_days: string; bookings_mode: string; organization: string;
+  benefits: string; duration_months: string;
 }
 
 export const emptyTerms = (): TermsValue => ({
   category: "", title: "", description: "", conditions: "", mission_type: "long_term", work_relationship: "independent", ack: false, city: "", address: "", start_date: "", end_date: "",
   application_deadline: "", schedule: [], amount: "", period: "monthly", payment_day: "5", auto_renew: false, renewal_term_months: "12", proration_mode: "none", overtime_hourly_rate: "",
-  notice_period_days: "7", bookings_mode: "none", organization: "",
+  notice_period_days: "7", bookings_mode: "none", organization: "", benefits: "", duration_months: "",
 });
 
 const num = (v: string | null | undefined) => (v ? String(Math.round(Number(v) * 100) / 100).replace(/\.0+$/, "") : "");
@@ -24,21 +25,23 @@ const num = (v: string | null | undefined) => (v ? String(Math.round(Number(v) *
 export function termsFromPosting(p: Posting): TermsValue {
   return { ...emptyTerms(), category: String(p.category.id), title: p.title, description: p.description ?? "", conditions: p.conditions ?? "", mission_type: p.mission_type, work_relationship: p.work_relationship,
     ack: Boolean(p.employment_notice_ack), city: p.city, address: p.location_note ?? "", start_date: p.start_date ?? "", end_date: p.end_date ?? "", application_deadline: p.application_deadline ?? "",
-    schedule: p.schedule ?? [], amount: num(p.amount), period: p.period, organization: p.organization ? String(p.organization.id) : "" };
+    schedule: p.schedule ?? [], amount: num(p.amount), period: p.period, organization: p.organization ? String(p.organization.id) : "",
+    benefits: p.benefits ?? "", duration_months: p.duration_months ? String(p.duration_months) : "" };
 }
 
 export function termsFromContract(c: ContractDetail): TermsValue {
   return { ...emptyTerms(), category: String(c.category.id), title: c.title, description: c.description, conditions: c.conditions, mission_type: c.mission_type, work_relationship: c.work_relationship, ack: c.legal_notice_ack,
     city: c.location_city, address: c.location_address, start_date: c.start_date, end_date: c.end_date ?? "", schedule: c.schedule, amount: num(c.amount), period: c.period,
     payment_day: String(c.payment_day ?? 5), auto_renew: c.auto_renew, renewal_term_months: String(c.renewal_term_months ?? 12), proration_mode: c.proration_mode,
-    overtime_hourly_rate: num(c.overtime_hourly_rate), notice_period_days: String(c.notice_period_days), bookings_mode: c.bookings_mode };
+    overtime_hourly_rate: num(c.overtime_hourly_rate), notice_period_days: String(c.notice_period_days), bookings_mode: c.bookings_mode, benefits: c.benefits ?? "" };
 }
 
 /** Corps d'un besoin publié. */
 export function postingBody(v: TermsValue) {
   return { category: Number(v.category) || null, title: v.title.trim(), description: v.description.trim(), conditions: v.conditions.trim(), mission_type: v.mission_type, work_relationship: v.work_relationship,
     employment_notice_ack: v.work_relationship === "employment" && v.ack, city: v.city.trim(), location_note: v.address.trim(), start_date: v.start_date || null, end_date: v.end_date || null,
-    application_deadline: v.application_deadline || null, schedule: v.schedule, amount: v.amount.trim(), period: v.period, ...(v.organization ? { organization: Number(v.organization) } : {}) };
+    application_deadline: v.application_deadline || null, schedule: v.schedule, amount: v.amount.trim(), period: v.period, benefits: v.benefits.trim(),
+    duration_months: Number(v.duration_months) || null, ...(v.organization ? { organization: Number(v.organization) } : {}) };
 }
 
 /** Corps d'un contrat (brouillon). */
@@ -47,7 +50,7 @@ export function contractBody(v: TermsValue) {
     legal_notice_ack: v.work_relationship === "employment" && v.ack, location_city: v.city.trim(), location_address: v.address.trim(), start_date: v.start_date, end_date: v.end_date || null,
     auto_renew: v.auto_renew && Boolean(v.end_date), renewal_term_months: v.auto_renew && v.end_date ? Number(v.renewal_term_months) || null : null, schedule: v.schedule, amount: v.amount.trim(), period: v.period,
     payment_day: Number(v.payment_day) || null, proration_mode: v.proration_mode, overtime_hourly_rate: v.overtime_hourly_rate.trim() || null,
-    notice_period_days: Number(v.notice_period_days), bookings_mode: v.bookings_mode };
+    notice_period_days: Number(v.notice_period_days), bookings_mode: v.bookings_mode, benefits: v.benefits.trim() };
 }
 
 export function TermsFields({
@@ -107,7 +110,11 @@ export function TermsFields({
           hint={r ? `Durée maximale pour ce métier : ${r.max_duration_months} mois.` : undefined} />
       </div>
       {mode === "posting" ? (
-        <TextField label="Date limite de candidature" type="date" optional disabled={disabled} value={value.application_deadline} error={e("application_deadline")} onChange={(ev) => set("application_deadline", ev.target.value)} />
+        <div className="grid gap-4 sm:grid-cols-2">
+          <TextField label="Date limite de candidature" type="date" optional disabled={disabled} value={value.application_deadline} error={e("application_deadline")} onChange={(ev) => set("application_deadline", ev.target.value)} />
+          <TextField label="Durée envisagée (mois)" inputMode="numeric" optional disabled={disabled} value={value.duration_months} error={e("duration_months")} onChange={(ev) => set("duration_months", ev.target.value)}
+            hint="Indicative : la durée exacte figure au contrat." />
+        </div>
       ) : null}
       <ScheduleEditor value={value.schedule} onChange={(s) => set("schedule", s)} error={e("schedule")} disabled={disabled} />
       <div className="grid gap-4 sm:grid-cols-2">
@@ -144,6 +151,8 @@ export function TermsFields({
           {errors.bookings_mode ? <p role="alert" className="text-xs font-medium text-dangerInk">{errors.bookings_mode}</p> : null}
         </>
       ) : null}
+      <TextareaField label="Avantages" optional disabled={disabled} rows={2} value={value.benefits} maxLength={2000} error={e("benefits")} onChange={(ev) => set("benefits", ev.target.value)}
+        hint="Repas, transport, logement… Uniquement ce qui est réellement proposé." />
       <TextareaField label="Conditions particulières" optional disabled={disabled} rows={4} value={value.conditions} maxLength={4000} error={e("conditions")} onChange={(ev) => set("conditions", ev.target.value)}
         hint="Tenue, matériel fourni, déplacements… Tout ce dont vous convenez doit figurer ici." />
     </div>

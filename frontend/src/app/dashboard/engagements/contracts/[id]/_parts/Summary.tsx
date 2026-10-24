@@ -8,6 +8,7 @@ import {
   AMENDMENT_KIND_FR, DISPUTE_KIND_FR, MISSION_TYPE_FR, PERIOD_FR, RELATIONSHIP_FR, ROLE_FR, dateFr, dateTimeFr, durationLabel, eng, errFields, fcfa, scheduleLabel, type Amendment, type ContractDetail,
 } from "@/lib/engagements";
 import { ActionModal, Facts, useIntent } from "../../../_components/common";
+import { ArticlesCard, DocumentsCard, SignCard } from "./Sealed";
 
 interface Doc { terms_hash: string; terms_version: number; acceptances: { role: string; user: { name: string } | null; terms_version: number; terms_hash: string; accepted_at: string }[]; amendments: Amendment[]; notice: string }
 
@@ -206,6 +207,7 @@ export function Summary({ c, reload, goTab, openAmend }: { c: ContractDetail; re
   return (
     <>
       {c.status === "pending_acceptance" && has("accept") ? <AcceptCard c={c} onChanged={reload} /> : null}
+      <SignCard c={c} onChanged={reload} />
       {c.status === "pending_acceptance" && iAccepted ? (
         <Alert tone="info" className="mb-6" title="En attente de l’autre partie">{c.counterpart.name} doit relire et accepter ces conditions. Vous serez prévenu(e) dès sa réponse.</Alert>
       ) : null}
@@ -224,6 +226,7 @@ export function Summary({ c, reload, goTab, openAmend }: { c: ContractDetail; re
           ["Préavis", `${c.notice_period_days} jours`], ["Lieu", [c.location_address, c.location_city].filter(Boolean).join(", ")],
           ["Renouvellement", c.auto_renew && c.end_date ? `Automatique (${c.renewal_term_months} mois)${c.non_renewal_at ? " — refusé" : c.non_renewal_deadline ? `, non-renouvellement possible jusqu’au ${dateFr(c.non_renewal_deadline)}` : ""}${c.renewal_count ? ` · renouvelé ${c.renewal_count} fois` : ""}` : "Non"],
           ["Heures supplémentaires", c.overtime_hourly_rate ? `${fcfa(c.overtime_hourly_rate)} / h` : "Non valorisées"], ["Prorata dernière période", c.proration_mode === "calendar_days" ? "Jours calendaires" : "Aucun"],
+          ["Avantages", c.benefits || "—"], ["Référence", c.reference ?? "—"],
           ["Réservations", c.bookings_mode === "per_occurrence" ? "Une réservation Tratra par intervention" : "Aucune"],
         ]} />
         {c.description ? <div className="mt-5"><h3 className="text-sm font-bold text-ink">Missions confiées</h3><p className="mt-1 whitespace-pre-line text-sm text-inkSoft">{c.description}</p></div> : null}
@@ -236,8 +239,10 @@ export function Summary({ c, reload, goTab, openAmend }: { c: ContractDetail; re
         ) : null}
         <p className="mt-5 rounded-panel bg-canvas p-3 text-xs text-ash">{c.legal_notice} Les paiements sont déclarés par une partie et ne comptent qu’une fois confirmés par l’autre : Tratra ne verse ni n’encaisse la rémunération.</p>
       </Card>
+      <ArticlesCard c={c} />
+      <DocumentsCard c={c} />
 
-      {["accepted", "active", "suspended", "notice", "terminated", "completed"].includes(c.status) ? (
+      {["accepted", "signed", "active", "suspended", "notice", "terminated", "completed"].includes(c.status) && !(c.status === "accepted" && c.signature_required) ? (
         <Card padding="md" className="mt-6">
           <CardHeader title="Actions" icon={<Gavel className="h-5 w-5" />} />
           <div className="flex flex-wrap gap-2">

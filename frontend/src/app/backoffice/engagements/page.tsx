@@ -5,10 +5,11 @@ import { Alert, Badge, Button, Card, Checkbox, Modal, PageHeader, SelectField, S
 import { bo, boError, fieldErrors, moneyLabel } from "@/lib/bo";
 import { useBo } from "@/lib/BoProvider";
 import { useCounts, useManagedList } from "@/lib/useBoList";
+import { DocumentsBlock, KeysTab, TemplatesTab } from "./ContractsLegal";
 import { Bars, DateRange, ExportButton, FilterBar, FilterSelect, Kpi, KpiGrid, KV, ListView, ReasonModal, SearchBox, Section, StatusChips, Tag, dd, dt, postTo, useNotice, useTabParam, type BoColumn, type BulkAction, type RowAction } from "../_components/ui";
 
-const CONTRACT_FR: Record<string, string> = { draft: "Brouillon", pending_acceptance: "À accepter", accepted: "Accepté", active: "En cours", suspended: "Suspendu", notice: "Préavis", terminated: "Résilié", completed: "Terminé", cancelled: "Annulé" };
-const CONTRACT_TONE: Record<string, "gray" | "warning" | "info" | "success" | "danger" | "primary"> = { draft: "gray", pending_acceptance: "warning", accepted: "info", active: "success", suspended: "warning", notice: "warning", terminated: "gray", completed: "primary", cancelled: "gray" };
+const CONTRACT_FR: Record<string, string> = { draft: "Brouillon", pending_acceptance: "À accepter", accepted: "Accepté", signed: "Signé", active: "En cours", suspended: "Suspendu", notice: "Préavis", terminated: "Résilié", completed: "Terminé", cancelled: "Annulé" };
+const CONTRACT_TONE: Record<string, "gray" | "warning" | "info" | "success" | "danger" | "primary"> = { draft: "gray", pending_acceptance: "warning", accepted: "info", signed: "info", active: "success", suspended: "warning", notice: "warning", terminated: "gray", completed: "primary", cancelled: "gray" };
 const INST_FR: Record<string, string> = { scheduled: "Planifiée", due: "À régler", partial: "Partielle", paid: "Réglée", overdue: "En retard", on_hold: "Suspendue", waived: "Abandonnée", cancelled: "Annulée" };
 const INST_TONE: Record<string, "gray" | "warning" | "info" | "success" | "danger"> = { scheduled: "gray", due: "warning", partial: "info", paid: "success", overdue: "danger", on_hold: "warning", waived: "gray", cancelled: "gray" };
 const POSTING_FR: Record<string, string> = { draft: "Brouillon", open: "Ouvert", closed: "Clos", filled: "Pourvu", cancelled: "Annulé", expired: "Expiré" };
@@ -110,6 +111,7 @@ function ContractPanel({ id, onClose, onChanged }: { id: number | null; onClose:
                 <tbody>{d.installments.map((i) => <tr key={i.id} className="border-t border-lineSoft"><td className="py-1.5 pr-3">{i.number}</td><td className="pr-3">{i.period_start} → {i.period_end}</td><td className="pr-3">{i.due_date}</td><td className="pr-3">{moneyLabel(i.total)}</td><td className="pr-3">{moneyLabel(i.confirmed)}</td><td className="pr-3">{moneyLabel(i.balance)}</td><td><Tag value={i.status} label={INST_FR[i.status]} tone={INST_TONE[i.status]} />{i.payments.some((p) => p.status === "declared") ? <Badge tone="accent" className="ml-1">à confirmer</Badge> : null}</td></tr>)}</tbody></table></div>
               <p className="mt-2 text-xs text-ash">La plateforme ne confirme jamais un paiement : seule la partie concernée le fait.</p>
             </div>
+            <DocumentsBlock contractId={d.id} />
             {d.disputes.length ? <p className="text-sm">Litiges : {d.disputes.map((x) => `#${x.id} ${KIND_FR[x.kind]} (${DISPUTE_FR[x.status]})`).join(" · ")}</p> : null}
             {d.amendments.length ? <div><h3 className="mb-1 text-sm font-bold text-ink">Avenants</h3><ul className="space-y-0.5 text-sm text-inkSoft">{d.amendments.map((a) => <li key={a.id}>{a.kind} · {a.status} · effet {a.effective_date} — {a.reason}</li>)}</ul></div> : null}
             {d.admin_actions.length ? <div><h3 className="mb-1 text-sm font-bold text-ink">Décisions de la plateforme</h3><ul className="space-y-0.5 text-sm text-inkSoft">{d.admin_actions.map((a, i) => <li key={i}>{a.action.replace("backoffice.engagement.", "")} · {a.by} · {dt(a.at)} — {a.reason}</li>)}</ul></div> : null}
@@ -449,13 +451,16 @@ function RulesTab() {
 }
 
 export default function EngagementsBoPage() {
-  const [tab, setTab] = useTabParam(["overview", "contracts", "postings", "installments", "disputes", "evaluations", "rules"] as const, "overview");
+  const { can } = useBo();
+  const [tab, setTab] = useTabParam(["overview", "contracts", "postings", "installments", "disputes", "evaluations", "rules", "templates", "keys"] as const, "overview");
+  const items = [{ id: "overview" as const, label: "Aperçu" }, { id: "contracts" as const, label: "Contrats" }, { id: "postings" as const, label: "Besoins" }, { id: "installments" as const, label: "Échéances" },
+    { id: "disputes" as const, label: "Litiges" }, { id: "evaluations" as const, label: "Évaluations" }, { id: "rules" as const, label: "Règles" }, { id: "templates" as const, label: "Modèles de contrat" },
+    ...(can("contracts.keys") ? [{ id: "keys" as const, label: "Clés de scellement" }] : [])];
   return (
     <>
       <PageHeader title="Engagements" description="Contrats récurrents et de longue durée : suivi, échéances, litiges, modération et règles par métier. La plateforme ne confirme jamais un paiement ni ne modifie un montant." />
-      <Tabs ariaLabel="Sections" value={tab} onChange={setTab} className="mb-5"
-        items={[{ id: "overview", label: "Aperçu" }, { id: "contracts", label: "Contrats" }, { id: "postings", label: "Besoins" }, { id: "installments", label: "Échéances" }, { id: "disputes", label: "Litiges" }, { id: "evaluations", label: "Évaluations" }, { id: "rules", label: "Règles" }]} />
-      {tab === "overview" ? <OverviewTab /> : tab === "contracts" ? <ContractsTab /> : tab === "postings" ? <PostingsTab /> : tab === "installments" ? <InstallmentsTab /> : tab === "disputes" ? <DisputesTab /> : tab === "evaluations" ? <EvaluationsTab /> : <RulesTab />}
+      <Tabs ariaLabel="Sections" value={tab} onChange={setTab} className="mb-5" items={items} />
+      {tab === "overview" ? <OverviewTab /> : tab === "contracts" ? <ContractsTab /> : tab === "postings" ? <PostingsTab /> : tab === "installments" ? <InstallmentsTab /> : tab === "disputes" ? <DisputesTab /> : tab === "evaluations" ? <EvaluationsTab /> : tab === "templates" ? <TemplatesTab /> : tab === "keys" && can("contracts.keys") ? <KeysTab /> : <RulesTab />}
     </>
   );
 }

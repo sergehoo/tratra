@@ -9,6 +9,7 @@ import {
   INTERVIEW_MODE_FR, MISSION_TYPE_FR, PERIOD_FR, RELATIONSHIP_FR, dateFr, dateTimeFr, eng, errFields, fcfa, scheduleLabel, type Application, type Interview, type Page, type Posting,
 } from "@/lib/engagements";
 import { ActionModal, Facts, LoadState, useIntent, useLoad } from "../../_components/common";
+import { InvitePanel } from "../../_components/Invitations";
 
 const INTERVIEW_STATUS_FR: Record<string, string> = { proposed: "Proposé", confirmed: "Confirmé", declined: "Refusé", cancelled: "Annulé", done: "Effectué" };
 
@@ -272,10 +273,12 @@ export default function PostingPage() {
               ["Rémunération", `${fcfa(p.amount, p.currency)} ${PERIOD_FR[p.period]}`], ["Nature", RELATIONSHIP_FR[p.work_relationship]], ["Début souhaité", dateFr(p.start_date)],
               ["Fin souhaitée", p.end_date ? dateFr(p.end_date) : "Durée indéterminée"], ["Planning", scheduleLabel(p.schedule)], ["Heures par semaine", p.hours_per_week ? `${Number(p.hours_per_week)} h` : "—"],
               ["Candidatures jusqu’au", p.application_deadline ? dateFr(p.application_deadline) : "Sans date limite"], ["Zone", p.location_note],
+              ["Durée", p.duration_months ? `${p.duration_months} mois` : "—"], ["Avantages", p.benefits || "—"],
             ]} />
             {p.description ? <div className="mt-5"><h2 className="text-sm font-bold text-ink">Mission</h2><p className="mt-1 whitespace-pre-line text-sm text-inkSoft">{p.description}</p></div> : null}
             {p.conditions ? <div className="mt-4"><h2 className="text-sm font-bold text-ink">Conditions</h2><p className="mt-1 whitespace-pre-line text-sm text-inkSoft">{p.conditions}</p></div> : null}
           </Card>
+          {p.mine && p.status === "open" ? <InvitePanel postingId={p.id} /> : null}
           {p.mine ? <Applications posting={p} /> : <LoadState loading={mine.loading} error={mine.error} hasData={!mine.loading && !mine.error} reload={() => void mine.reload()}><ApplyCard posting={p} mine={mine.data} onChanged={() => { void mine.reload(); void posting.reload(); }} /></LoadState>}
           <ConfirmDialog open={closing} onClose={() => setClosing(false)} loading={busy} confirmLabel="Clore le besoin" tone="danger" title="Clore ce besoin ?" onConfirm={() => void act(`/postings/${p.id}/close/`)}
             description="Il n’accepte plus de candidatures. Les candidatures déjà reçues restent consultables." />

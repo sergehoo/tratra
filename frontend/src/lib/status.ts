@@ -57,6 +57,8 @@ export const CONTRACT_STATUS: Record<string, StatusView> = {
   draft: { label: "Brouillon", tone: "gray" },
   pending_acceptance: { label: "À accepter", tone: "accent" },
   accepted: { label: "Accepté · début à venir", tone: "info" },
+  to_sign: { label: "Accepté · à signer", tone: "accent" }, // pseudo-statut : accepté, contrat scellé en attente des signatures
+  signed: { label: "Signé · début à venir", tone: "info" },
   active: { label: "En cours", tone: "success" },
   suspended: { label: "Suspendu", tone: "warning" },
   notice: { label: "Préavis en cours", tone: "warning" },

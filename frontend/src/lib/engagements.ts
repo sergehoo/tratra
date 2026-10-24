@@ -26,7 +26,7 @@ export interface Posting {
   start_date: string | null; end_date: string | null; hours_per_week: string | null; amount: string | null; period: PayPeriod; currency: string; status: string;
   application_deadline: string | null; published_at: string | null; created_at: string; version: number; publisher: Person | null;
   organization: { id: number; name: string } | null; mine: boolean; applications_count: number | null;
-  description?: string; conditions?: string; schedule?: ScheduleSlot[]; employment_notice_ack?: boolean; location_note?: string; legal_notice?: string;
+  description?: string; conditions?: string; benefits?: string; duration_months?: number | null; schedule?: ScheduleSlot[]; employment_notice_ack?: boolean; location_note?: string; legal_notice?: string;
   can_apply?: boolean; applied?: boolean;
 }
 
@@ -49,10 +49,20 @@ export interface Contract {
   hours_per_week: string | null; worker: Person; principal: Person; counterpart: Person; organization: { id: number; name: string } | null; version: number; terms_version: number;
   terms_hash: string; accepted_by: string[]; actions: string[]; pending_amendment: Amendment | null; created_at: string; updated_at: string; activated_at: string | null;
   ended_at: string | null; closed_at: string | null;
+  /** Contrats établis sur un modèle VALIDÉ par revue juridique : référence TRT-CTR, signature des parties, documents scellés. */
+  reference: string | null; signature_required: boolean;
+  template: { id: number; title: string; version: number; status: string; status_label: string } | null;
+  signatures?: { principal: string | null; worker: string | null };
+}
+
+export interface ContractArticle { number: number; key: string; title: string; body: string }
+export interface SealedDocument {
+  id: number; reference: string; kind: "contract" | "amendment"; stage: "for_signature" | "final"; version: number; sha256: string; size: number;
+  issued_at: string; signing_key: string; revoked_at: string | null; revoked_reason: string; download: string;
 }
 
 export interface ContractDetail extends Contract {
-  description: string; conditions: string; schedule: ScheduleSlot[]; location_city: string; location_address: string; auto_renew: boolean; renewal_term_months: number | null;
+  description: string; conditions: string; benefits: string; articles: ContractArticle[]; documents: SealedDocument[]; schedule: ScheduleSlot[]; location_city: string; location_address: string; auto_renew: boolean; renewal_term_months: number | null;
   renewal_count: number; non_renewal_at: string | null; non_renewal_deadline: string | null; proration_mode: string; overtime_hourly_rate: string | null; notice_period_days: number;
   bookings_mode: string; legal_notice_ack: boolean; end_reason: string; notice_given_by: Person | null; notice_given_at: string | null;
   suspensions: { starts_on: string; ends_on: string | null; reason: string; source: "agreed" | "admin" }[]; service_id: number | null; posting_id: number | null; rules: Rules; legal_notice: string;
@@ -123,6 +133,9 @@ export const CONTRACT_EVENT_FR: Record<string, string> = {
   schedule_approved: "Planning validé", schedule_rejected: "Planning refusé", schedule_cancelled: "Demande annulée", attendance_declared: "Présence déclarée",
   attendance_confirmed: "Présence confirmée", attendance_disputed: "Présence contestée", replacement_proposed: "Remplacement proposé", replacement_accepted: "Remplacement accepté",
   replacement_declined: "Remplacement refusé", evaluation_created: "Évaluation publiée", dispute_opened: "Litige ouvert", dispute_review: "Litige pris en charge", dispute_resolved: "Litige traité",
+  ready_to_sign: "Prêt à signer", signed: "Signé par une partie", concluded: "Contrat signé par les deux parties",
+  "document.contract.for_signature": "Document à signer scellé", "document.contract.final": "Contrat final scellé",
+  "document.amendment.final": "Avenant scellé", "document.revoked": "Document révoqué",
 };
 
 const money = new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 0 });
@@ -207,3 +220,8 @@ export function errFields(e: unknown): Record<string, string> {
   return Object.fromEntries(Object.entries(fields).map(([k, v]) => [k, Array.isArray(v) ? String(v[0]) : String(v)]));
 }
 export const isConflictVersion = (e: unknown): boolean => e instanceof ApiError && e.status === 409 && errCode(e) === "version_conflict";
+
+/** Statut affiché : un contrat accepté qui attend encore les signatures (modèle validé) n'est pas « début à venir ». */
+export function contractStatusKey(c: { status: string; signature_required?: boolean }): string {
+  return c.signature_required && c.status === "accepted" ? "to_sign" : c.status;
+}
