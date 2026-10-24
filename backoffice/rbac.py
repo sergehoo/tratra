@@ -20,6 +20,10 @@ PERMISSIONS = {
     "business.manage": "Organisations, sites, équipements, contrats, budgets, facturation",
     "engagements.view": "Consulter contrats d'engagement, échéances, litiges et règles",
     "engagements.manage": "Suspendre, reprendre ou résilier un contrat ; traiter les litiges ; modérer besoins et évaluations",
+    "contracts.templates": "Modèles de contrat : rédiger, versionner, soumettre à la revue juridique, retirer",
+    "contracts.legal_review": "Modèles de contrat : VALIDER après revue par un juriste (jamais « conforme » sans revue spécialisée)",
+    "contracts.revoke": "Révoquer un document de contrat scellé (émis par erreur, fraude)",
+    "contracts.keys": "Clés de scellement des contrats : rotation et révocation",
     "finance.view": "Consulter paiements, commissions, remboursements",
     "finance.manage": "Rembourser, valider un retrait",
     "announcements.manage": "Créer, programmer et publier des annonces",
@@ -38,12 +42,14 @@ ROLES = {
     "super_admin": set(PERMISSIONS),
     "ops": {"assistant.use", "messages.send", "messages.bulk", "dashboard.view", "users.view", "kyc.review", "trust.manage", "tratra_id.manage", "services.moderate", "bookings.view",
             "bookings.manage", "live.view", "reviews.moderate", "business.manage", "continuity.view", "analytics.view",
-            "notifications.view", "engagements.view", "engagements.manage"},
+            "notifications.view", "engagements.view", "engagements.manage", "contracts.templates", "contracts.revoke"},
     "support": {"assistant.use", "messages.send", "dashboard.view", "users.view", "bookings.view", "bookings.manage", "reviews.moderate", "support.manage",
                 "notifications.view", "continuity.view", "engagements.view", "engagements.manage"},
     "finance": {"assistant.use", "dashboard.view", "bookings.view", "finance.view", "finance.manage", "analytics.view", "business.manage", "engagements.view"},
     "marketing": {"assistant.use", "dashboard.view", "announcements.manage", "notifications.view", "analytics.view"},
     "analyst": {"assistant.use", "dashboard.view", "analytics.view"},
+    # Revue juridique des modèles de contrat (juriste interne ou partenaire) : aucun autre droit.
+    "legal": {"dashboard.view", "engagements.view", "contracts.templates", "contracts.legal_review"},
 }
 GROUP_PREFIX = "bo_"
 

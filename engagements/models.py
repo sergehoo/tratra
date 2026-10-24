@@ -85,6 +85,8 @@ class EngagementPosting(models.Model):
     period = models.CharField(max_length=10, choices=PERIODS, default="monthly")
     currency = models.CharField(max_length=3, default="XOF")
     conditions = models.TextField(max_length=4000, blank=True, default="")
+    benefits = models.TextField(max_length=2000, blank=True, default="")         # avantages (repas, transport, logement…), tels que déclarés
+    duration_months = models.PositiveSmallIntegerField(null=True, blank=True, validators=[MinValueValidator(1), MaxValueValidator(240)])
     employment_notice_ack = models.BooleanField(default=False)                   # mention légale reconnue (emploi salarié)
     application_deadline = models.DateField(null=True, blank=True)
     status = models.CharField(max_length=10, choices=STATUSES, default="draft", db_index=True)
@@ -151,11 +153,12 @@ class EngagementContract(models.Model):
     RELATIONSHIPS = EngagementPosting.RELATIONSHIPS
     PERIODS = EngagementPosting.PERIODS
     STATUSES = [
-        ("draft", "Brouillon"), ("pending_acceptance", "En attente d'acceptation"), ("accepted", "Accepté, avant le début"),
-        ("active", "En cours"), ("suspended", "Suspendu"), ("notice", "En préavis"),
+        ("draft", "Brouillon"), ("pending_acceptance", "Proposé, en attente d'acceptation"), ("accepted", "Accepté"),
+        ("signed", "Signé, avant le début"), ("active", "En cours"), ("suspended", "Suspendu"), ("notice", "En préavis"),
         ("terminated", "Résilié"), ("completed", "Terminé"), ("cancelled", "Annulé avant le début"),
     ]
-    LIVE = ("accepted", "active", "suspended", "notice")          # engagement en vigueur ou sur le point de l'être
+    # BROUILLON → PROPOSÉ → ACCEPTÉ → SIGNÉ (contrats établis sur un modèle validé juridiquement) → ACTIF → TERMINÉ / RÉSILIÉ.
+    LIVE = ("accepted", "signed", "active", "suspended", "notice")          # engagement en vigueur ou sur le point de l'être
     ENDED = ("terminated", "completed", "cancelled")
     BOOKING_MODES = [("none", "Aucune réservation"), ("per_occurrence", "Une réservation par occurrence")]
     PRORATION = [("none", "Aucun prorata"), ("calendar_days", "Prorata des jours calendaires (dernière période)")]
@@ -173,6 +176,14 @@ class EngagementContract(models.Model):
     title = models.CharField(max_length=160)
     description = models.TextField(max_length=4000, blank=True, default="")      # missions confiées
     conditions = models.TextField(max_length=4000, blank=True, default="")
+    benefits = models.TextField(max_length=2000, blank=True, default="")
+
+    # Modèle juridique (validé par revue humaine) et articles FIGÉS à la proposition : c'est ce texte que les parties acceptent puis
+    # signent. Sans modèle validé : ancien parcours (acceptation électronique simple, pas de signature ni de document scellé).
+    template = models.ForeignKey("engagements.ContractTemplate", null=True, blank=True, on_delete=models.PROTECT, related_name="contracts")
+    articles = models.JSONField(default=list, blank=True)
+    signature_required = models.BooleanField(default=False)
+    reference = models.CharField(max_length=24, unique=True, null=True, blank=True)   # TRT-CTR-AAAA-NNNNNN
 
     start_date = models.DateField()
     end_date = models.DateField(null=True, blank=True)                           # vide = durée indéterminée
@@ -482,3 +493,145 @@ class EngagementDispute(models.Model):
 
     class Meta:
         ordering = ["-created_at", "-id"]
+
+
+# ═══ Modèles juridiques, documents scellés, signatures ══════════════════════════════════════════════════════════════
+
+class ContractTemplate(models.Model):
+    """Modèle de contrat versionné (articles + références juridiques), par nature de relation et, si besoin, par métier.
+
+    Statuts : brouillon → « À valider juridiquement » → « Validé par revue juridique » (personnel habilité « contracts.legal_review »,
+    après revue par un juriste ; jamais « conforme ») → retiré. Un modèle validé n'est plus modifiable : on en crée une nouvelle
+    version. Seul un modèle validé peut servir à un contrat (engagements/legal.py)."""
+    DRAFT, TO_REVIEW, VALIDATED, RETIRED = "draft", "to_review", "validated", "retired"
+    STATUSES = [(DRAFT, "Brouillon"), (TO_REVIEW, "À valider juridiquement"), (VALIDATED, "Validé par revue juridique"), (RETIRED, "Retiré")]
+
+    code = models.SlugField(max_length=60)
+    version = models.PositiveIntegerField(default=1)
+    title = models.CharField(max_length=160)
+    relationship = models.CharField(max_length=12, choices=EngagementPosting.RELATIONSHIPS)
+    categories = models.ManyToManyField("handy.ServiceCategory", blank=True, related_name="contract_templates")  # vide = tous les métiers
+    articles = models.JSONField(default=list)
+    legal_references = models.JSONField(default=list, blank=True)
+    status = models.CharField(max_length=10, choices=STATUSES, default=DRAFT, db_index=True)
+    review_note = models.TextField(max_length=2000, blank=True, default="")
+    reviewed_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    previous = models.ForeignKey("self", null=True, blank=True, on_delete=models.SET_NULL, related_name="next_versions")
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["code", "-version"]
+        constraints = [models.UniqueConstraint(fields=["code", "version"], name="eng_template_code_version")]
+
+    def __str__(self):
+        return f"{self.title} (v{self.version})"
+
+
+class ContractReferenceCounter(models.Model):
+    """Compteur annuel des références TRT-CTR-AAAA-NNNNNN (incrémenté sous verrou : jamais deux fois le même numéro)."""
+    year = models.PositiveSmallIntegerField(primary_key=True)
+    last = models.PositiveIntegerField(default=0)
+
+
+class SigningKey(models.Model):
+    """Clé de scellement Ed25519 de la plateforme (engagements/signing.py). La clé privée n'est stockée que CHIFFRÉE et n'est jamais
+    exposée ; la clé publique est publiée pour permettre la vérification hors de Tratra."""
+    ACTIVE, RETIRED, REVOKED = "active", "retired", "revoked"
+    STATUSES = [(ACTIVE, "Active"), (RETIRED, "Retirée (vérifie encore)"), (REVOKED, "Révoquée")]
+
+    kid = models.CharField(max_length=40, unique=True)
+    algorithm = models.CharField(max_length=10, default="Ed25519")
+    public_key = models.CharField(max_length=100)
+    private_key_encrypted = models.TextField()
+    status = models.CharField(max_length=8, choices=STATUSES, default=ACTIVE, db_index=True)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    created_at = models.DateTimeField(auto_now_add=True)
+    retired_at = models.DateTimeField(null=True, blank=True)
+    revoked_at = models.DateTimeField(null=True, blank=True)
+    revoked_reason = models.CharField(max_length=300, blank=True, default="")
+    revoked_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+
+    class Meta:
+        ordering = ["-created_at"]
+        constraints = [models.UniqueConstraint(fields=["status"], condition=Q(status="active"), name="eng_one_active_signing_key")]
+
+    def __str__(self):
+        return f"{self.kid} ({self.status})"
+
+
+def document_path(instance, filename):
+    return f"contracts/{instance.contract_id}/{uuid.uuid4().hex}.pdf"
+
+
+class ContractDocument(models.Model):
+    """Document PDF émis et scellé (engagements/documents.py). IMMUABLE : un déclencheur PostgreSQL refuse toute suppression et toute
+    modification autre que la révocation (une seule fois)."""
+    KINDS = [("contract", "Contrat"), ("amendment", "Avenant")]
+    STAGES = [("for_signature", "À signer"), ("final", "Signé")]
+
+    contract = models.ForeignKey(EngagementContract, on_delete=models.PROTECT, related_name="documents")
+    kind = models.CharField(max_length=10, choices=KINDS, default="contract")
+    stage = models.CharField(max_length=14, choices=STAGES, default="for_signature")
+    reference = models.CharField(max_length=32, db_index=True)
+    version = models.PositiveIntegerField()
+    parent = models.ForeignKey("self", null=True, blank=True, on_delete=models.PROTECT, related_name="children")
+    amendment = models.ForeignKey(ContractAmendment, null=True, blank=True, on_delete=models.PROTECT, related_name="documents")
+    file = models.FileField(upload_to=document_path, storage=KycPrivateStorage(), max_length=255)
+    sha256 = models.CharField(max_length=64, unique=True)
+    size = models.PositiveIntegerField(default=0)
+    terms_hash = models.CharField(max_length=64)
+    token_hash = models.CharField(max_length=64, unique=True)
+    signing_key = models.ForeignKey(SigningKey, to_field="kid", db_column="signing_key_kid", on_delete=models.PROTECT, related_name="documents")
+    signature = models.CharField(max_length=128)
+    issued_at = models.DateTimeField()
+    issued_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    revoked_at = models.DateTimeField(null=True, blank=True)
+    revoked_reason = models.CharField(max_length=500, blank=True, default="")
+    revoked_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+
+    class Meta:
+        ordering = ["issued_at", "id"]
+        indexes = [models.Index(fields=["contract", "kind", "stage", "version"])]
+
+    def __str__(self):
+        return f"{self.reference} ({self.get_stage_display()}, v{self.version})"
+
+
+class ContractSignature(models.Model):
+    """Signature électronique SIMPLE d'une partie sur un document « à signer » : compte, date, heure, empreinte du document ;
+    adresse IP gardée seulement sous forme d'empreinte. Immuable (déclencheur PostgreSQL)."""
+    contract = models.ForeignKey(EngagementContract, on_delete=models.PROTECT, related_name="signatures")
+    document = models.ForeignKey(ContractDocument, on_delete=models.PROTECT, related_name="signatures")
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+")
+    role = models.CharField(max_length=10, choices=[("principal", "Donneur d'ordre"), ("worker", "Professionnel")])
+    document_sha256 = models.CharField(max_length=64)
+    signed_at = models.DateTimeField(auto_now_add=True)
+    ip_hash = models.CharField(max_length=64, blank=True, default="")
+    user_agent = models.CharField(max_length=200, blank=True, default="")
+
+    class Meta:
+        ordering = ["signed_at", "id"]
+        constraints = [models.UniqueConstraint(fields=["document", "role"], name="eng_one_signature_per_role")]
+
+
+# ═══ Recrutement : invitations ══════════════════════════════════════════════════════════════════════════════════════
+
+class EngagementInvitation(models.Model):
+    """Invitation d'un professionnel vérifié à candidater à un besoin publié ; acceptée, elle devient une candidature."""
+    STATUSES = [("sent", "Envoyée"), ("accepted", "Acceptée"), ("declined", "Déclinée"), ("cancelled", "Retirée")]
+
+    posting = models.ForeignKey(EngagementPosting, on_delete=models.CASCADE, related_name="invitations")
+    invitee = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="engagement_invitations")
+    invited_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+")
+    message = models.CharField(max_length=500, blank=True, default="")
+    status = models.CharField(max_length=10, choices=STATUSES, default="sent", db_index=True)
+    application = models.OneToOneField(EngagementApplication, null=True, blank=True, on_delete=models.SET_NULL, related_name="invitation")
+    created_at = models.DateTimeField(auto_now_add=True)
+    responded_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+        constraints = [models.UniqueConstraint(fields=["posting", "invitee"], name="eng_one_invitation_per_posting")]

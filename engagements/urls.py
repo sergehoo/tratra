@@ -1,6 +1,6 @@
 from django.urls import path
 
-from engagements import api
+from engagements import api, api_contracts
 
 urlpatterns = [
     path("engagements/rules/", api.rules, name="engagements-rules"),
@@ -34,6 +34,18 @@ urlpatterns = [
     path("engagements/contracts/<int:pk>/close/", api.contract_close),
     path("engagements/contracts/<int:pk>/history/", api.contract_history),
     path("engagements/contracts/<int:pk>/document/", api.contract_document),
+    path("engagements/contracts/<int:pk>/sign/", api_contracts.contract_sign, name="engagements-contract-sign"),
+    path("engagements/contracts/<int:pk>/documents/", api_contracts.contract_documents, name="engagements-contract-documents"),
+    path("engagements/documents/<int:pk>/pdf/", api_contracts.document_pdf, name="engagements-document-pdf"),
+    path("engagements/templates/", api_contracts.templates_usable, name="engagements-templates"),
+    path("engagements/postings/<int:pk>/invitations/", api_contracts.posting_invitations, name="engagements-posting-invitations"),
+    path("engagements/invitations/mine/", api_contracts.invitations_mine, name="engagements-invitations-mine"),
+    path("engagements/invitations/<int:pk>/respond/", api_contracts.invitation_respond, name="engagements-invitation-respond"),
+    path("engagements/invitations/<int:pk>/cancel/", api_contracts.invitation_cancel, name="engagements-invitation-cancel"),
+    # Vérification PUBLIQUE d'un document de contrat (QR code, PDF déposé, clés publiques) : aucune donnée personnelle.
+    path("public/contracts/verify/<str:token>/", api_contracts.verify_token, name="contracts-verify"),
+    path("public/contracts/verify-file/", api_contracts.verify_file, name="contracts-verify-file"),
+    path("public/contracts/keys/", api_contracts.public_keys, name="contracts-keys"),
     path("engagements/contracts/<int:pk>/amendments/", api.contract_amendments),
     path("engagements/amendments/<int:pk>/respond/", api.amendment_respond),
     path("engagements/amendments/<int:pk>/withdraw/", api.amendment_withdraw),

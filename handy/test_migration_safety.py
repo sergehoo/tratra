@@ -16,6 +16,10 @@ FIRST_PARTY = ("handy", "backoffice", "engagements", "trust", "business", "live"
 REVIEWED = {
     ("handy", "0014_remove_handymanprofile_deposit_balance", "RemoveField", "deposit_balance"),    # champ de dépôt abandonné, valeur toujours nulle
     ("handy", "0015_availabilityslot_bookingroute_bookingtimeline_and_more", "RenameField", "related_id"),
+    # Faux positif revu (24 oct. 2026) : le SQL installe des déclencheurs qui INTERDISENT DELETE/UPDATE sur les documents, signatures et
+    # événements de contrat (« BEFORE UPDATE OR DELETE ») et les recrée de façon idempotente (DROP TRIGGER IF EXISTS). Aucune donnée
+    # supprimée ; retour arrière = retrait des seuls déclencheurs (répété : docs/deploiement-staging.md § 9).
+    ("engagements", "0004_immutable_documents_and_templates", "RunSQL-destructif", ""),
 }
 
 

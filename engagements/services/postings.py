@@ -10,7 +10,7 @@ from typing import Optional
 from django.db import transaction
 from django.utils import timezone
 
-from engagements.models import EngagementApplication, EngagementInterview, EngagementPosting
+from engagements.models import EngagementApplication, EngagementInterview, EngagementInvitation, EngagementPosting
 from engagements.rules import rules_for
 from engagements.services.common import EngagementError, conflict, organization_actor, public_name, require_eligible_worker
 from engagements.services.validation import Validator, check_common_terms, derived_hours, PERIODS, MISSION_TYPES, RELATIONSHIPS
@@ -34,7 +34,7 @@ def _clean(data: dict, *, instance: Optional[EngagementPosting] = None, today: O
     v = Validator()
     merged = {**({f: getattr(instance, f) for f in ("title", "description", "mission_type", "work_relationship", "city", "location_note", "start_date",
                                                       "end_date", "schedule", "hours_per_week", "amount", "period", "conditions", "employment_notice_ack",
-                                                      "application_deadline")} if instance else {}), **data}
+                                                      "application_deadline", "benefits", "duration_months")} if instance else {}), **data}
     category = None
     category_id = data.get("category") or (instance.category_id if instance else None)
     if category_id:
@@ -54,6 +54,8 @@ def _clean(data: dict, *, instance: Optional[EngagementPosting] = None, today: O
         "amount": v.amount(merged, "amount", label="Rémunération", required=True),
         "period": v.choice(merged, "period", label="Période de rémunération", allowed=PERIODS, default="monthly"),
         "conditions": v.text(merged, "conditions", label="Conditions", max_len=4000),
+        "benefits": v.text(merged, "benefits", label="Avantages", max_len=2000),
+        "duration_months": v.integer(merged, "duration_months", label="Durée (mois)", lo=1, hi=240),
         "employment_notice_ack": bool(merged.get("employment_notice_ack")),
         "application_deadline": v.date(merged, "application_deadline", label="Date limite de candidature"),
     }
@@ -270,3 +272,60 @@ def respond_interview(interview: EngagementInterview, user, op: str) -> Engageme
         notify(other, "engagement_interview", f"Entretien {label} pour « {app.posting.title} ».", title=f"Entretien {label}",
                data={"kind": "posting", "id": app.posting_id}, dedupe_key=f"eng-int:{interview.pk}:{op}")
     return interview
+
+
+# ── Invitations : le donneur d'ordre invite un professionnel vérifié à candidater ─────────────────────────────────────
+
+@transaction.atomic
+def invite(posting: EngagementPosting, user, invitee_id, message: str = "") -> EngagementInvitation:
+    from django.contrib.auth import get_user_model
+
+    posting = EngagementPosting.objects.select_for_update().get(pk=posting.pk)
+    if not posting_side(posting, user):
+        raise EngagementError("not_found", "Besoin introuvable.", 404)
+    if posting.status != "open":
+        raise conflict("posting_closed", "Publiez le besoin avant d'inviter des professionnels.")
+    invitee = get_user_model().objects.filter(pk=invitee_id, is_active=True).select_related("handyman_profile").first()
+    if invitee is None or invitee.pk == user.pk:
+        raise EngagementError("invalid", "Professionnel introuvable.", 400, fields={"invitee": "Choisissez un professionnel vérifié."})
+    require_eligible_worker(invitee, "Seuls les professionnels vérifiés peuvent être invités.")
+    v = Validator()
+    message = v.text({"message": message}, "message", label="Message", max_len=500)
+    v.raise_if()
+    if EngagementApplication.objects.filter(posting=posting, applicant=invitee).exists():
+        raise conflict("already_applied", "Ce professionnel a déjà candidaté à ce besoin.")
+    invitation, created = EngagementInvitation.objects.get_or_create(posting=posting, invitee=invitee,
+                                                                     defaults={"invited_by": user, "message": message})
+    if not created:
+        raise conflict("already_invited", "Ce professionnel est déjà invité.", invitation_id=invitation.pk)
+    notify(invitee, "engagement_application", f"{public_name(user)} vous invite à candidater : « {posting.title} ».", title="Invitation à candidater",
+           data={"kind": "posting", "id": posting.pk}, dedupe_key=f"eng-invite:{invitation.pk}")
+    return invitation
+
+
+@transaction.atomic
+def respond_invitation(invitation: EngagementInvitation, user, accept_it: bool, data: Optional[dict] = None) -> EngagementInvitation:
+    invitation = EngagementInvitation.objects.select_for_update().select_related("posting").get(pk=invitation.pk)
+    if invitation.invitee_id != user.id:
+        raise EngagementError("not_found", "Invitation introuvable.", 404)
+    if invitation.status != "sent":
+        raise conflict("not_open", "Cette invitation a déjà reçu une réponse.")
+    if accept_it:
+        invitation.application = apply(invitation.posting, user, data or {})      # mêmes contrôles qu'une candidature spontanée
+    invitation.status, invitation.responded_at = ("accepted" if accept_it else "declined"), timezone.now()
+    invitation.save(update_fields=["status", "responded_at", "application"])
+    if not accept_it:
+        notify(invitation.invited_by, "engagement_application", f"{public_name(user)} décline votre invitation pour « {invitation.posting.title} ».",
+               title="Invitation déclinée", data={"kind": "posting", "id": invitation.posting_id}, dedupe_key=f"eng-invite-no:{invitation.pk}")
+    return invitation
+
+
+@transaction.atomic
+def cancel_invitation(invitation: EngagementInvitation, user) -> EngagementInvitation:
+    invitation = EngagementInvitation.objects.select_for_update().select_related("posting").get(pk=invitation.pk)
+    if not posting_side(invitation.posting, user):
+        raise EngagementError("not_found", "Invitation introuvable.", 404)
+    if invitation.status == "sent":
+        invitation.status, invitation.responded_at = "cancelled", timezone.now()
+        invitation.save(update_fields=["status", "responded_at"])
+    return invitation

@@ -644,6 +644,8 @@ class ServiceSerializer(serializers.ModelSerializer):
     # Distance en km : renseignée uniquement quand le queryset est annoté
     # `distance` (/services/nearby/, alternatives) ; None sinon.
     distance_km = serializers.SerializerMethodField()
+    # Modes proposés (plusieurs possibles) : « one_off » (ponctuel), « recurring » (récurrent), « contract » (contractuel mensuel).
+    modes = serializers.ListField(child=serializers.ChoiceField(choices=[m for m, _ in Service.MODES]), required=False, allow_empty=False)
 
     class Meta:
         model = Service
@@ -653,9 +655,25 @@ class ServiceSerializer(serializers.ModelSerializer):
             "title", "description",
             "price_type", "price", "duration",'banner','image_url',
             "is_active", "created_at", "updated_at",
-            "images", "distance_km",
+            "images", "distance_km", "modes",
         ]
         read_only_fields = ["created_at", "updated_at"]
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        modes = attrs.pop("modes", None)
+        if modes is not None:
+            from engagements.rules import rules_for
+
+            category = attrs.get("category") or getattr(self.instance, "category", None)
+            rules = rules_for(category)
+            refused = [m for m, allowed in (("recurring", rules.allow_recurring), ("contract", rules.allow_long_term)) if m in modes and not allowed]
+            if refused:
+                raise serializers.ValidationError({"modes": "Ce métier ne permet pas ces modes : " + ", ".join(
+                    dict(Service.MODES)[m] for m in refused) + "."})
+            for code, _ in Service.MODES:
+                attrs[f"offers_{code}"] = code in modes
+        return attrs
 
     def validate_image_url(self, value):
         """`https` vers un hôte de stockage du projet (MEDIA_PUBLIC_HOSTS) uniquement :

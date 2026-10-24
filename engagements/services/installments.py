@@ -19,7 +19,7 @@ from engagements.services.evidence import clean_evidence
 from engagements.services.validation import Validator
 
 ZERO = Decimal("0.00")
-LIVE_FOR_PAYMENT = ("accepted", "active", "suspended", "notice", "terminated", "completed")
+LIVE_FOR_PAYMENT = ("accepted", "signed", "active", "suspended", "notice", "terminated", "completed")
 
 
 def q(value) -> Decimal:
@@ -61,7 +61,7 @@ def generate_installments(contract: EngagementContract, today: Optional[date] = 
     """Crée les échéances manquantes jusqu'à l'horizon (3 périodes) et jusqu'à la fin effective du contrat. IDEMPOTENT : une
     échéance existe au plus une fois par numéro d'ordre ; une échéance existante n'est jamais réécrite ici."""
     today = today or timezone.localdate()
-    if contract.status not in ("accepted", "active", "suspended", "notice"):
+    if contract.status not in ("accepted", "signed", "active", "suspended", "notice") or (contract.signature_required and contract.status == "accepted"):
         return 0
     anchor = max(today, contract.start_date)
     horizon = add_months(anchor, HORIZON_PERIODS)

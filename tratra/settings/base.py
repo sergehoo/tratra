@@ -757,6 +757,9 @@ BACKOFFICE_MFA_REQUIRED = env_bool('BACKOFFICE_MFA_REQUIRED', False)
 BACKOFFICE_MFA_MAX_AGE = int(config('BACKOFFICE_MFA_MAX_AGE', default='43200'))
 MFA_ISSUER = config('MFA_ISSUER', default='Tratra')
 MFA_ENCRYPTION_KEY = config('MFA_ENCRYPTION_KEY', default='')
+# Contrats : clé de chiffrement des clés PRIVÉES de scellement (Ed25519) stockées en base — à défaut SECRET_KEY. La changer rend les
+# clés existantes illisibles : procéder d'abord à une rotation (manage.py contract_keys rotate), voir docs/contrats-anti-falsification.md.
+CONTRACT_SIGNING_KEK = config('CONTRACT_SIGNING_KEK', default='')
 MFA_MAX_FAILURES = int(config('MFA_MAX_FAILURES', default='5'))
 MFA_LOCK_SECONDS = int(config('MFA_LOCK_SECONDS', default='900'))
 

@@ -344,7 +344,7 @@ def _badge_param(params):
 def apply_public_service_filters(qs, params, *, restrict=True):
     """Filtres de recherche publics communs à /services/ et /services/nearby/.
 
-    categories=1,2 · category__name=<nom> · commune=<commune ou quartier> · verified=1 · online=1 · urgent=1 · min_price · max_price
+    categories=1,2 · category__name=<nom> · commune=<commune ou quartier> · verified=1 · online=1 · urgent=1 · mode=one_off|recurring|contract · min_price · max_price
     """
     # Publication : seuls les services ACTIFS d'artisans éligibles (compte actif, profil approuvé,
     # KYC approuvé, profil complet) sont publics — règle unique : handy/eligibility.py.
@@ -386,6 +386,11 @@ def apply_public_service_filters(qs, params, *, restrict=True):
         # « Urgent » = intervention immédiate possible : artisan en ligne MAINTENANT et hors
         # congé/absence (même sens que « Intervention immédiate » sur la landing).
         qs = qs.filter(handyman__handyman_profile__online=True).filter(not_on_timeoff(timezone.now()))
+
+    mode = _text_param(params.get("mode"))
+    if mode in ("one_off", "recurring", "contract"):
+        # Mode proposé : ponctuel, récurrent ou contractuel (mensuel) — une offre peut en proposer plusieurs.
+        qs = qs.filter(**{f"offers_{mode}": True})
 
     min_price = _decimal_param(params.get("min_price"))
     if min_price is not None:

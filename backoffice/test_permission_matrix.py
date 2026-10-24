@@ -105,8 +105,11 @@ def test_an_unrelated_verified_account_reaches_none_of_the_private_data_of_engag
     leaked = []
     for path, method in endpoints(ENGAGEMENTS):
         # Ouverts PAR CONCEPTION à tout compte connecté : règles, recherche de professionnels vérifiés, offres ouvertes (lecture) et candidature
-        # (refusée 409 sans profil vérifié). Les listes personnelles renvoient une page vide pour un tiers (vérifié plus bas).
-        if (path.endswith("/rules/") or "/me/" in path or path.endswith("/workers/") or (method == "GET" and path.endswith(("/postings/", "/postings/{pk}/", "/contracts/", "/postings/mine/", "/applications/mine/")))
+        # (refusée 409 sans profil vérifié), modèles de contrat VALIDÉS (aucune donnée privée). Les listes personnelles (dont les invitations)
+        # renvoient une page vide pour un tiers (vérifié plus bas).
+        if (path.endswith("/rules/") or "/me/" in path or path.endswith("/workers/")
+                or (method == "GET" and path.endswith(("/postings/", "/postings/{pk}/", "/contracts/", "/postings/mine/", "/applications/mine/",
+                                                       "/invitations/mine/", "/engagements/templates/")))
                 or (method == "POST" and path.endswith("/postings/{pk}/apply/"))):
             continue
         if "{kind}" in path:
@@ -122,6 +125,7 @@ def test_an_unrelated_verified_account_reaches_none_of_the_private_data_of_engag
         data = stranger_client.get(ENGAGEMENTS + url).json()
         assert data["count"] == 0, url
     assert stranger_client.get(ENGAGEMENTS + "me/overview/").json()["todo"] == []
+    assert stranger_client.get(ENGAGEMENTS + "invitations/mine/").json()["results"] == []
     # Un tiers ne lit pas non plus les pièces d'un paiement ; le remplaçant désigné ne voit que SES remplacements.
     sub_client = APIClient()
     sub_client.force_authenticate(sub)

@@ -497,6 +497,12 @@ class Service(models.Model):
     image_url = models.URLField(blank=True, null=True)
     # Les frais de déplacement ne s'appliquent qu'aux prestations qui nécessitent que l'artisan se rende chez le client.
     requires_travel = models.BooleanField(default=True)
+    # Modes proposés pour cette offre (plusieurs possibles) : PONCTUEL (réservation), RÉCURRENT (interventions régulières sous
+    # contrat), CONTRACTUEL (engagement mensuel : nounou, chauffeur, gardien…). Bornés par les règles du métier (engagements).
+    MODES = [("one_off", "Ponctuel"), ("recurring", "Récurrent"), ("contract", "Contractuel (mensuel)")]
+    offers_one_off = models.BooleanField(default=True)
+    offers_recurring = models.BooleanField(default=False)
+    offers_contract = models.BooleanField(default=False, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -512,6 +518,10 @@ class Service(models.Model):
                 name="svc_price_logic"
             )
         ]
+
+    @property
+    def modes(self) -> list:
+        return [code for code, _ in self.MODES if getattr(self, f"offers_{code}")]
 
     def clean(self):
         if self.price_type == 'fixed' and self.price is None:

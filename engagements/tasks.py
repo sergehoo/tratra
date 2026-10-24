@@ -29,7 +29,7 @@ def _each(qs):
 def run(today: Optional[date] = None) -> dict:
     today = today or timezone.localdate()
     stats = {"postings_expired": postings.expire_due(today), "contracts": 0, "errors": 0, "installments_refreshed": 0, "reminders": 0}
-    live = EngagementContract.objects.filter(status__in=("accepted", "active", "suspended", "notice"))
+    live = EngagementContract.objects.filter(status__in=("accepted", "signed", "active", "suspended", "notice"))
     for pk in _each(live):
         try:
             contract = EngagementContract.objects.get(pk=pk)

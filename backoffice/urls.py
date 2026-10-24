@@ -2,7 +2,7 @@ from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
 from announcements.api import AnnouncementAdminViewSet
-from backoffice import api_core, api_engagements, api_flash, api_mfa, api_money, api_ops, api_people, api_system, api_transport, api_reputation, api_intelligence, api_biometrics, api_messaging, api_statuses, api_assistant
+from backoffice import api_contracts, api_core, api_engagements, api_flash, api_mfa, api_money, api_ops, api_people, api_system, api_transport, api_reputation, api_intelligence, api_biometrics, api_messaging, api_statuses, api_assistant
 
 router = DefaultRouter()
 router.register("announcements", AnnouncementAdminViewSet, basename="bo-announcements")
@@ -88,6 +88,12 @@ urlpatterns = [
     path("engagements/contracts/", api_engagements.ContractList.as_view(), name="bo-engagement-contracts"),
     path("engagements/contracts/<int:pk>/", api_engagements.ContractDetail.as_view(), name="bo-engagement-contract"),
     path("engagements/contracts/<int:pk>/decision/", api_engagements.ContractDecision.as_view(), name="bo-engagement-contract-decision"),
+    path("engagements/contracts/<int:pk>/documents/", api_contracts.ContractDocuments.as_view(), name="bo-contract-documents"),
+    path("engagements/documents/<int:pk>/revoke/", api_contracts.DocumentRevoke.as_view(), name="bo-contract-document-revoke"),
+    path("engagements/templates/", api_contracts.TemplateList.as_view(), name="bo-contract-templates"),
+    path("engagements/templates/<int:pk>/", api_contracts.TemplateDetail.as_view(), name="bo-contract-template"),
+    path("engagements/templates/<int:pk>/<str:action>/", api_contracts.TemplateAction.as_view(), name="bo-contract-template-action"),
+    path("engagements/signing-keys/", api_contracts.SigningKeys.as_view(), name="bo-contract-signing-keys"),
     path("engagements/postings/", api_engagements.PostingList.as_view(), name="bo-engagement-postings"),
     path("engagements/postings/<int:pk>/remove/", api_engagements.PostingModerate.as_view(), name="bo-engagement-posting-remove"),
     path("engagements/installments/", api_engagements.InstallmentList.as_view(), name="bo-engagement-installments"),

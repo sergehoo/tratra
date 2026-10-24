@@ -31,10 +31,10 @@ from handy.models import Service, ServiceCategory
 logger = logging.getLogger(__name__)
 User = get_user_model()
 
-TERM_FIELDS = ("title", "description", "conditions", "category_id", "service_id", "mission_type", "work_relationship", "start_date", "end_date", "auto_renew",
+TERM_FIELDS = ("title", "description", "conditions", "benefits", "category_id", "service_id", "mission_type", "work_relationship", "start_date", "end_date", "auto_renew",
                "renewal_term_months", "schedule", "hours_per_week", "location_city", "location_address", "amount", "period", "currency", "payment_day",
                "proration_mode", "overtime_hourly_rate", "notice_period_days", "bookings_mode", "legal_notice_ack")
-AMENDABLE = {"amount", "schedule", "hours_per_week", "end_date", "notice_period_days", "conditions", "description", "auto_renew", "renewal_term_months", "payment_day",
+AMENDABLE = {"amount", "schedule", "hours_per_week", "end_date", "notice_period_days", "conditions", "benefits", "description", "auto_renew", "renewal_term_months", "payment_day",
              "overtime_hourly_rate", "location_address", "location_city", "proration_mode"}
 LIVE = EngagementContract.LIVE
 
@@ -46,6 +46,8 @@ def snapshot(c: EngagementContract) -> dict:
     for f in TERM_FIELDS:
         v = getattr(c, f)
         out[f] = v.isoformat() if hasattr(v, "isoformat") else (str(v.quantize(Decimal("0.01"))) if isinstance(v, Decimal) else v)
+    if c.template_id:          # contrat établi sur un modèle : le texte des articles fait partie des conditions acceptées et signées
+        out.update(template=f"{c.template.code}@v{c.template.version}", reference=c.reference, articles=c.articles)
     return out
 
 
@@ -79,6 +81,7 @@ def _clean_terms(data: dict, *, instance: Optional[EngagementContract], worker, 
         "title": v.text(merged, "title", label="Titre", max_len=160, min_len=5, required=True),
         "description": v.text(merged, "description", label="Missions confiées", max_len=4000),
         "conditions": v.text(merged, "conditions", label="Conditions", max_len=4000),
+        "benefits": v.text(merged, "benefits", label="Avantages", max_len=2000),
         "mission_type": mission_type, "work_relationship": relationship, "start_date": start, "end_date": end, "schedule": schedule,
         "auto_renew": bool(merged.get("auto_renew")),
         "renewal_term_months": v.integer(merged, "renewal_term_months", label="Durée d'un renouvellement (mois)", lo=1, hi=120),
@@ -140,8 +143,8 @@ def create_draft(user, data: dict, *, today: Optional[date] = None) -> Engagemen
             raise conflict("contract_exists", "Un contrat existe déjà pour cette candidature.", contract_id=application.contract.pk)
         posting, worker = application.posting, application.applicant
         organization_id = posting.organization_id
-        prefill = {f: getattr(posting, f) for f in ("title", "description", "conditions", "mission_type", "work_relationship", "start_date", "end_date", "schedule", "hours_per_week",
-                                                      "amount", "period")}
+        prefill = {f: getattr(posting, f) for f in ("title", "description", "conditions", "benefits", "mission_type", "work_relationship", "start_date", "end_date",
+                                                      "schedule", "hours_per_week", "amount", "period")}
         prefill.update(category_id=posting.category_id, location_city=posting.city, legal_notice_ack=posting.employment_notice_ack)
         if application.proposed_amount:
             prefill["amount"] = application.proposed_amount
@@ -156,9 +159,26 @@ def create_draft(user, data: dict, *, today: Optional[date] = None) -> Engagemen
         raise EngagementError("invalid", "Le prestataire ne peut pas être son propre donneur d'ordre.", 400, fields={"worker": "Prestataire invalide."})
     require_eligible_worker(worker)
     cleaned = _clean_terms(data, instance=None, worker=worker, today=today, strict_start=True)
-    contract = EngagementContract.objects.create(principal=user, organization_id=organization_id, worker=worker, posting=posting, application=application, **cleaned)
-    record(contract, user, "created", source="posting" if application else "direct")
+    template = _template(data.get("template"), cleaned["work_relationship"], cleaned["category"])
+    contract = EngagementContract.objects.create(principal=user, organization_id=organization_id, worker=worker, posting=posting, application=application,
+                                                 template=template, signature_required=template is not None, **cleaned)
+    record(contract, user, "created", source="posting" if application else "direct", template=f"{template.code}@v{template.version}" if template else None)
     return contract
+
+
+def _template(requested, relationship: str, category):
+    """Modèle juridique du contrat : celui demandé (s'il est validé et adapté), sinon le meilleur modèle VALIDÉ ; aucun modèle validé =
+    ancien parcours (acceptation simple, sans signature ni document scellé)."""
+    from engagements.models import ContractTemplate
+    from engagements.services import templates
+
+    if requested in (None, "", "auto"):
+        return templates.template_for(relationship, category)
+    t = ContractTemplate.objects.filter(pk=requested).first() if str(requested).isdigit() else None
+    if t is None:
+        raise EngagementError("invalid", "Modèle de contrat introuvable.", 400, fields={"template": "Modèle introuvable."})
+    templates.check_usable(t, relationship, category)
+    return t
 
 
 @transaction.atomic
@@ -172,6 +192,9 @@ def update_draft(contract: EngagementContract, user, data: dict, *, expected_ver
     cleaned = _clean_terms({k: v for k, v in data.items() if k in TERM_FIELDS or k in ("category", "service")}, instance=contract, worker=contract.worker, today=today or timezone.localdate(), strict_start=True)
     for field, value in cleaned.items():
         setattr(contract, field, value)
+    if "template" in data or contract.template_id:
+        contract.template = _template(data.get("template", contract.template_id), contract.work_relationship, contract.category)
+        contract.signature_required = contract.template is not None
     contract.version += 1
     contract.save()
     return contract
@@ -195,11 +218,16 @@ def propose(contract: EngagementContract, user, *, expected_version=None, today:
     cleaned = _clean_terms({}, instance=contract, worker=contract.worker, today=today, strict_start=True)  # revalide avec les règles du moment
     if contract.acceptances.filter(terms_version=contract.terms_version).exists():
         contract.terms_version += 1                      # conditions renvoyées après demande de modification : nouvelle version à accepter
+    if contract.template_id:
+        from engagements.services import templates
+
+        templates.check_usable(contract.template, contract.work_relationship, contract.category)   # modèle retiré entre-temps : refus
+        render_articles(contract)
     contract.terms_hash = terms_hash(contract)
     require_eligible_worker(contract.worker)
     contract.status = "pending_acceptance"
     contract.version += 1
-    contract.save(update_fields=["status", "terms_hash", "terms_version", "version", "updated_at"])
+    contract.save(update_fields=["status", "terms_hash", "terms_version", "version", "articles", "updated_at"])
     _accept(contract, user, "principal")
     record(contract, user, "proposed", terms_version=contract.terms_version, terms_hash=contract.terms_hash)
     notify_role(contract, "worker", "contract_proposed", f"Un contrat vous est proposé : « {contract.title} ». Lisez les conditions puis acceptez ou demandez des modifications.",
@@ -271,8 +299,24 @@ def _confirm(contract: EngagementContract, today: date) -> None:
     contract.status = "accepted"
     contract.version += 1
     contract.save(update_fields=["status", "version", "updated_at"])
-    notify_role(contract, "worker", "contract_accepted", f"Le contrat « {contract.title} » est signé par les deux parties.", title="Contrat conclu", key="confirmed")
-    notify_role(contract, "principal", "contract_accepted", f"Le contrat « {contract.title} » est signé par les deux parties.", title="Contrat conclu", key="confirmed")
+    if contract.signature_required:
+        # Conditions acceptées par les deux parties : le document à signer est émis et scellé ; le contrat n'est conclu qu'une fois signé.
+        from engagements import documents
+
+        doc = documents.issue(contract, kind="contract", stage="for_signature")
+        record(contract, None, "ready_to_sign", reference=doc.reference, sha256=doc.sha256)
+        for role in ("worker", "principal"):
+            notify_role(contract, role, "contract_accepted", f"« {contract.title} » est prêt à être signé ({doc.reference}).", title="Contrat à signer",
+                        key=f"to-sign-v{contract.terms_version}")
+        return
+    # Parcours sans modèle validé : acceptation électronique simple des conditions (pas de signature ni de document scellé).
+    notify_role(contract, "worker", "contract_accepted", f"Le contrat « {contract.title} » est accepté par les deux parties.", title="Contrat conclu", key="confirmed")
+    notify_role(contract, "principal", "contract_accepted", f"Le contrat « {contract.title} » est accepté par les deux parties.", title="Contrat conclu", key="confirmed")
+    _fill_posting(contract)
+    sync(contract, today)
+
+
+def _fill_posting(contract: EngagementContract) -> None:
     if contract.posting_id:
         from engagements.services.postings import close_posting
 
@@ -281,7 +325,79 @@ def _confirm(contract: EngagementContract, today: date) -> None:
             posting.status, posting.closed_at = "filled", timezone.now()
             posting.save(update_fields=["status", "closed_at", "updated_at"])
         EngagementApplication.objects.filter(posting_id=contract.posting_id, status__in=EngagementApplication.OPEN).update(status="rejected", decision_note="Poste pourvu.", decided_at=timezone.now())
-    sync(contract, today)
+
+
+# ── Modèle juridique et signature ───────────────────────────────────────────────────────────────────────────────────
+
+ROLE_WORDS = {"employment": ("Employeur", "Salarié(e)"), "independent": ("Client", "Prestataire")}
+DAYS = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"]
+
+
+def _values(c: EngagementContract) -> dict:
+    """Valeurs des variables des articles (liste blanche de engagements/legal.py)."""
+    from engagements.documents import _person
+
+    principal_role, worker_role = ROLE_WORDS.get(c.work_relationship, ROLE_WORDS["independent"])
+    slots = [f"{DAYS[int(s.get('weekday', 0)) % 7]} {s.get('start', '')}–{s.get('end', '')}" for s in (c.schedule or []) if isinstance(s, dict)]
+    period = dict(EngagementContract.PERIODS).get(c.period, c.period).lower()
+    return {"reference": c.reference or "—", "principal_role": principal_role, "worker_role": worker_role, "principal_name": _person(c.principal),
+            "worker_name": _person(c.worker), "category": c.category.name, "title": c.title, "missions": c.description or "—",
+            "location_city": c.location_city or "—", "start_date": c.start_date.strftime("%d/%m/%Y"),
+            "end_date": f"jusqu'au {c.end_date:%d/%m/%Y}" if c.end_date else "indéterminée", "schedule": ", ".join(slots) or "à convenir dans le planning",
+            "hours_per_week": str(c.hours_per_week or "—"), "amount": f"{int(c.amount):,} {c.currency}".replace(",", " "), "period": period,
+            "payment_day": str(c.payment_day) if c.payment_day else "jour convenu", "benefits": c.benefits or "aucun",
+            "conditions": c.conditions or "aucune", "notice_period_days": str(c.notice_period_days)}
+
+
+def render_articles(c: EngagementContract) -> None:
+    """Fige les articles du modèle, adaptés au métier, avec les conditions du contrat (référence attribuée ici si besoin)."""
+    from engagements import legal
+    from engagements.documents import ensure_reference
+
+    ensure_reference(c)
+    slugs = [s for s in (c.category.slug, getattr(c.category.parent, "slug", None)) if s]
+    c.articles = legal.render_articles(c.template.articles, _values(c), slugs)
+
+
+@transaction.atomic
+def sign(contract: EngagementContract, user, *, consent: bool, ip: str = "", user_agent: str = "", today: Optional[date] = None) -> EngagementContract:
+    """Signature électronique simple d'une partie sur le document à signer ; les deux signatures émettent le document FINAL scellé
+    et le contrat passe « Signé » (puis « En cours » à sa date de début)."""
+    from engagements import documents
+
+    today = today or timezone.localdate()
+    contract = EngagementContract.objects.select_for_update(of=("self",)).select_related("worker", "principal", "template", "category").get(pk=contract.pk)
+    role = party_of(contract, user)
+    if role is None:
+        raise EngagementError("not_found", "Introuvable.", 404)
+    if not contract.signature_required or contract.status != "accepted":
+        raise conflict("not_to_sign", "Ce contrat n'attend pas de signature.")
+    if consent is not True:
+        raise EngagementError("consent_required", "Cochez la case « J'ai lu le contrat et je le signe » pour signer.", 400, fields={"consent": "Obligatoire."})
+    if role == "worker":
+        require_eligible_worker(user)
+    try:
+        doc, _, created = documents.sign_document(contract, user, role=role, ip=ip, user_agent=user_agent)
+    except documents.DocumentError as exc:
+        raise conflict(exc.code, exc.message)
+    if created:
+        record(contract, user, "signed", by=role, reference=doc.reference, sha256=doc.sha256)
+    roles = set(doc.signatures.values_list("role", flat=True))
+    if roles >= {"principal", "worker"}:
+        final = documents.issue(contract, kind="contract", stage="final", actor=user)
+        contract.status = "signed"
+        _touch(contract, "status")
+        record(contract, user, "concluded", reference=final.reference, sha256=final.sha256)
+        for r in ("worker", "principal"):
+            notify_role(contract, r, "contract_accepted", f"« {contract.title} » est signé par les deux parties ({final.reference}).", title="Contrat signé",
+                        key=f"signed-v{contract.terms_version}")
+        _fill_posting(contract)
+        sync(contract, today)
+    elif created:
+        notify_role(contract, counterpart(role), "contract_accepted", f"L'autre partie a signé « {contract.title} » : à votre tour.", title="Contrat à signer",
+                    key=f"signed-{role}-v{contract.terms_version}", exclude_user=user)
+        _touch(contract)
+    return contract
 
 
 # ── Cycle de vie : synchronisation avec le calendrier ───────────────────────────────────────────────────────────────
@@ -294,7 +410,9 @@ def sync(contract: EngagementContract, today: Optional[date] = None) -> list:
     contract.refresh_from_db()
     if contract.status in EngagementContract.ENDED or contract.status in ("draft", "pending_acceptance"):
         return changes
-    if contract.status == "accepted" and contract.start_date <= today:
+    if contract.signature_required and contract.status == "accepted":
+        return changes                     # conditions acceptées, signatures attendues : rien ne commence avant la signature
+    if contract.status in ("accepted", "signed") and contract.start_date <= today:
         contract.status, contract.activated_at = "active", contract.activated_at or moment(today)
         _touch(contract, "status", "activated_at")
         record(contract, None, "activated", date=today)
@@ -383,8 +501,8 @@ def propose_amendment(contract: EngagementContract, user, data: dict, *, expecte
     role = party_of(contract, user)
     if role is None:
         raise EngagementError("not_found", "Introuvable.", 404)
-    if contract.status not in ("active", "suspended", "notice", "accepted"):
-        raise conflict("contract_not_live", "Un avenant ne concerne qu'un contrat en vigueur.")
+    if contract.status not in ("active", "suspended", "notice", "accepted", "signed") or (contract.signature_required and contract.status == "accepted"):
+        raise conflict("contract_not_live", "Un avenant ne concerne qu'un contrat conclu (signé) ou en vigueur.")
     check_version(contract, expected_version)
     if _open_amendment(contract) is not None:
         raise conflict("amendment_pending", "Un avenant est déjà en cours : attendez la réponse de l'autre partie.")
@@ -495,11 +613,17 @@ def _apply_amendment(contract: EngagementContract, amendment: ContractAmendment,
         contract.ends_on = contract.notice_given_by = contract.notice_given_at = None
         contract.end_reason, contract.status = "", "active"
     contract.terms_version += 1
+    if contract.template_id:
+        render_articles(contract)          # texte consolidé à jour ; le document signé d'origine n'est jamais modifié
     contract.terms_hash = terms_hash(contract)
     amendment.status, amendment.applied_at = "applied", timezone.now()
     amendment.save(update_fields=["status", "applied_at"])
     contract.version += 1
     contract.save()
+    if contract.documents.filter(kind="contract", stage="final").exists():
+        from engagements import documents
+
+        documents.issue(contract, kind="amendment", stage="final", amendment=amendment, actor=amendment.responded_by)
     for role, user in (("principal", amendment.proposed_by if party_of(contract, amendment.proposed_by) == "principal" else amendment.responded_by),
                        ("worker", amendment.proposed_by if party_of(contract, amendment.proposed_by) == "worker" else amendment.responded_by)):
         if user is not None:

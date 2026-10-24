@@ -23,7 +23,7 @@ from handy.models import Booking, User
 
 logger = logging.getLogger(__name__)
 
-LIVE = ("accepted", "active", "suspended", "notice")
+LIVE = ("accepted", "signed", "active", "suspended", "notice")
 REQUESTABLE = ("leave", "absence", "overtime", "rest", "shift")
 COVERING = ("leave", "absence", "rest")
 

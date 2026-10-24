@@ -177,6 +177,13 @@ et, le 10 oct. 2026, retour des DEUX derniers lots (`handy` 0039 + `engagements`
 puis ré-application **OK**, `makemigrations --check` propre. Un retour de ces lots supprime les tables `engagements_*` et `backoffice_staffmfa` :
 préférer la restauration du dump (§ 8).
 
+Contrats scellés (24 oct. 2026) : `handy` 0062, `engagements` 0003 (colonnes nullables ou avec défaut, nouvelles tables) et 0004 (fonctions et
+déclencheurs PostgreSQL d'immuabilité + deux modèles « À valider juridiquement »). 0004 figure dans `REVIEWED` : son SQL contient `DELETE`/`DROP`
+parce qu'il INTERDIT la suppression et recrée ses déclencheurs, sans supprimer aucune donnée. Répété sur base jetable : aller **OK**, retour
+0004→0003 **OK** (déclencheurs retirés, données intactes), retour `engagements` 0002 + `handy` 0061 **OK**, ré-application **OK**,
+`makemigrations --check` propre. Un retour sous 0003 supprime les tables des modèles, documents et signatures : préférer la restauration du dump.
+Définir `CONTRACT_SIGNING_KEK` avant le premier contrat scellé (docs/contrats-anti-falsification.md).
+
 Répétition sur une copie de la production (opérateur autorisé ; **anonymiser** : téléphones, e-mails, documents KYC) :
 ```bash
 pg_dump -Fc -h <hôte-prod> -U <utilisateur> <base> > prod.dump          # lecture seule côté production

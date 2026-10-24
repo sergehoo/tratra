@@ -65,6 +65,7 @@ def posting(p: EngagementPosting, user, *, detail: bool = False) -> dict:
            "status": p.status, "application_deadline": p.application_deadline, "published_at": p.published_at, "created_at": p.created_at, "version": p.version,
            "publisher": person(p.publisher), "organization": ({"id": p.organization_id, "name": p.organization.name} if p.organization_id else None), "mine": mine,
            "applications_count": p.applications.exclude(status__in=("withdrawn",)).count() if mine else None}
+    out.update({"benefits": p.benefits, "duration_months": p.duration_months})
     if detail:
         out.update({"description": p.description, "conditions": p.conditions, "employment_notice_ack": p.employment_notice_ack,
                     "location_note": p.location_note if mine else ""})
@@ -95,7 +96,11 @@ def available_actions(c: EngagementContract, role: str, user) -> list:
             out += ["accept", "send_back", "decline"]
         elif role == "principal":
             out += ["cancel"]
-    if c.status in ("accepted", "active", "suspended", "notice"):
+    if c.signature_required and c.status == "accepted":
+        signed = set(c.signatures.filter(document__version=c.terms_version, document__stage="for_signature").values_list("role", flat=True))
+        out += ["decline"] + (["sign"] if role and role not in signed else [])
+        return sorted(set(out))
+    if c.status in ("accepted", "signed", "active", "suspended", "notice"):
         out += ["propose_amendment", "dispute"]
         if c.status in ("active", "suspended"):
             out += ["give_notice"]
@@ -125,10 +130,18 @@ def contract(c: EngagementContract, user, *, detail: bool = False) -> dict:
            "worker": person(c.worker), "principal": person(c.principal), "counterpart": person(other), "organization": ({"id": c.organization_id, "name": c.organization.name} if c.organization_id else None),
            "version": c.version, "terms_version": c.terms_version, "terms_hash": c.terms_hash, "accepted_by": sorted(accepted_roles), "actions": available_actions(c, role, user),
            "pending_amendment": amendment(open_amendment, user, c) if open_amendment else None, "created_at": c.created_at, "updated_at": c.updated_at,
-           "activated_at": c.activated_at, "ended_at": c.ended_at, "closed_at": c.closed_at}
+           "activated_at": c.activated_at, "ended_at": c.ended_at, "closed_at": c.closed_at,
+           "reference": c.reference, "signature_required": c.signature_required,
+           "template": ({"id": c.template_id, "title": c.template.title, "version": c.template.version, "status": c.template.status,
+                         "status_label": c.template.get_status_display()} if c.template_id else None)}
+    if c.signature_required:
+        signed = {s.role: s.signed_at for s in c.signatures.filter(document__version=c.terms_version, document__stage="for_signature")}
+        out["signatures"] = {"principal": signed.get("principal"), "worker": signed.get("worker")}
     if detail:
         suspensions = [{"starts_on": s.starts_on, "ends_on": s.ends_on, "reason": s.reason, "source": s.source} for s in c.suspensions.all()]
-        out.update({"description": c.description, "conditions": c.conditions, "schedule": c.schedule, "location_city": c.location_city,
+        out.update({"description": c.description, "conditions": c.conditions, "benefits": c.benefits, "articles": c.articles,
+                    "documents": [document(d) for d in c.documents.order_by("issued_at")],
+                    "schedule": c.schedule, "location_city": c.location_city,
                     "location_address": c.location_address if c.status not in ("draft", "pending_acceptance") or role == "principal" else "",
                     "auto_renew": c.auto_renew, "renewal_term_months": c.renewal_term_months, "renewal_count": c.renewal_count, "non_renewal_at": c.non_renewal_at,
                     "non_renewal_deadline": (c.end_date - timedelta(days=c.notice_period_days)) if (c.auto_renew and c.end_date) else None,
@@ -139,6 +152,30 @@ def contract(c: EngagementContract, user, *, detail: bool = False) -> dict:
                     "legal_notice": ("Emploi salarié : Tratra met en relation et garde la trace des accords, mais ne calcule ni cotisations, ni impôts, ni congés payés."
                                      if c.work_relationship == "employment" else
                                      "Prestation indépendante : aucune relation de travail salarié n'est créée par Tratra.")})
+    return out
+
+
+def document(d) -> dict:
+    """Document scellé (sans le jeton de vérification, qui n'existe qu'imprimé dans le PDF)."""
+    return {"id": d.id, "reference": d.reference, "kind": d.kind, "stage": d.stage, "version": d.version, "sha256": d.sha256, "size": d.size,
+            "issued_at": d.issued_at, "signing_key": d.signing_key_id, "revoked_at": d.revoked_at, "revoked_reason": d.revoked_reason,
+            "download": reverse("engagements-document-pdf", args=[d.id])}
+
+
+def invitation(i, user) -> dict:
+    return {"id": i.id, "status": i.status, "message": i.message, "created_at": i.created_at, "responded_at": i.responded_at,
+            "posting": {"id": i.posting_id, "title": i.posting.title, "category": i.posting.category.name, "city": i.posting.city,
+                        "amount": money(i.posting.amount), "period": i.posting.period, "work_relationship": i.posting.work_relationship},
+            "invitee": person(i.invitee), "invited_by": person(i.invited_by), "application_id": i.application_id,
+            "can_respond": i.status == "sent" and i.invitee_id == user.id}
+
+
+def template(t, *, detail: bool = False) -> dict:
+    out = {"id": t.id, "code": t.code, "version": t.version, "title": t.title, "relationship": t.relationship, "status": t.status,
+           "status_label": t.get_status_display(), "categories": [{"id": c.id, "name": c.name} for c in t.categories.all()],
+           "reviewed_at": t.reviewed_at, "reviewed_by": person(t.reviewed_by), "updated_at": t.updated_at, "contracts": t.contracts.count()}
+    if detail:
+        out.update({"articles": t.articles, "legal_references": t.legal_references, "review_note": t.review_note, "previous_id": t.previous_id})
     return out
 
 
