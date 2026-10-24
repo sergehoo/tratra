@@ -135,6 +135,12 @@ DATABASES = {
         'PASSWORD': os.getenv('DB_PASSWORD'),
         'HOST': os.getenv('DB_HOST'),
         'PORT': os.getenv('DB_PORT'),
+        # Connexions gardées ouvertes (secondes) : le compose le pose sur le service HTTP gunicorn SEULEMENT (sous ASGI/Daphne, une
+        # connexion par fil d'exécution ne serait jamais réutilisée : 0). Vérifiées avant réutilisation.
+        'CONN_MAX_AGE': int(os.getenv('DB_CONN_MAX_AGE', '0')),
+        'CONN_HEALTH_CHECKS': True,
+        # PgBouncer en mode « transaction » : curseurs côté serveur interdits (voir docs/scalabilite-phase2.md).
+        'DISABLE_SERVER_SIDE_CURSORS': env_bool('DB_DISABLE_SERVER_SIDE_CURSORS', False),
     }
 }
 

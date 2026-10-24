@@ -19,9 +19,12 @@ def make_eligible(profile, *, category=None):
         # Catégorie neutre : n'interfère avec aucun filtre de catégorie des tests.
         profile.skills.add(category or ServiceCategory.objects.get_or_create(
             slug="eligibility-skill", defaults={"name": "Spécialité de test", "is_active": False})[0])
-    HandymanDocument.objects.get_or_create(
+    doc, _ = HandymanDocument.objects.get_or_create(
         handyman=profile, document_type="id_card", defaults={"file": "kyc/test.pdf", "status": "approved"})
-    HandymanDocument.objects.filter(handyman=profile, document_type="id_card").update(status="approved")
+    if doc.status != "approved":
+        doc.status = "approved"
+        doc.save(update_fields=["status"])   # enregistrement normal : la copie calculée de l'éligibilité suit (eligibility_sync)
+    profile.refresh_from_db(fields=["published"])
     return profile
 
 

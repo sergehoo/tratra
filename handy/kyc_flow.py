@@ -322,6 +322,9 @@ def _reopen(dossier: KycDossier) -> None:
     stale = list(dossier.documents.filter(status="pending").values_list("pk", flat=True))
     if stale:
         HandymanDocument.objects.filter(pk__in=stale).update(status="rejected", rejection_reason=SUPERSEDED_REASON, reviewed_at=timezone.now())
+        from handy.eligibility import refresh_published
+
+        refresh_published([dossier.profile_id])   # écriture en masse : aucun signal, la copie de l'éligibilité est recalculée ici
         audit("kyc.identity_superseded", actor=dossier.profile.user, target=dossier.profile.user, documents=stale)
     dossier.front, dossier.back, dossier.front_check, dossier.back_check, dossier.sent_at = "", "", {}, {}, None
     dossier.save(update_fields=["front", "back", "front_check", "back_check", "sent_at", "updated_at"])

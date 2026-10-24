@@ -18,12 +18,14 @@ from django.conf import settings
 from django.contrib.gis.db.models.functions import Distance
 from django.contrib.gis.geos import Point
 from django.core.cache import cache
+from django.core.paginator import Paginator as DjangoPaginator
 from django.core.exceptions import ObjectDoesNotExist, ValidationError as DjangoValidationError
 from django.db import transaction, models
 from django.db.models import Avg, Count, Exists, F, OuterRef, Q
 from django.db.models.functions import Trim
 from django.http import FileResponse, Http404
 from django.utils import timezone
+from django.utils.functional import cached_property
 
 import django_filters
 from django_filters.rest_framework import DjangoFilterBackend
@@ -184,10 +186,11 @@ def search_services_nearby_qs(origin_point: Point, category=None, max_km=15):
           .filter(distance__lte=max_km * 1000))
     if category:
         qs = qs.filter(category_id__in=catalog.with_descendants([category.pk]))    # un métier couvre ses prestations
-    # 'id' en dernier : tri total, donc pagination LIMIT/OFFSET stable (sinon les
-    # ex aequo — services d'un même artisan — sortent en doublon ou jamais).
-    return qs.order_by('distance', '-handyman__handyman_profile__rating',
-                       F('price').asc(nulls_last=True), 'id')
+    # Tri du plus proche au plus éloigné par l'index « plus proches voisins » (même distance sphérique que `distance`) : seules les
+    # lignes de la page sont lues et triées, pas toutes celles du rayon. 'id' en dernier : tri total, donc pagination LIMIT/OFFSET
+    # stable (sinon les ex aequo — services d'un même artisan — sortent en doublon ou jamais).
+    return qs.order_by(proximity.nearest('handyman__handyman_profile__location', origin_point),
+                       '-handyman__handyman_profile__rating', F('price').asc(nulls_last=True), 'id')
 
 
 def suggest_alternatives_qs(booking: Booking, price_tolerance=Decimal('0.15'), km=10):
@@ -222,6 +225,31 @@ class DefaultPageNumberPagination(PageNumberPagination):
     page_size = 20
     page_size_query_param = "page_size"
     max_page_size = 100
+
+
+# Total de « près de moi » compté au plus jusqu'à ce plafond : dans une zone dense, compter TOUTES les offres du rayon coûtait autant
+# que la recherche elle-même. Au-delà, `count` vaut le plafond, `count_capped` est vrai (« plus de 1 000 offres ») et les pages au-delà
+# du plafond ne sont pas servies (50 pages de 20 : personne ne va plus loin).
+NEARBY_COUNT_CAP = 1000
+
+
+class CappedCountPaginator(DjangoPaginator):
+    capped = False
+
+    @cached_property
+    def count(self):
+        n = self.object_list.order_by()[: NEARBY_COUNT_CAP + 1].count()   # sans tri : PostgreSQL s'arrête au plafond
+        self.capped = n > NEARBY_COUNT_CAP
+        return min(n, NEARBY_COUNT_CAP)
+
+
+class NearbyPagination(DefaultPageNumberPagination):
+    django_paginator_class = CappedCountPaginator
+
+    def get_paginated_response(self, data):
+        response = super().get_paginated_response(data)
+        response.data["count_capped"] = self.page.paginator.capped
+        return response
 
 
 # ---- Paramètres publics (recherche anonyme, landing) ----
@@ -893,7 +921,7 @@ class ServiceViewSet(viewsets.ModelViewSet):
     )
     @action(detail=False, methods=["get"],
             permission_classes=[permissions.AllowAny],
-            authentication_classes=[], filter_backends=[])
+            authentication_classes=[], filter_backends=[], pagination_class=NearbyPagination)
     def nearby(self, request):
         """
         GET /services/nearby/?lat=..&lng=..&radius_km=15&category_id=...

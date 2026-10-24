@@ -153,6 +153,10 @@ def delete_account(user, *, actor=None) -> Dict:
         username=f"supprime-{user.pk}-{uuid.uuid4().hex[:8]}", first_name="", last_name="", email=None, phone=None, address=None, city=None,
         postal_code=None, country=None, latitude=None, longitude=None, last_location=None, last_location_ts=None, is_active=False, is_verified=False,
         deleted_at=timezone.now(), password="!" + uuid.uuid4().hex)       # mot de passe inutilisable : aucune connexion possible
+    from handy.eligibility import refresh_published
+    from handy.models import HandymanProfile
+
+    refresh_published(HandymanProfile.objects.filter(user_id=user.pk))   # compte désactivé : plus jamais publié
     audit("account.deleted", actor=actor or user, target_type="user", target_id=user.pk)       # aucune donnée personnelle dans la trace
     logger.info("Compte #%s supprimé (anonymisé)", user.pk)
     return {"deleted": True, "already": False}

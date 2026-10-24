@@ -164,6 +164,9 @@ class HandymanProfileAdmin(admin.ModelAdmin):
     @admin.action(description="Approuver les profils sélectionnés")
     def approve_profiles(self, request, queryset):
         updated = queryset.update(is_approved=True)
+        from handy.eligibility import refresh_published
+
+        refresh_published(queryset)   # écriture en masse : aucun signal, la copie de l'éligibilité est recalculée ici
         self.message_user(request, f"{updated} profils ont été approuvés avec succès.")
 
 

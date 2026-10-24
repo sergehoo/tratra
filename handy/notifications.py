@@ -203,15 +203,15 @@ def notify_bulk(user_ids: List[int], ntype: str, message: str, *, title: str = "
     return {n.user_id: n for n in rows}
 
 
-# Files Celery des push : une diffusion de masse (annonce à des centaines de milliers de comptes) passe par la file « bulk », pour ne
-# jamais retarder une alerte de mission (90 s pour répondre), un message ou une réservation. Le worker DOIT écouter ces files
-# (docker-compose*.yml, vérifié par `manage.py celery_check` et ses tests).
-PUSH_QUEUE, BULK_PUSH_QUEUE = "notifications", "bulk"
-BULK_CATEGORIES = {"announcement"}
+# Files Celery des push (routage explicite, un worker par file — docker-compose*.yml, vérifié par `manage.py celery_check`) :
+# nouvelles missions Tratra Flash sur « flash » (90 s pour répondre : jamais derrière autre chose), diffusions de masse sur « bulk »
+# (une annonce à des centaines de milliers de comptes ne retarde ni un message ni une réservation), le reste sur « default ».
+PUSH_QUEUE, FLASH_PUSH_QUEUE, BULK_PUSH_QUEUE = "default", "flash", "bulk"
+QUEUE_BY_CATEGORY = {"flash": FLASH_PUSH_QUEUE, "announcement": BULK_PUSH_QUEUE}
 
 
 def push_queue(category: str) -> str:
-    return BULK_PUSH_QUEUE if category in BULK_CATEGORIES else PUSH_QUEUE
+    return QUEUE_BY_CATEGORY.get(category, PUSH_QUEUE)
 
 
 def _schedule_push(notification: Notification, collapse_key: Optional[str] = None) -> None:
@@ -263,3 +263,50 @@ def mark_read(user, *, ids: Optional[Iterable[int]] = None, category: Optional[s
     if category:
         qs = qs.filter(category=category)
     return qs.update(is_read=True, read_at=timezone.now())
+
+
+# ------------------------------------------------------------------------------------------------------- rétention
+
+def _purgeable(now, days: int):
+    """Notifications au-delà de la rétention : lues depuis plus de `days` jours ; non lues seulement si une rétention propre est réglée
+    (NOTIFICATION_UNREAD_RETENTION_DAYS, désactivée par défaut). Jamais : catégories protégées (paiements, compte, engagements — preuves
+    d'information utiles en cas de litige), push pas encore envoyé (« queued » ou en cours)."""
+    from datetime import timedelta
+
+    from django.conf import settings
+    from django.db.models import Q
+
+    q = Q(is_read=True, created_at__lt=now - timedelta(days=days))
+    unread_days = int(getattr(settings, "NOTIFICATION_UNREAD_RETENTION_DAYS", 0) or 0)
+    if unread_days > 0:
+        q |= Q(is_read=False, created_at__lt=now - timedelta(days=unread_days))
+    protected = set(getattr(settings, "NOTIFICATION_RETENTION_PROTECTED_CATEGORIES", ()))
+    return Notification.objects.filter(q).exclude(category__in=protected).exclude(push_status__in=("queued", "sending"))
+
+
+def purge(now=None, *, days: Optional[int] = None, dry_run: bool = False) -> Dict:
+    """Purge par lots (le plus ancien d'abord, par l'index de la clé primaire) : chaque lot est une transaction courte, et un passage
+    s'arrête après NOTIFICATION_PURGE_MAX_BATCHES lots (le suivant reprend). Désactivée tant que NOTIFICATION_RETENTION_DAYS vaut 0."""
+    from django.conf import settings
+    from django.db.models import Count
+
+    days = int(settings.NOTIFICATION_RETENTION_DAYS if days is None else days)
+    if days <= 0:
+        return {"enabled": False, "deleted": 0}
+    qs = _purgeable(now or timezone.now(), days)
+    if dry_run:
+        by_category = dict(qs.order_by().values_list("category").annotate(n=Count("id")))
+        return {"enabled": True, "dry_run": True, "would_delete": sum(by_category.values()), "by_category": by_category}
+    size, limit = int(settings.NOTIFICATION_PURGE_BATCH), int(settings.NOTIFICATION_PURGE_MAX_BATCHES)
+    deleted = batches = 0
+    while batches < limit:
+        ids = list(qs.order_by("pk").values_list("pk", flat=True)[:size])
+        if not ids:
+            break
+        with transaction.atomic():
+            _, per_model = Notification.objects.filter(pk__in=ids).delete()
+        deleted += per_model.get(Notification._meta.label, 0)
+        batches += 1
+    if deleted:
+        logger.info("Rétention des notifications : %s supprimée(s) en %s lot(s) (au-delà de %s jours).", deleted, batches, days)
+    return {"enabled": True, "deleted": deleted, "batches": batches, "complete": batches < limit}

@@ -22,8 +22,8 @@ DB_USER="$(envval DB_USER)"; DB_NAME="$(envval DB_NAME)"
 running tratradb || dc up -d tratradb
 until [ "$(health tratradb)" = "healthy" ]; do sleep 2; done
 
-say "Arrêt des applications (web, worker, beat, frontend)"
-dc stop tratrafrontend-stg beat worker tratraweb-stg >/dev/null 2>&1 || true
+say "Arrêt des applications (web, WebSocket, workers, beat, frontend)"
+dc stop tratrafrontend-stg beat worker worker-flash worker-otp worker-bulk tratraws-stg tratraweb-stg >/dev/null 2>&1 || true
 
 say "Recréation de la base ${DB_NAME}"
 dc exec -T tratradb psql -U "$DB_USER" -d postgres -v ON_ERROR_STOP=1 \

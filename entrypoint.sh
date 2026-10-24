@@ -134,6 +134,8 @@ run_migrations() {
     log "Migrations…"
     python manage.py migrate --noinput
     ok "Migrations OK."
+    # Copie calculée de l'éligibilité des professionnels : recalculée à chaque démarrage (filet de sécurité après une mise à jour).
+    python manage.py eligibility_sync || warn "eligibility_sync en échec (la réconciliation périodique reprendra)."
   else
     warn "Skip migrate (RUN_MIGRATIONS != 1)"
   fi

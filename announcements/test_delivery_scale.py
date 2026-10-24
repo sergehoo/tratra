@@ -80,4 +80,4 @@ def test_mission_alerts_and_messages_never_wait_behind_a_mass_announcement(djang
         notifications.notify(user, "new_mission", "Nouvelle mission", dedupe_key="m1")
         notifications.notify(user, "message_received", "Bonjour", dedupe_key="m2")
         notifications.notify(user, "announcement", "Promo", dedupe_key="m3")
-    assert [c.kwargs["queue"] for c in enqueue.call_args_list] == ["notifications", "notifications", "bulk"]
+    assert [c.kwargs["queue"] for c in enqueue.call_args_list] == ["flash", "default", "bulk"]

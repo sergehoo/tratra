@@ -11,7 +11,7 @@ from django.urls import reverse
 from django.utils import timezone
 from rest_framework.test import APIClient
 
-from handy.eligibility import is_publishable, publishable
+from handy.eligibility import is_publishable, publishable, publishable_rule
 from handy.models import (
     Booking, HandymanDocument, HandymanProfile, Service, ServiceCategory, TimeOff, User,
 )
@@ -93,7 +93,7 @@ def test_rule_sql_matches_python(case):
     profile = HandymanProfile.objects.get(pk=profile.pk)
     expected = case == "complet"
     assert is_publishable(profile) is expected
-    assert publishable().filter(pk=profile.pk).exists() is expected
+    assert publishable_rule().filter(pk=profile.pk).exists() is expected
 
 
 EXPERIENCE_CASES = {
@@ -120,7 +120,8 @@ def test_experience_declared_and_trade_minimum_sql_matches_python(case):
     Service.objects.create(handyman=user, category=trade, title="Inactive", description="d", price_type="fixed", price=1, is_active=False)
     profile = HandymanProfile.objects.get(pk=profile.pk)
     assert is_publishable(profile) is expected
-    assert publishable().filter(pk=profile.pk).exists() is expected
+    assert publishable_rule().filter(pk=profile.pk).exists() is expected
+    assert publishable().filter(pk=profile.pk).exists() is expected   # offres et seuils changés par des enregistrements normaux
 
 
 def test_inactive_account_is_not_publishable():

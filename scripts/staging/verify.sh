@@ -16,7 +16,7 @@ CURLX=(${STAGING_CURL_OPTS:-})
 code() { curl -s "${CURLX[@]}" -o /dev/null -w '%{http_code}' --max-time 20 "$@" || echo 000; }
 
 say "1. Conteneurs"
-for svc in tratradb redis minio-stg tratraweb-stg worker beat tratrafrontend-stg; do
+for svc in tratradb redis minio-stg tratraweb-stg tratraws-stg worker worker-flash worker-otp worker-bulk beat tratrafrontend-stg; do
   st="$(health "$svc")"
   case "$st" in healthy|running) pass "$svc : $st" ;; *) fail "$svc : $st" ;; esac
 done

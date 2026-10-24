@@ -158,6 +158,8 @@ export interface Booking {
 
 export interface Paginated<T> {
   count: number;
+  /** « Près de moi » : total compté jusqu'à un plafond ; vrai s'il y a davantage de résultats que `count`. */
+  count_capped?: boolean;
   next: string | null;
   previous: string | null;
   results: T[];

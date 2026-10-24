@@ -549,11 +549,13 @@ FCM_PROJECT_ID = config('FCM_PROJECT_ID', default='')
 # === CHANNELS ===
 ASGI_APPLICATION = 'tratra.asgi.application'
 
+# Redis des WebSocket : CHANNELS_REDIS_URL (instance dédiée, voir docs/scalabilite-phase2.md) ; à défaut, le Redis commun (REDIS_HOST).
+CHANNELS_REDIS_URL = config('CHANNELS_REDIS_URL', default='')
 CHANNEL_LAYERS = {
     'default': {
         'BACKEND': 'channels_redis.core.RedisChannelLayer',
         'CONFIG': {
-            "hosts": [(config('REDIS_HOST', default='redis'), 6379)],
+            "hosts": [CHANNELS_REDIS_URL or (config('REDIS_HOST', default='redis'), 6379)],
         },
     },
 }
@@ -561,7 +563,8 @@ CHANNEL_LAYERS = {
 TAILWIND_APP_NAME = 'theme'
 INTERNAL_IPS = ['127.0.0.1']
 # === CELERY ===
-CELERY_BROKER_URL = config('REDIS_URL', default='redis://redis:6379/0')
+# Broker : CELERY_BROKER_URL (Redis dédié et persistant, voir docs/scalabilite-phase2.md) ; à défaut, le Redis commun (REDIS_URL).
+CELERY_BROKER_URL = config('CELERY_BROKER_URL', default='') or config('REDIS_URL', default='redis://redis:6379/0')
 
 # === CACHE PARTAGÉ (limites de débit, quotas SMS, verrous d'essais) ===
 # Sans cache partagé, chaque processus compte de son côté : les limites ne valent rien avec plusieurs workers. Redis dès qu'il est
@@ -585,6 +588,15 @@ CACHES = {
                  'OPTIONS': {'socket_connect_timeout': 2, 'socket_timeout': 2}}
                 if CACHE_URL else {'BACKEND': 'django.core.cache.backends.locmem.LocMemCache', 'LOCATION': 'tratra'}),
 }
+
+# === RÉTENTION DES NOTIFICATIONS (historique « cloche ») — handy.notifications.purge, tâche quotidienne (file bulk) ===
+# 0 = aucune purge (défaut : rien n'est supprimé tant que l'exploitant n'a pas choisi une durée). Les notifications NON lues ne sont
+# purgées que si NOTIFICATION_UNREAD_RETENTION_DAYS est réglée ; les catégories protégées ne le sont jamais.
+NOTIFICATION_RETENTION_DAYS = config('NOTIFICATION_RETENTION_DAYS', default=0, cast=int)
+NOTIFICATION_UNREAD_RETENTION_DAYS = config('NOTIFICATION_UNREAD_RETENTION_DAYS', default=0, cast=int)
+NOTIFICATION_RETENTION_PROTECTED_CATEGORIES = env_list('NOTIFICATION_RETENTION_PROTECTED_CATEGORIES', 'payment,account,engagement')
+NOTIFICATION_PURGE_BATCH = config('NOTIFICATION_PURGE_BATCH', default=5000, cast=int)
+NOTIFICATION_PURGE_MAX_BATCHES = config('NOTIFICATION_PURGE_MAX_BATCHES', default=200, cast=int)
 
 # === ANTI-FRAUDE : SMS (« SMS pumping ») et inscriptions — app `antifraud` ===
 # Interrupteurs (false = aucun SMS de ce type, aucune dépense ; réponse claire 503 aux utilisateurs).
@@ -625,10 +637,37 @@ UNVERIFIED_RESTRICTIONS = env_bool('UNVERIFIED_RESTRICTIONS', True)
 # Comptes créés AVANT cette date (AAAA-MM-JJ) : exemptés (clients historiques du pilote). Vide = tous les comptes.
 UNVERIFIED_RESTRICTIONS_SINCE = config('UNVERIFIED_RESTRICTIONS_SINCE', default='')
 CELERY_RESULT_BACKEND = CELERY_BROKER_URL
+# Aucun appelant ne lit le résultat d'une tâche : ne pas les stocker (sinon une clé Redis par tâche, gardée un jour).
+CELERY_TASK_IGNORE_RESULT = env_bool('CELERY_TASK_IGNORE_RESULT', True)
 # File par défaut des tâches : DOIT figurer dans --queues du worker (docker-compose*.yml). Sans cette ligne, Celery
 # publie dans la file « celery » que le worker (--queues=default,notifications) n'écoute pas : aucune tâche ne
 # s'exécute (notifications, push FCM, réévaluation des badges, purge GPS).
 CELERY_TASK_DEFAULT_QUEUE = 'default'
+# Files et workers dédiés (docker-compose*.yml) — chaque file a son worker, une file engorgée n'en retarde aucune autre :
+#   flash   Tratra Flash : échéances des vagues et push des nouvelles missions (90 s pour répondre) — priorité absolue ;
+#   otp     envois SMS asynchrones (alertes de service) ; les codes de vérification restent envoyés DANS la requête (réponse immédiate,
+#           quotas anti-fraude consommés au même moment) ;
+#   default push courants (réservations, messages…), paiements, tâches légères ;
+#   bulk    diffusions de masse et maintenance lourde (annonces, réévaluations, purges, analyses).
+# Les push sont routés par catégorie au moment de l'envoi (handy.notifications.push_queue). « notifications » : ancienne file,
+# encore vidée par le worker par défaut pour les messages publiés avant la mise à jour.
+CELERY_TASK_ROUTES = {
+    'flash.tasks.*': {'queue': 'flash'},
+    'handy.tasks.notify_arrival_imminent': {'queue': 'otp'},
+    'announcements.tasks.deliver_announcement': {'queue': 'bulk'},
+    'backoffice.tasks.deliver_batch': {'queue': 'bulk'},
+    'backoffice.tasks.purge_assistant_history': {'queue': 'bulk'},
+    'trust.tasks.reevaluate_all_profiles': {'queue': 'bulk'},
+    'intelligence.tasks.*': {'queue': 'bulk'},
+    'business.tasks.run_preventive_plans': {'queue': 'bulk'},
+    'statuses.tasks.purge': {'queue': 'bulk'},
+    'live.tasks.purge_positions': {'queue': 'bulk'},
+    'continuity.tasks.purge_idempotency': {'queue': 'bulk'},
+    'biometrics.tasks.tick': {'queue': 'bulk'},
+    'handy.tasks.reconcile_published': {'queue': 'bulk'},
+    'handy.tasks.purge_notifications': {'queue': 'bulk'},
+    'handy.tasks.send_profile_completion_reminders': {'queue': 'bulk'},
+}
 CELERY_BEAT_SCHEDULE = {
     # Tratra Trust : réévaluation périodique des badges et des scores (la durée mini entre deux évaluations
     # d'un profil est configurable dans l'administration : TrustConfig.reevaluation_hours).
@@ -695,6 +734,16 @@ CELERY_BEAT_SCHEDULE = {
     'live-purge-positions': {
         'task': 'live.tasks.purge_positions',
         'schedule': 3600.0,
+    },
+    # Éligibilité : réconciliation de la copie calculée (filet de sécurité ; un écart corrigé est signalé dans le journal).
+    'eligibility-reconcile': {
+        'task': 'handy.tasks.reconcile_published',
+        'schedule': 900.0,
+    },
+    # Notifications : rétention (sans effet tant que NOTIFICATION_RETENTION_DAYS vaut 0).
+    'notifications-purge': {
+        'task': 'handy.tasks.purge_notifications',
+        'schedule': 86400.0,
     },
 }
 

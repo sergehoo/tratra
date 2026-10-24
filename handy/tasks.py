@@ -49,7 +49,8 @@ def send_push(user_id, title, body, data=None):
 @shared_task(bind=True, max_retries=3)
 def send_notification_push(self, notification_id, collapse_key=None):
     """Diffuse UNE notification enregistrée sur tous les appareils du compte (FCM), de façon idempotente :
-    seule une notification « queued » est envoyée, donc un rejeu de la tâche ne duplique jamais le push.
+    seule une notification « queued » est envoyée, et elle est d'abord RÉSERVÉE atomiquement (« queued » → « sending ») : deux
+    exécutions de la même tâche (rejeu, double livraison par le broker, deux workers) ne peuvent pas envoyer deux fois.
     Réessaie (délai exponentiel) uniquement les échecs transitoires ; l'état d'envoi est consigné sur la notification."""
     from django.utils import timezone
 
@@ -58,6 +59,8 @@ def send_notification_push(self, notification_id, collapse_key=None):
     n = Notification.objects.filter(pk=notification_id).first()
     if n is None or n.push_status != 'queued':
         return {"skipped": "already_processed"}
+    if not Notification.objects.filter(pk=n.pk, push_status='queued').update(push_status='sending'):
+        return {"skipped": "already_processed"}      # une autre exécution l'a réservée entre-temps
     if not notifications.push_enabled(n.user_id, n.category):
         Notification.objects.filter(pk=n.pk).update(push_status='disabled')
         return {"skipped": "disabled"}
@@ -108,6 +111,7 @@ def send_notification_push(self, notification_id, collapse_key=None):
         status = "sent"
     elif result["failed"]:
         if self.request.retries < self.max_retries:
+            Notification.objects.filter(pk=n.pk, push_status='sending').update(push_status='queued')   # rendue au prochain essai
             raise self.retry(countdown=30 * (2 ** self.request.retries))
         status = "failed"
     elif result["skipped"] in ("no_device",) or result["removed"]:
@@ -192,3 +196,25 @@ def reconcile_provider_payments():
         done["settled"] += int(result.get("state") in ("completed", "failed", "refunded"))
     return done
 
+
+
+# ---------- Éligibilité et notifications : maintenance ----------
+
+@shared_task(ignore_result=True)
+def reconcile_published():
+    """Filet de sécurité de la copie calculée de l'éligibilité : recalcule les profils dont la publication diffère de la règle.
+    Un écart est anormal (un chemin de modification n'a pas recalculé) : il est corrigé ET signalé dans le journal."""
+    from handy import eligibility
+
+    changed = eligibility.refresh_published()
+    if changed:
+        logger.warning("Éligibilité : %s profil(s) corrigé(s) par la réconciliation (chemin de modification sans recalcul).", changed)
+    return {"changed": changed}
+
+
+@shared_task(ignore_result=True)
+def purge_notifications():
+    """Rétention des notifications (NOTIFICATION_RETENTION_DAYS, désactivée par défaut) : purge par lots, catégories protégées."""
+    from handy import notifications
+
+    return notifications.purge()

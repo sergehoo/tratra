@@ -45,11 +45,12 @@ def test_both_compose_files_listen_to_the_default_queue_and_the_notification_que
 
 
 def test_both_compose_files_listen_to_every_push_queue():
-    """Push courants (« notifications ») et diffusions de masse (« bulk ») : une file que personne n'écoute = des push jamais envoyés."""
+    """Push courants (« default »), missions Flash (« flash ») et diffusions de masse (« bulk ») : une file que personne n'écoute = des
+    push jamais envoyés."""
     from handy import notifications
 
     queues = {notifications.push_queue(category) for category in notifications.CHANNEL_BY_CATEGORY}
-    assert queues == {"notifications", "bulk"}
+    assert queues == {"default", "flash", "bulk"}
     for name in ("docker-compose.yml", "docker-compose.staging.yml"):
         assert queues <= compose_queues(name), name
 
@@ -64,7 +65,7 @@ def test_the_check_detects_a_misspelt_task_and_an_unlistened_queue(settings):
 
 
 def test_the_command_passes_on_the_real_schedule_and_lists_names(capsys):
-    call_command("celery_check", "--queues", "default,notifications,celery")
+    call_command("celery_check", "--queues", "default,notifications,celery,flash,otp,bulk")
     assert "0 anomalie(s)" in capsys.readouterr().out
     call_command("celery_check", "--names")
     assert REQUIRED <= set(capsys.readouterr().out.split())

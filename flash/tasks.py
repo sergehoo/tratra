@@ -17,3 +17,13 @@ def tick():
     result = expire_due()
     result["awaiting_closed"] = close_stale_awaiting()   # demandes « choix du client attendu » restées sans réponse
     return result
+
+
+@shared_task(ignore_result=True)
+def close_offers(offer_ids):
+    """Notifications marquées lues et alerte retirée des téléphones pour des propositions closes. Rejouable : la notification reste
+    lue et le signal de fermeture n'a aucun effet sur un téléphone qui l'a déjà reçu."""
+    from flash import notify
+
+    for offer_id in offer_ids:
+        notify.offer_closed(offer_id)

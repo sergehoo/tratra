@@ -188,10 +188,44 @@ def eligibility_summary(profile) -> dict:
     }
 
 
-def publishable(profiles=None):
-    """Profils publiables / éligibles aux missions."""
+def publishable_rule(profiles=None):
+    """La RÈGLE complète en SQL (source de vérité, coûteuse : KYC, spécialités, seuils d'expérience des métiers). Sert à calculer
+    `HandymanProfile.published` (`refresh_published`) et aux contrôles ; les lectures courantes passent par `publishable()`."""
     qs = HandymanProfile.objects.all() if profiles is None else profiles
     return qs.filter(*_profile_conditions())
+
+
+def publishable(profiles=None):
+    """Profils publiables / éligibles aux missions — lecture RAPIDE et indexée : copie calculée de la règle (`published`), plus les
+    deux conditions qui doivent retirer un professionnel À L'INSTANT, même si un recalcul avait été manqué (compte désactivé,
+    validation de l'équipe retirée). Une réservation ou une acceptation revérifie toujours la règle complète (`is_publishable`)."""
+    qs = HandymanProfile.objects.all() if profiles is None else profiles
+    return qs.filter(published=True, is_approved=True, user__is_active=True)
+
+
+def refresh_published(profiles=None) -> int:
+    """Recalcule `published` à partir de la règle pour les profils donnés (queryset, liste d'identifiants, ou tous) ; deux requêtes
+    UPDATE, sans signal. Renvoie le nombre de profils dont la publication a changé."""
+    if profiles is None:
+        scope = HandymanProfile.objects.all()
+    elif hasattr(profiles, "values"):
+        scope = HandymanProfile.objects.filter(pk__in=profiles.values("pk"))
+    else:
+        ids = [pk for pk in profiles if pk]
+        if not ids:
+            return 0
+        scope = HandymanProfile.objects.filter(pk__in=ids)
+    eligible = publishable_rule(scope).values("pk")
+    on = scope.filter(published=False, pk__in=eligible).update(published=True)
+    off = scope.filter(published=True).exclude(pk__in=eligible).update(published=False)
+    return on + off
+
+
+def published_drift() -> int:
+    """Profils dont la copie `published` diffère de la règle (0 attendu ; sinon, un chemin de modification n'a pas recalculé)."""
+    eligible = publishable_rule().values("pk")
+    return (HandymanProfile.objects.filter(published=False, pk__in=eligible).count()
+            + HandymanProfile.objects.filter(published=True).exclude(pk__in=eligible).count())
 
 
 def publishable_user_ids():

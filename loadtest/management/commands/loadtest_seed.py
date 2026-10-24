@@ -68,6 +68,9 @@ class Command(BaseCommand):
         self._devices(users)
         self._conversations(bookings, o["conversations"] or max(1, n_users // 10), o["messages_per_conversation"])
         self._flash_history(clients, profiles, cats, o["flash_history_per_pro"])
+        from handy.eligibility import refresh_published
+
+        self._log(f"Éligibilité calculée : {refresh_published()} profils publiés (insertions en lot : aucun signal).")
         with connection.cursor() as c:
             c.execute("ANALYZE")
         self._log(f"Terminé : {n_users} comptes dont {len(profiles)} professionnels.")

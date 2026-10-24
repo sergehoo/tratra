@@ -57,11 +57,11 @@ health() {
   docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$id"
 }
 
-# wait_stack : attend que l'API, le worker Celery et le frontend soient « healthy » et que beat tourne (les vérifications qui suivent
+# wait_stack : attend que l'API, les WebSocket, le worker Celery et le frontend soient « healthy » et que beat tourne (les vérifications qui suivent
 # interrogent le worker et le frontend : sans cette attente elles échouent à tort pendant leur période de démarrage).
 wait_stack() {
   local svc i
-  for svc in tratraweb-stg worker tratrafrontend-stg; do
+  for svc in tratraweb-stg tratraws-stg worker tratrafrontend-stg; do
     for i in $(seq 1 120); do
       case "$(health "$svc")" in healthy) break ;; unhealthy) die "$svc en échec de santé : docker compose -p ${PROJECT} -f ${COMPOSE_FILE} logs $svc" ;; esac
       sleep 5

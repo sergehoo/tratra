@@ -10,6 +10,8 @@ export interface ServiceSearch {
   items: Service[];
   /** Nombre total réel renvoyé par l'API (null tant qu'inconnu). */
   count: number | null;
+  /** Vrai si l'API a plafonné le total (« près de moi » : il y a plus de `count` résultats). */
+  countCapped: boolean;
   status: SearchStatus;
   more: MoreStatus;
   hasMore: boolean;
@@ -28,6 +30,10 @@ function totalOf(data: Paginated<Service> | Service[], fallback: number): number
   return !Array.isArray(data) && typeof data.count === "number" ? data.count : fallback;
 }
 
+function cappedOf(data: Paginated<Service> | Service[]): boolean {
+  return !Array.isArray(data) && data.count_capped === true;
+}
+
 function nextOf(data: Paginated<Service> | Service[]): boolean {
   return !Array.isArray(data) && Boolean(data.next);
 }
@@ -42,6 +48,7 @@ function nextOf(data: Paginated<Service> | Service[]): boolean {
 export function useServiceSearch(query: string | null): ServiceSearch {
   const [items, setItems] = useState<Service[]>([]);
   const [count, setCount] = useState<number | null>(null);
+  const [countCapped, setCountCapped] = useState(false);
   const [status, setStatus] = useState<SearchStatus>(query ? "loading" : "waiting");
   const [more, setMore] = useState<MoreStatus>("idle");
   const [hasMore, setHasMore] = useState(false);
@@ -67,6 +74,7 @@ export function useServiceSearch(query: string | null): ServiceSearch {
       if (!data) {
         setItems([]);
         setCount(null);
+        setCountCapped(false);
         setHasMore(false);
         setStatus("error");
         return;
@@ -75,6 +83,7 @@ export function useServiceSearch(query: string | null): ServiceSearch {
       pageRef.current = 1;
       setItems(results);
       setCount(totalOf(data, results.length));
+      setCountCapped(cappedOf(data));
       setHasMore(nextOf(data));
       setStatus("ready");
     });
@@ -114,5 +123,5 @@ export function useServiceSearch(query: string | null): ServiceSearch {
 
   const retry = useCallback(() => setNonce((n) => n + 1), []);
 
-  return { items, count, status, more, hasMore, loadMore, retry };
+  return { items, count, countCapped, status, more, hasMore, loadMore, retry };
 }

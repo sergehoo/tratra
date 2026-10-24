@@ -212,7 +212,7 @@ export default function SearchClient() {
         ? "Recherche en cours…"
         : total === 0
           ? "Aucune offre"
-          : `${formatCount(total)} offre${total > 1 ? "s" : ""}`;
+          : `${search.countCapped ? "Plus de " : ""}${formatCount(total)} offre${total > 1 ? "s" : ""}`;
   const where: string[] = [];
   if (state.q && listMode) where.push(`pour « ${state.q} »`);
   if (located) where.push(`dans un rayon de ${state.radius} km autour de vous`);
@@ -230,7 +230,7 @@ export default function SearchClient() {
 
   const applyLabel =
     search.status === "ready" && total > 0
-      ? `Afficher ${formatCount(total)} offre${total > 1 ? "s" : ""}`
+      ? `Afficher ${search.countCapped ? "plus de " : ""}${formatCount(total)} offre${total > 1 ? "s" : ""}`
       : "Voir les résultats";
 
   // ---- États vides honnêtes (actions réelles) ----

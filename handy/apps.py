@@ -7,3 +7,6 @@ class HandyConfig(AppConfig):
 
     def ready(self):
         import handy.signal
+        from handy import eligibility_sync
+
+        eligibility_sync.connect()   # copie calculée de l'éligibilité, recalculée dans la transaction de chaque changement

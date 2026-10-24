@@ -517,10 +517,14 @@ def _withdraw_others(req: MissionRequest, keep: Optional[int]) -> List[int]:
 
 
 def _closed(offer_ids: List[int]) -> None:
-    from flash import notify
+    """Arrêt de l'alerte des propositions closes, HORS de la requête (file « flash ») : l'acceptation répond sans attendre Firebase.
+    Sans broker, sur place (filet de sécurité)."""
+    from flash.tasks import close_offers
 
-    for oid in offer_ids:
-        notify.offer_closed(oid)
+    try:
+        close_offers.apply_async(args=(list(offer_ids),), retry=False)
+    except Exception:   # broker indisponible
+        close_offers(list(offer_ids))
 
 
 def _offer_for(offer_id: int, user, *, lock: bool = True) -> MissionOffer:

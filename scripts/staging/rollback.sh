@@ -20,7 +20,7 @@ if [ -s "${DIR}/db.dump" ]; then
   "$STAGING_SCRIPTS/restore.sh" "$@"
 else
   warn "aucun dump dans ${DIR} (sauvegarde du premier déploiement) : base non restaurée"
-  dc stop tratrafrontend-stg beat worker tratraweb-stg >/dev/null 2>&1 || true
+  dc stop tratrafrontend-stg beat worker worker-flash worker-otp worker-bulk tratraws-stg tratraweb-stg >/dev/null 2>&1 || true
 fi
 
 # 2) Images précédentes

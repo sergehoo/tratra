@@ -52,20 +52,53 @@ def _worker_queues(compose):
     return queues
 
 
+def _routed_queues():
+    """Toutes les files où une tâche peut être publiée : file par défaut, routes explicites, files des push."""
+    from handy import notifications
+
+    queues = {settings.CELERY_TASK_DEFAULT_QUEUE} | {r["queue"] for r in settings.CELERY_TASK_ROUTES.values()}
+    return queues | {notifications.push_queue(c) for c in notifications.CHANNEL_BY_CATEGORY}
+
+
 @pytest.mark.parametrize("compose_file", ["docker-compose.yml", "docker-compose.staging.yml"])
-def test_celery_default_queue_is_consumed_by_every_worker(compose_file):
+def test_every_routed_queue_is_consumed_by_a_dedicated_worker(compose_file):
+    """Un worker par file (flash, otp, default, bulk) : une file que personne n'écoute = des tâches qui ne s'exécutent jamais."""
     workers = _worker_queues(_compose(compose_file))
     assert workers, "aucun worker Celery dans " + compose_file
-    for name, queues in workers.items():
-        assert settings.CELERY_TASK_DEFAULT_QUEUE in queues, (
-            f"{compose_file}:{name} n'écoute pas la file par défaut « {settings.CELERY_TASK_DEFAULT_QUEUE} » : "
-            "les tâches (notifications, push, badges, purge GPS) ne s'exécuteraient jamais")
+    consumed = set().union(*workers.values())
+    missing = _routed_queues() - consumed
+    assert not missing, f"{compose_file} : files sans worker {sorted(missing)}"
+    assert _routed_queues() == {"default", "flash", "otp", "bulk"}
+    by_queue = {q: [name for name, qs in workers.items() if q in qs] for q in ("flash", "otp", "bulk")}
+    for queue, names in by_queue.items():
+        assert len(names) == 1 and workers[names[0]] == {queue}, f"{compose_file} : la file {queue} doit avoir son worker dédié ({names})"
+    default = [name for name, qs in workers.items() if settings.CELERY_TASK_DEFAULT_QUEUE in qs]
+    assert default and "notifications" in workers[default[0]], "l'ancienne file « notifications » doit rester vidée"
 
 
-def test_staging_worker_also_drains_the_legacy_celery_queue():
+@pytest.mark.parametrize("compose_file", ["docker-compose.yml", "docker-compose.staging.yml"])
+def test_http_is_served_by_gunicorn_and_websockets_by_daphne_on_the_same_host(compose_file):
+    compose = _compose(compose_file)
+    services = compose["services"]
+    web = next(s for n, s in services.items() if n.startswith("tratraweb"))
+    ws_name, ws = next((n, s) for n, s in services.items() if n.startswith("tratraws"))
+    assert "gunicorn" in web["command"] and "tratra.wsgi:application" in web["command"]
+    assert "daphne" in ws["command"] and "tratra.asgi:application" in ws["command"]
+    # Une seule instance lance les migrations ; le service WebSocket ne garde aucune connexion SQL (ASGI).
+    assert ws["environment"]["RUN_MIGRATIONS"] == "0" and ws["environment"]["DB_CONN_MAX_AGE"] == "0"
+    assert ws["depends_on"][next(n for n in services if n.startswith("tratraweb"))]["condition"] == "service_healthy"
+    labels = _labels(ws)
+    rule = next(l for l in labels if ".rule=" in l)
+    web_rule = next(l for l in _labels(web) if ".rule=" in l)
+    assert "PathPrefix(`/ws/`)" in rule and rule.split("=", 1)[1].startswith(web_rule.split("=", 1)[1])
+    assert any(l.endswith(".priority=100") for l in labels)
+    assert not any("compress" in l for l in labels if ".middlewares=" in l), "pas de compression sur les WebSocket"
+
+
+def test_staging_default_worker_also_drains_the_legacy_celery_queue():
     # Producteurs d'une ancienne version (file « celery ») pendant une mise à jour progressive.
-    for queues in _worker_queues(_compose("docker-compose.staging.yml")).values():
-        assert "celery" in queues
+    workers = _worker_queues(_compose("docker-compose.staging.yml"))
+    assert any({"default", "celery"} <= queues for queues in workers.values())
 
 
 def test_staging_cannot_collide_with_production_on_the_shared_traefik():

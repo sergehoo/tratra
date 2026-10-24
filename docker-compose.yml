@@ -14,6 +14,7 @@ volumes:
   static_volume:
   media_volume:
   minio_data: { }
+  redis_broker_data: { }      # profil « redis-split » seulement
  
 services:
   # --- Base de données Postgres + PostGIS ---
@@ -102,14 +103,19 @@ services:
     networks: [web]
     restart: unless-stopped
 
-  # --- tratraweb Django/ASGI (Daphne) ---
+  # --- tratraweb : API HTTP Django (WSGI, gunicorn) — Daphne ne sert plus que les WebSocket (service tratraws) ---
   tratraweb:
     build:
       context: .
       dockerfile: Dockerfile
+    # Image unique du backend : construite ici, réutilisée telle quelle par tratraws, les workers et beat (même code partout).
+    image: tratra-backend:${IMAGE_TAG:-prod}
     env_file: .env
-    # Entrypoint qui fait: check DB/Redis, migrate, collectstatic… puis Daphne
-    command: ["/app/docker/entrypoint.sh", "daphne", "-b", "0.0.0.0", "-p", "8000", "tratra.asgi:application"]
+    # Entrypoint : contrôle DB/Redis, migrations, éligibilité recalculée, collectstatic… puis gunicorn (docker/gunicorn.conf.py :
+    # WEB_CONCURRENCY processus × GUNICORN_THREADS fils). Seul ce service lance les migrations.
+    command: ["/app/docker/entrypoint.sh", "gunicorn", "tratra.wsgi:application", "-c", "/app/docker/gunicorn.conf.py"]
+    environment:
+      DB_CONN_MAX_AGE: ${WEB_DB_CONN_MAX_AGE:-60}   # connexions PostgreSQL gardées ouvertes (WSGI uniquement)
     depends_on:
       tratradb:
         condition: service_healthy
@@ -172,6 +178,48 @@ services:
       - proxy   # exposé à Traefik
     restart: unless-stopped
 
+  # --- tratraws : WebSocket uniquement (Daphne, ASGI) — messagerie, statuts et suivi en direct (/ws/…) ---
+  # Même image et même authentification (billets signés de 60 s délivrés par l'API HTTP). Traefik lui envoie /ws/ seulement
+  # (routeur prioritaire) ; aucune migration ni collectstatic ici (faits par tratraweb, dont il attend la bonne santé).
+  tratraws:
+    image: tratra-backend:${IMAGE_TAG:-prod}
+    pull_policy: never          # image construite par tratraweb (même code)
+    env_file: .env
+    command: ["/app/docker/entrypoint.sh", "daphne", "-b", "0.0.0.0", "-p", "8000", "tratra.asgi:application"]
+    environment:
+      RUN_MIGRATIONS: "0"
+      COLLECTSTATIC: skip
+      DB_CONN_MAX_AGE: "0"      # ASGI : jamais de connexion gardée ouverte
+    depends_on:
+      tratraweb:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - 'wget -qO- --header="Host: $${tratraweb_HOST}" --header="X-Forwarded-Proto: https" http://127.0.0.1:8000/readyz > /dev/null || exit 1'
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=proxy
+      # Même hôte que l'API, chemins /ws/ seulement ; priorité au-dessus du routeur de l'API (qui prend tout le reste).
+      - traefik.http.routers.tratraws.rule=Host(`${tratraweb_HOST}`) && PathPrefix(`/ws/`)
+      - traefik.http.routers.tratraws.priority=100
+      - traefik.http.routers.tratraws.entrypoints=websecure
+      - traefik.http.routers.tratraws.tls.certresolver=lets
+      # Pas de compression (WebSocket) ; mêmes en-têtes de sécurité et même limite d'ouvertures que l'API.
+      - traefik.http.routers.tratraws.middlewares=tratraweb-sec-headers@docker,tratraweb-rl@docker
+      - traefik.http.services.tratraws-svc.loadbalancer.server.port=8000
+      - traefik.http.routers.tratraws.service=tratraws-svc
+    volumes:
+      - ./secrets:/run/tratra-secrets:ro
+    networks:
+      - web
+      - proxy
+    restart: unless-stopped
+
   # --- Frontend Next.js ---
   tratrafrontend:
     build:
@@ -208,17 +256,21 @@ services:
       - proxy
     restart: unless-stopped
 
-  # --- Celery Worker ---
+  # --- Celery : un worker par file (routage explicite : CELERY_TASK_ROUTES et handy.notifications.push_queue) ---
+  # Une file engorgée n'en retarde aucune autre. flash : nouvelles missions et échéances (90 s pour répondre) ; otp : SMS
+  # asynchrones ; default : push courants, paiements, tâches légères (+ ancienne file « notifications ») ; bulk : annonces de masse,
+  # réévaluations, purges. Concurrence réglable par file (CELERY_*_CONCURRENCY). Tous envoient des push : compte Firebase monté.
   worker:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: tratra-backend:${IMAGE_TAG:-prod}
+    pull_policy: never          # image construite par tratraweb (même code)
     env_file: .env
-    command: celery -A tratra worker -l info --prefetch-multiplier=1 --max-tasks-per-child=200 --queues=default,notifications,bulk
+    command: celery -A tratra worker -n default@%h -l info --prefetch-multiplier=1 --max-tasks-per-child=200 --concurrency=${CELERY_DEFAULT_CONCURRENCY:-2} --queues=default,notifications
     # Le worker ENVOIE les push (tâche send_notification_push) : il doit lire le même compte de service Firebase.
     volumes:
       - ./secrets:/run/tratra-secrets:ro
     depends_on:
+      tratraweb:
+        condition: service_healthy   # migrations terminées
       tratradb:
         condition: service_healthy
       redis:
@@ -233,11 +285,49 @@ services:
     networks: [web]
     restart: unless-stopped
 
+  worker-flash:
+    image: tratra-backend:${IMAGE_TAG:-prod}
+    pull_policy: never          # image construite par tratraweb
+    env_file: .env
+    command: celery -A tratra worker -n flash@%h -l info --prefetch-multiplier=1 --max-tasks-per-child=500 --concurrency=${CELERY_FLASH_CONCURRENCY:-2} --queues=flash
+    volumes:
+      - ./secrets:/run/tratra-secrets:ro
+    depends_on:
+      worker:
+        condition: service_started
+    networks: [web]
+    restart: unless-stopped
+
+  worker-otp:
+    image: tratra-backend:${IMAGE_TAG:-prod}
+    pull_policy: never
+    env_file: .env
+    command: celery -A tratra worker -n otp@%h -l info --prefetch-multiplier=1 --max-tasks-per-child=500 --concurrency=${CELERY_OTP_CONCURRENCY:-1} --queues=otp
+    depends_on:
+      worker:
+        condition: service_started
+    networks: [web]
+    restart: unless-stopped
+
+  worker-bulk:
+    image: tratra-backend:${IMAGE_TAG:-prod}
+    pull_policy: never
+    env_file: .env
+    command: celery -A tratra worker -n bulk@%h -l info --prefetch-multiplier=1 --max-tasks-per-child=100 --concurrency=${CELERY_BULK_CONCURRENCY:-2} --queues=bulk
+    volumes:
+      - ./secrets:/run/tratra-secrets:ro
+    depends_on:
+      worker:
+        condition: service_started
+    extra_hosts:
+      - "${MINIO_API_HOST}:host-gateway"
+    networks: [web]
+    restart: unless-stopped
+
   # --- Celery Beat (planificateur) ---
   beat:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: tratra-backend:${IMAGE_TAG:-prod}
+    pull_policy: never          # image construite par tratraweb
     env_file: .env
     command: celery -A tratra beat -l info --scheduler django_celery_beat.schedulers:DatabaseScheduler
     depends_on:
@@ -247,6 +337,73 @@ services:
         condition: service_healthy
       minio-init:
         condition: service_completed_successfully
+    networks: [web]
+    restart: unless-stopped
+
+  # --- PRÉPARATION DE LA CROISSANCE — services DÉSACTIVÉS par défaut (profils), aucun effet sur la production actuelle -------
+  # Activation et retour arrière : docs/scalabilite-phase2.md. Aucun port publié (réseau interne uniquement).
+  #
+  # PgBouncer : mutualise les connexions PostgreSQL (mode transaction). Activer : `--profile pgbouncer`, puis pour l'API et les workers
+  # DB_HOST=pgbouncer, DB_PORT=6432, DB_DISABLE_SERVER_SIDE_CURSORS=true.
+  pgbouncer:
+    profiles: ["pgbouncer"]
+    build:
+      context: ./docker/pgbouncer
+    image: tratra-pgbouncer:local
+    env_file: .env
+    environment:
+      PGB_DB_HOST: tratradb
+      PGB_DB_PORT: "5432"
+    depends_on:
+      tratradb:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 6432 -d $${DB_NAME} || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [web]
+    restart: unless-stopped
+
+  # Redis séparés par usage (profil « redis-split ») : broker Celery PERSISTANT (AOF : une file ne se perd plus au redémarrage),
+  # cache et quotas anti-fraude (noeviction : un quota n'est jamais effacé pour faire de la place — mieux vaut un refus qu'une
+  # limite remise à zéro), WebSocket (Channels). Activer : CELERY_BROKER_URL=redis://redis-broker:6379/0,
+  # CACHE_URL=redis://redis-cache:6379/0, CHANNELS_REDIS_URL=redis://redis-channels:6379/0.
+  redis-broker:
+    profiles: ["redis-split"]
+    image: redis:7
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec", "--save", ""]
+    volumes:
+      - redis_broker_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "PING"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    networks: [web]
+    restart: unless-stopped
+
+  redis-cache:
+    profiles: ["redis-split"]
+    image: redis:7
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "${REDIS_CACHE_MAXMEMORY:-512mb}", "--maxmemory-policy", "noeviction"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "PING"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    networks: [web]
+    restart: unless-stopped
+
+  redis-channels:
+    profiles: ["redis-split"]
+    image: redis:7
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "PING"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
     networks: [web]
     restart: unless-stopped
 

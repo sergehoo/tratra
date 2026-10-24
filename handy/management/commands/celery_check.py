@@ -3,7 +3,7 @@
     python manage.py celery_check                  # contrôle statique (aucun broker requis)
     python manage.py celery_check --db             # + la planification est bien présente dans la base du beat (django_celery_beat)
     python manage.py celery_check --names          # affiche seulement les noms des tâches planifiées (pour scripts/staging/verify.sh)
-    python manage.py celery_check --queues default,notifications,celery,bulk   # files écoutées par le worker (défaut : celles du compose)
+    python manage.py celery_check --queues default,notifications,celery,flash,otp,bulk   # files écoutées par le worker (défaut : celles du compose)
 
 Une faute de frappe dans le nom d'une tâche, ou une tâche routée vers une file que personne n'écoute, ne produit AUCUNE erreur à
 l'exécution : la tâche ne tourne simplement jamais. Cette commande (et son test) le rend visible avant le déploiement.
@@ -40,7 +40,7 @@ class Command(BaseCommand):
     help = "Vérifie le câblage des tâches Celery planifiées (nom, cadence, file écoutée)."
 
     def add_arguments(self, parser):
-        parser.add_argument("--queues", default="default,notifications,celery,bulk", help="Files écoutées par le worker.")
+        parser.add_argument("--queues", default="default,notifications,celery,flash,otp,bulk", help="Files écoutées par le worker.")
         parser.add_argument("--db", action="store_true", help="Contrôle aussi la base du beat (django_celery_beat).")
         parser.add_argument("--names", action="store_true", help="N'affiche que les noms des tâches planifiées.")
 

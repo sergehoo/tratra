@@ -119,6 +119,11 @@ class HandymanProfile(models.Model):
     trust_badges = models.JSONField(default=list, blank=True)
     trust_evaluated_at = models.DateTimeField(null=True, blank=True)
 
+    # Copie CALCULÉE de la règle d'éligibilité (handy/eligibility.py), jamais saisie : lue par la recherche publique, le Smart
+    # Dispatch et les listes au lieu de recalculer la règle complète (KYC, spécialités, expérience) sur tout le pays à chaque requête.
+    # Recalculée dans la MÊME transaction que chaque changement (handy/eligibility_sync.py) et réconciliée périodiquement.
+    published = models.BooleanField(default=False, db_index=True, editable=False)
+
     class Meta:
         indexes = [
             models.Index(fields=["is_approved", "rating"]),
@@ -1237,7 +1242,7 @@ class Notification(models.Model):
         ('flash', 'Nouvelles missions (Tratra Flash)'),
     ]
     PUSH_STATUSES = [
-        ('', 'Non concerné'), ('queued', 'En file'), ('sent', 'Envoyé'), ('no_device', 'Aucun appareil'),
+        ('', 'Non concerné'), ('queued', 'En file'), ('sending', 'Envoi en cours'), ('sent', 'Envoyé'), ('no_device', 'Aucun appareil'),
         ('disabled', 'Désactivé par l\'utilisateur'), ('unconfigured', 'Firebase non configuré'), ('failed', 'Échec'),
         ('obsolete', 'Non envoyé : mission déjà attribuée ou expirée'),
     ]
