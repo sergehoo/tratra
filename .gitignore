@@ -208,3 +208,4 @@ fcm-*.json
 *.mobileprovision
 *.jks
 *.keystore
+loadtest-results/
