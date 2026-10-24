@@ -487,7 +487,7 @@ class UserViewSet(viewsets.ModelViewSet):
         if refusal is not None:
             signup_guard.record(ctx, refusal=refusal)
             logger.warning("Inscription refusée (%s).", refusal.reason)
-            response = Response({"code": f"signup_{refusal.reason}", "detail": refusal.message}, status=refusal.http_status)
+            response = Response({"code": refusal.public_code, "detail": refusal.message}, status=refusal.http_status)
             if refusal.retry_after:
                 response["Retry-After"] = str(refusal.retry_after)
             return response
@@ -1666,7 +1666,9 @@ def _otp_error(detail, http_status, **extra):
 
 
 def _sms_blocked_response(exc):
-    resp = _otp_error(str(exc), exc.http_status, code=f"sms_{exc.reason}")
+    from antifraud.sms_guard import public_code
+
+    resp = _otp_error(str(exc), exc.http_status, code=public_code(exc.reason))
     if exc.retry_after:
         resp["Retry-After"] = str(exc.retry_after)
     return resp

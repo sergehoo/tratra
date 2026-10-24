@@ -44,7 +44,8 @@ def test_same_name_and_consecutive_numbers_are_stopped_even_from_many_ips(antifr
     codes = [signup(first="Rita", last="Kamal", phone=f"+225011598{i:04d}"[:14], ip=f"198.51.100.{i}").status_code for i in range(6)]
     assert codes[:3] == [201, 201, 201] and set(codes[3:]) == {429}
     r = signup(first="Rita", last="Kamal", phone="+2250700123456", ip="198.51.100.77")
-    assert r.status_code == 429 and r.json()["code"] == "signup_name"
+    assert r.status_code == 429 and r.json()["code"] == "signup_limited"                  # la règle n'est pas révélée…
+    assert SignupLog.objects.filter(accepted=False).first().reason == "name"               # … mais elle est journalisée
 
 
 def test_consecutive_number_blocks_are_limited(antifraud_on):
@@ -86,10 +87,66 @@ def test_turnstile_is_verified_server_side_for_the_website(post, antifraud_on):
     sent = post.call_args.kwargs["data"]
     assert sent == {"secret": "secret-test", "response": "jeton", "remoteip": "192.0.2.42"}
     assert SignupLog.objects.get(user__phone="+2250700000022").captcha == "ok"
-    # Application mobile (pas d'en-tête Origin) : protections serveur seulement, sauf mode « all ».
-    assert signup(first="App", last="Mobile", phone="0700000023", ip="192.0.2.43").status_code == 201
+    # Application mobile (identifiant d'installation) : protections serveur seulement, sauf mode « all ».
+    calls = post.call_count
+    app = signup(first="App", last="Mobile", phone="0700000023", ip="192.0.2.43", HTTP_X_TRATRA_DEVICE=str(uuid.uuid4()))
+    assert app.status_code == 201 and post.call_count == calls
+    assert SignupLog.objects.get(user__phone="+2250700000023").channel == "app"
     antifraud_on.TURNSTILE_MODE = "all"
-    assert signup(first="App", last="Deux", phone="0700000024", ip="192.0.2.44").status_code == 400
+    assert signup(first="App", last="Deux", phone="0700000024", ip="192.0.2.44", HTTP_X_TRATRA_DEVICE=str(uuid.uuid4())).status_code == 400
+
+
+@mock.patch("antifraud.turnstile.requests.post")
+def test_a_script_posing_as_the_app_must_pass_the_anti_robot_check(post, antifraud_on):
+    """2ᵉ vague (23 oct. 2026) : appels directs à l'API, sans en-tête Origin NI identifiant d'installation — auparavant classés
+    « application », donc dispensés de Turnstile."""
+    antifraud_on.TURNSTILE_SECRET_KEY = "secret-test"
+    antifraud_on.CORS_ALLOWED_ORIGINS = [SITE]
+    r = signup(first="Eileen", last="White", phone="+2250759893259", ip="102.209.220.10")
+    assert r.status_code == 400 and r.json()["code"] == "signup_captcha" and not post.called
+    assert not User.objects.filter(phone="+2250759893259").exists()
+    log = SignupLog.objects.get()
+    assert (log.accepted, log.reason, log.channel, log.device) == (False, "captcha", "unknown", "")
+    post.return_value = mock.Mock(status_code=200, json=lambda: {"success": True})
+    assert signup(first="Eileen", last="White", phone="+2250759893259", ip="102.209.220.10",
+                  extra={"turnstile_token": "jeton"}).status_code == 201                      # un humain qui passe le test : accepté
+    antifraud_on.TURNSTILE_UNKNOWN_CLIENTS = False                                              # interrupteur de repli
+    assert signup(first="Marilyn", last="Clark", phone="+2250759834838", ip="160.155.84.10").status_code == 201
+
+
+def test_second_wave_spread_over_one_range_of_numbers_is_stopped(antifraud_on):
+    """Noms aléatoires, numéros de blocs de 1 000 différents mais d'une même plage de 100 000 (+225 07 59 8x xx xx), une IP par
+    compte : aucune règle de la 1ʳᵉ vague ne s'appliquait."""
+    wave = [("Eileen", "White", "0759893259"), ("Marilyn", "Clark", "0759834838"), ("Lynn", "Bautista", "0759891892"),
+            ("Owen", "Watkins", "0759881858"), ("Patricia", "Ferrell", "0759858888"), ("Nicholas", "Robertson", "0759836322"),
+            ("Thomas", "Scott", "0759849150")]
+    codes = [signup(first=f, last=l, phone=p, ip=f"102.67.221.{i + 1}").status_code for i, (f, l, p) in enumerate(wave)]
+    assert codes == [201] * 5 + [429, 429]
+    assert set(SignupLog.objects.filter(accepted=False).values_list("reason", flat=True)) == {"range"}
+    assert signup(first="Awa", last="Koné", phone="0707123456", ip="102.67.221.99").status_code == 201   # autre plage : libre
+
+
+def test_refusals_never_tell_which_rule_was_hit(antifraud_on):
+    antifraud_on.SIGNUP_PER_IP_HOURLY_LIMIT = 1
+    antifraud_on.SIGNUP_GLOBAL_HOURLY_LIMIT = 3
+    assert signup(first="A", last="B", phone="0700000101", ip="192.0.2.201").status_code == 201
+    by_ip = signup(first="C", last="D", phone="0500000102", ip="192.0.2.201")
+    assert signup(first="E", last="F", phone="0100000103", ip="192.0.2.202").status_code == 201
+    assert signup(first="G", last="H", phone="0500000104", ip="192.0.2.203").status_code == 201
+    by_global = signup(first="I", last="J", phone="0100000105", ip="192.0.2.204")
+    assert by_ip.status_code == by_global.status_code == 429
+    assert by_ip.json() == by_global.json() == {"code": "signup_limited", "detail": by_ip.json()["detail"]}
+    assert list(SignupLog.objects.filter(accepted=False).order_by("created_at").values_list("reason", flat=True)) == ["ip", "global"]
+
+
+def test_public_signups_can_be_suspended_during_an_attack(antifraud_on):
+    antifraud_on.SIGNUP_ENABLED = False
+    r = signup(phone="0700000110")
+    assert r.status_code == 503 and r.json()["code"] == "signup_closed" and "suspendues" in r.json()["detail"]
+    assert not User.objects.filter(phone="+2250700000110").exists()
+    assert SignupLog.objects.get().reason == "closed"
+    antifraud_on.SIGNUP_ENABLED = True
+    assert signup(phone="0700000110").status_code == 201
 
 
 @mock.patch("antifraud.turnstile.requests.post", side_effect=OSError("injoignable"))
@@ -173,6 +230,32 @@ def test_report_lists_bots_and_never_legitimate_or_active_accounts(antifraud_on)
     assert ["rita kamal", 9] in data["summary"]["top_names"]
     candidate = data["candidates"][0]
     assert "•" in candidate["phone"] and any(r.startswith("nom répété") for r in candidate["reasons"])
+
+
+def test_report_catches_the_second_wave(antifraud_on):
+    """Noms tous différents, blocs de 1 000 différents, une IP par compte, un compte toutes les 16 min (aucune rafale) : seuls la
+    plage de 100 000 numéros et l'absence d'identifiant (ni site ni application) les trahissent."""
+    start = timezone.now() - timedelta(hours=3)
+    numbers = ["0759893259", "0759834838", "0759891892", "0759881858", "0759858888", "0759836322", "0759849150"]
+    wave = []
+    for i, number in enumerate(numbers):
+        u = User.objects.create_user(f"vague{i}", f"vague{i}@x.test", "pass1234", first_name=f"Prenom{i}", last_name=f"Nom{i}",
+                                     phone=f"+225{number}", date_joined=start + timedelta(minutes=16 * i))
+        SignupLog.objects.create(user=u, ip=f"102.209.220.{i + 1}", channel="unknown", captcha="off")
+        wave.append(u)
+    same_range_verified = User.objects.create_user("voisin", "voisin@x.test", "pass1234", first_name="Ama", last_name="Kouassi",
+                                                   phone="+2250759800001", is_verified=True)
+    web = User.objects.create_user("site", "site@x.test", "pass1234", first_name="Awa", last_name="Koné", phone="+2250707123456")
+    SignupLog.objects.create(user=web, ip="160.120.33.224", channel="web", captcha="ok", device="")
+    data = report.build(timezone.now() - timedelta(hours=4))
+    ids = {c["id"] for c in data["candidates"]}
+    assert ids == {u.pk for u in wave}
+    assert same_range_verified.pk not in ids and web.pk not in ids
+    reasons = data["candidates"][0]["reasons"]
+    assert any(r.startswith("plage de numéros ×8") for r in reasons)
+    assert "client non identifié (ni site ni application)" in reasons and not any(r == "rafale" for r in reasons)
+    assert ["+22507598xxxxx", 8] in data["summary"]["top_phone_ranges"]
+    assert data["summary"]["signups_by_client"]["non identifié"] == 7
 
 
 def test_suspension_is_reviewed_reversible_and_rechecks_each_account(antifraud_on, tmp_path):

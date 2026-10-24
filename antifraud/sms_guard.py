@@ -129,6 +129,16 @@ def _quota(name: str, limit: int, window: int) -> Optional[Verdict]:
     return None if ok else Verdict(name.split(":")[0], 429, MSG_QUOTA, limits.retry_after(window))
 
 
+def public_code(reason: str) -> str:
+    """Code renvoyé au client. Le quota exact (IP, numéro, compte, global) reste dans `SmsLog` : le révéler montrerait à un robot
+    quelle limite contourner."""
+    if reason in ("kill_switch", "limits_unavailable"):
+        return "sms_suspended"
+    if reason.startswith("destination"):
+        return "sms_destination"
+    return "sms_limited"
+
+
 def check(number: str, purpose: str, *, ip: Optional[str] = None, user_id: Optional[int] = None) -> Optional[Verdict]:
     """Décision d'envoi (et consommation des quotas si autorisé jusqu'au global). None = envoi autorisé."""
     if not _bool("SMS_ENABLED") or not _bool(SWITCHES.get(purpose, "SMS_ENABLED")):

@@ -13,6 +13,31 @@ Plus de 300 comptes ont été créés en masse sous le même nom (« Rita Kamal 
 - aucun cache partagé n'était configuré. Les limites de débit et les compteurs d'essais étaient donc comptés **par processus** :
   avec plusieurs workers, chaque limite valait N fois sa valeur.
 
+## 2ᵉ vague (23 oct. 2026, à partir de 19 h 25)
+
+Une fois les SMS coupés et les premières règles déployées, le robot a changé de méthode dans l'heure, mais les SMS sont restés bloqués
+(`kill_switch`, aucune dépense) :
+
+- **noms aléatoires** (« Eileen White », « Marilyn Clark »…) au lieu de « Rita Kamal » : la règle « même nom 3 par jour » ne voit plus rien ;
+- **numéros dispersés** dans une même plage de 100 000 (+225 07 59 8x xx xx), un bloc de 1 000 différent à chaque fois : la règle
+  « même bloc 3 par heure » ne voit plus rien ;
+- **un compte toutes les ~16 min**, chacun depuis une **connexion ivoirienne différente** (fibre et ADSL Orange, Moov, GVA, Avisonet :
+  réseau de proxys résidentiels) : limites par IP et plafond global jamais atteints, aucune rafale ;
+- **appel direct de l'API, sans en-tête Origin** : l'API le prenait pour l'application mobile, qui est dispensée de Turnstile.
+
+Le robot savait quoi changer : la réponse indiquait la règle exacte (`signup_name`, `signup_block`, `sms_quota_ip`…).
+
+Correctifs (24 oct.) :
+
+- Turnstile exigé aussi des **clients inconnus**, c'est-à-dire ni le site, ni l'application avec son identifiant d'installation
+  (`TURNSTILE_UNKNOWN_CLIENTS`). Ce n'est qu'une présomption : un robot peut imiter l'en-tête de l'application. La preuve viendra de
+  Turnstile dans l'application (`TURNSTILE_MODE=all`) ou de Play Integrity ;
+- limite par **plage de 100 000 numéros** : 5 par jour (`SIGNUP_PHONE_RANGE_DAILY_LIMIT`) ;
+- **refus muets** : `signup_limited`, `sms_limited`, `sms_suspended`, `sms_destination`. La règle exacte reste dans les journaux ;
+- **interrupteur des inscriptions** `SIGNUP_ENABLED` (message « momentanément suspendues ») ;
+- rapport : nouveaux signaux « plage de numéros » (signal de masse) et « client non identifié » ; journal des inscriptions : type de
+  client `unknown` et filtre « identifiant d'appareil ».
+
 ## Protections (app `antifraud`)
 
 | Couche | Où | Réglage |
@@ -22,7 +47,7 @@ Plus de 300 comptes ont été créés en masse sous le même nom (« Rita Kamal 
 | Quotas atomiques Redis : IP, numéro, compte, global (heure, jour) | idem | `SMS_*_LIMIT` |
 | Alertes : journal critique (Sentry) et e-mail aux `ADMINS`, à 80 % puis à l'épuisement | idem | `SMS_ALERT_RATIO` |
 | Journal de chaque tentative (envoyé, bloqué, échec), sans texte ni code, numéro masqué + empreinte | `SmsLog` (admin en lecture seule) | — |
-| Inscription : anti-robot du site, limites par IP, appareil et global, même nom répété, bloc de numéros | `antifraud/signup_guard.py`, `UserViewSet.create` | `SIGNUP_*`, `TURNSTILE_*` |
+| Inscription : interrupteur, anti-robot du site et des clients inconnus, limites par IP, appareil et global, même nom répété, bloc de 1 000 et plage de 100 000 numéros ; refus sans détail de la règle | `antifraud/signup_guard.py`, `UserViewSet.create` | `SIGNUP_*`, `TURNSTILE_*` |
 | Journal des inscriptions (IP, appareil, acceptée ou refusée, raison) | `SignupLog` | — |
 | Code OTP : délai croissant (60 s, 2, 5 puis 10 min), 5 par heure, code encore valide renvoyé, numéro déjà vérifié = aucun SMS, essais comptés atomiquement avant vérification (5 puis verrou) | `handy/api/views.py`, `handy/api/recovery.py` | `THROTTLE_OTP`, `THROTTLE_OTP_VERIFY` |
 | Récupération : mêmes contrôles appliqués avant de savoir si le compte existe (aucune énumération) | `recovery.py` | — |
@@ -30,9 +55,11 @@ Plus de 300 comptes ont été créés en masse sous le même nom (« Rita Kamal 
 | Comptes non vérifiés : réservation, commande Flash, message, avis, paiement, KYC, engagements refusés (403 `phone_not_verified`) | `antifraud/permissions.py` | `UNVERIFIED_RESTRICTIONS`, `UNVERIFIED_RESTRICTIONS_SINCE` |
 | Cache partagé Redis obligatoire en production | `tratra/settings/{base,prod}.py` | `CACHE_URL` (sinon `REDIS_URL`, base n° 1) |
 
-L'application mobile ne peut pas afficher Turnstile. Elle envoie un identifiant d'installation (`X-Tratra-Device`) et reste soumise
-aux mêmes protections serveur, qui valent pour tous les clients : un robot peut se faire passer pour l'application. Turnstile
-peut être exigé partout (`TURNSTILE_MODE=all`) le jour où l'application l'intégrera.
+L'application mobile n'affiche pas encore Turnstile. Elle envoie un identifiant d'installation (`X-Tratra-Device`) et reste soumise
+aux mêmes protections serveur, qui valent pour tous les clients. Un client sans cet identifiant ni site d'origine (un script) doit
+passer Turnstile. Un robot qui imiterait l'identifiant n'est arrêté que par les limites : Turnstile peut être exigé partout
+(`TURNSTILE_MODE=all`) le jour où l'application l'intégrera. Les versions de l'application antérieures au build 9 n'envoient pas
+cet identifiant : leurs inscriptions et demandes de code sont désormais refusées (test interne seulement).
 
 ## Actions urgentes en production (dans cet ordre)
 
@@ -66,7 +93,7 @@ peut être exigé partout (`TURNSTILE_MODE=all`) le jour où l'application l'int
 
 - SMS : 30 par heure, 150 par jour au total ; 3 par heure et 6 par jour par numéro ; 5 par heure et 15 par jour par IP ; 8 par jour par compte.
 - Inscriptions : 5 par heure et 20 par jour par IP ; 3 par jour par appareil ; 60 par heure au total ; même nom complet 3 par jour ;
-  même bloc de 1 000 numéros 3 par heure.
+  même bloc de 1 000 numéros 3 par heure ; même plage de 100 000 numéros 5 par jour.
 
 Ces valeurs sont à ajuster à la croissance réelle du trafic, en surveillant `SmsLog` (raisons des blocages) et `SignupLog`.
 

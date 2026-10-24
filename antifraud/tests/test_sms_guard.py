@@ -2,8 +2,10 @@
 de code OTP (délai croissant, code renvoyé tant qu'il est valide, numéro déjà vérifié, essais). Aucun SMS réel : backend locmem."""
 import logging
 import threading
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
+from unittest import mock
 
 import pytest
 from django.contrib.auth import get_user_model
@@ -40,10 +42,29 @@ def test_kill_switch_stops_every_verification_sms(antifraud_on, switch):
     setattr(antifraud_on, switch, False)
     u = account(1)
     r = client(u).post(OTP)
-    assert r.status_code == 503 and "suspendu" in r.json()["detail"] and r.json()["code"] == "sms_kill_switch"
+    assert r.status_code == 503 and "suspendu" in r.json()["detail"] and r.json()["code"] == "sms_suspended"
     assert sms.outbox == [] and not OTPCode.objects.filter(user=u, used=False).exists()
     log = SmsLog.objects.get()
     assert log.status == "blocked" and log.reason == "kill_switch" and log.user == u
+
+
+def test_public_codes_never_name_the_exact_quota(antifraud_on):
+    from antifraud.sms_guard import public_code
+
+    assert {public_code(r) for r in ("quota_ip", "quota_number", "quota_user", "quota_global")} == {"sms_limited"}
+    assert public_code("kill_switch") == public_code("limits_unavailable") == "sms_suspended"
+    assert public_code("destination_country") == public_code("destination_type") == "sms_destination"
+
+
+@mock.patch("antifraud.turnstile.requests.post")
+def test_a_script_cannot_request_a_code_without_the_anti_robot_check(post, antifraud_on):
+    """Le robot de la 2ᵉ vague appelait l'API sans en-tête Origin ni identifiant d'installation : il passait pour l'application."""
+    antifraud_on.TURNSTILE_SECRET_KEY = "secret-test"
+    u = account(3)
+    r = client(u).post(OTP)
+    assert r.status_code == 400 and r.json()["code"] == "captcha" and sms.outbox == [] and not post.called
+    app = client(u).post(OTP, HTTP_X_TRATRA_DEVICE=str(uuid.uuid4()))       # l'application : protections serveur seulement
+    assert app.status_code == 201 and len(sms.outbox) == 1 and not post.called
 
 
 def test_recovery_kill_switch_answers_the_same_for_known_and_unknown_numbers(antifraud_on):

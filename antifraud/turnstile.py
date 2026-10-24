@@ -4,13 +4,18 @@ Configuration :
   TURNSTILE_SECRET_KEY  clé secrète (serveur) ; vide = désactivé.
   TURNSTILE_MODE        « web » (défaut) : exigé pour les requêtes d'un navigateur (en-tête Origin d'un site autorisé) ;
                         « all » : exigé pour tous les clients (quand l'application mobile intégrera le widget) ; « off ».
+  TURNSTILE_UNKNOWN_CLIENTS  (vrai par défaut) en mode « web », exigé AUSSI des clients inconnus : ni site autorisé, ni
+                        identifiant d'installation de l'application (`X-Tratra-Device`). C'est le cas d'un script qui appelle
+                        l'API directement (attaque du 23 oct. 2026 : sans en-tête Origin, il passait pour l'application).
 Le jeton arrive dans le champ `turnstile_token` ou l'en-tête `X-Turnstile-Token`. Il est à usage unique et vérifié auprès de
 Cloudflare avec l'IP du client ; Cloudflare injoignable = refus (jamais de contournement silencieux).
-L'application mobile n'envoie pas d'en-tête Origin : elle reste soumise aux protections serveur (limites par IP, appareil, numéro,
-global, règles de motifs) — qui s'appliquent d'ailleurs à TOUS les clients, un robot pouvant omettre l'en-tête Origin."""
+L'application mobile n'affiche pas encore le widget : elle s'identifie par son identifiant d'installation et reste soumise aux
+protections serveur (limites par IP, appareil, numéro, plage, global). Ce n'est qu'une présomption (un robot peut imiter l'en-tête) :
+la vraie preuve viendra du widget dans l'application (mode « all ») ou d'une attestation de l'appareil (Play Integrity)."""
 from __future__ import annotations
 
 import logging
+import uuid
 
 import requests
 from django.conf import settings
@@ -36,10 +41,29 @@ def is_browser(request) -> bool:
     return bool(origin) and origin in allowed
 
 
+def installation_id(request) -> str:
+    """Identifiant d'installation envoyé par l'application (`X-Tratra-Device`, UUID normalisé) ; vide s'il manque ou est invalide."""
+    raw = (request.META.get("HTTP_X_TRATRA_DEVICE") or "").strip()
+    try:
+        return str(uuid.UUID(raw))
+    except (ValueError, AttributeError):
+        return ""
+
+
+def client_kind(request) -> str:
+    """« web » (site autorisé), « app » (identifiant d'installation) ou « unknown » (ni l'un ni l'autre : script, robot)."""
+    if is_browser(request):
+        return "web"
+    return "app" if installation_id(request) else "unknown"
+
+
 def required(request) -> bool:
     if not secret() or mode() == "off":
         return False
-    return mode() == "all" or is_browser(request)
+    if mode() == "all":
+        return True
+    kind = client_kind(request)
+    return kind == "web" or (kind == "unknown" and bool(getattr(settings, "TURNSTILE_UNKNOWN_CLIENTS", True)))
 
 
 def token_of(request) -> str:

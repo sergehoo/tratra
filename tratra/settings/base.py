@@ -603,17 +603,21 @@ SMS_PER_IP_HOURLY_LIMIT = config('SMS_PER_IP_HOURLY_LIMIT', default=5, cast=int)
 SMS_PER_IP_DAILY_LIMIT = config('SMS_PER_IP_DAILY_LIMIT', default=15, cast=int)
 SMS_PER_USER_DAILY_LIMIT = config('SMS_PER_USER_DAILY_LIMIT', default=8, cast=int)
 SMS_ALERT_RATIO = config('SMS_ALERT_RATIO', default=0.8, cast=float)   # alerte (journal critique + e-mail ADMINS) à 80 %
-# Inscriptions publiques.
+# Inscriptions publiques. SIGNUP_ENABLED=false : suspendues (attaque en cours), message « momentanément suspendues ».
+SIGNUP_ENABLED = env_bool('SIGNUP_ENABLED', True)
 SIGNUP_PER_IP_HOURLY_LIMIT = config('SIGNUP_PER_IP_HOURLY_LIMIT', default=5, cast=int)
 SIGNUP_PER_IP_DAILY_LIMIT = config('SIGNUP_PER_IP_DAILY_LIMIT', default=20, cast=int)
 SIGNUP_PER_DEVICE_DAILY_LIMIT = config('SIGNUP_PER_DEVICE_DAILY_LIMIT', default=3, cast=int)
 SIGNUP_GLOBAL_HOURLY_LIMIT = config('SIGNUP_GLOBAL_HOURLY_LIMIT', default=60, cast=int)
 SIGNUP_SAME_NAME_DAILY_LIMIT = config('SIGNUP_SAME_NAME_DAILY_LIMIT', default=3, cast=int)
 SIGNUP_PHONE_BLOCK_HOURLY_LIMIT = config('SIGNUP_PHONE_BLOCK_HOURLY_LIMIT', default=3, cast=int)
+SIGNUP_PHONE_RANGE_DAILY_LIMIT = config('SIGNUP_PHONE_RANGE_DAILY_LIMIT', default=5, cast=int)   # plage de 100 000 numéros, par jour
 PHONE_CHANGES_DAILY_LIMIT = config('PHONE_CHANGES_DAILY_LIMIT', default=3, cast=int)   # changements de numéro par compte et par jour
 # Cloudflare Turnstile (anti-robot du site) : clé secrète ; mode web (navigateurs) | all | off.
 TURNSTILE_SECRET_KEY = config('TURNSTILE_SECRET_KEY', default='')
 TURNSTILE_MODE = config('TURNSTILE_MODE', default='web')
+# Mode web : anti-robot exigé aussi des clients ni site ni application (script appelant l'API sans identifiant d'installation).
+TURNSTILE_UNKNOWN_CLIENTS = env_bool('TURNSTILE_UNKNOWN_CLIENTS', True)
 # Site derrière le proxy Cloudflare : l'adresse du visiteur est lue dans CF-Connecting-IP (seulement depuis une adresse Cloudflare).
 CLOUDFLARE_PROXY = env_bool('CLOUDFLARE_PROXY', False)
 # Comptes au téléphone NON vérifié : actions sensibles refusées (réservation, commande, messages, offres, paiement…).

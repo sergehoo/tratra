@@ -2,12 +2,15 @@
 
 Signaux, sur une période d'inscription :
  - nom complet répété (normalisé : « Rita Kamal » = « RITA kamal ») ;
- - numéros d'un même bloc de 1 000 (+225 01 15 98 1xx) ;
+ - numéros d'un même bloc de 1 000 (+225 01 15 98 1xx) ou d'une même plage de 100 000 (+225 07 59 8x xx xx : 2ᵉ vague, noms
+   aléatoires, un compte toutes les ~16 min depuis des IP différentes — aucun autre signal de masse) ;
  - même adresse IP d'inscription (journal `SignupLog`, à partir de ce correctif) ;
  - rafale : de nombreux comptes créés en quelques minutes ;
+ - client non identifié : inscrit ni depuis le site, ni depuis l'application (aucun identifiant d'installation) — script ;
  - téléphone jamais vérifié, jamais connecté ; SMS reçus (journal `SmsLog`).
 Un compte n'est CANDIDAT que s'il n'a pas de numéro vérifié, aucune activité réelle (réservation, offre, message, demande Tratra
-Flash, pièce KYC) et au moins deux signaux dont un signal de masse (nom, bloc, IP, rafale). Le personnel n'est jamais candidat.
+Flash, pièce KYC) et au moins deux signaux dont un signal de masse (nom, bloc, plage, IP, rafale). Le personnel n'est jamais
+candidat.
 
 La désactivation (is_active = faux) ne supprime rien : chaque compte est inscrit dans un lot (`SuspensionBatch`) avec son état
 précédent, et `revert` le rétablit à l'identique. Les sessions des comptes désactivés sont révoquées."""
@@ -23,10 +26,10 @@ from django.db.models import Count
 from django.utils import timezone
 
 from antifraud.models import AccountSuspension, SignupLog, SmsLog, SuspensionBatch
-from antifraud.signup_guard import normalize_name, phone_block
+from antifraud.signup_guard import normalize_name, phone_block, phone_range
 
 User = get_user_model()
-MASS_SIGNALS = ("nom répété", "bloc de numéros", "même IP", "rafale")
+MASS_SIGNALS = ("nom répété", "bloc de numéros", "plage de numéros", "même IP", "rafale")
 
 
 def _mask(phone: str) -> str:
@@ -63,18 +66,34 @@ def _bursts(rows, minutes: int, size: int) -> set:
     return flagged
 
 
-def build(since: datetime, until: Optional[datetime] = None, *, min_name: int = 3, min_block: int = 3, min_ip: int = 3,
-          burst_minutes: int = 10, burst_size: int = 5) -> dict:
+def _unidentified(channel: str, device: str) -> bool:
+    """Inscription sans le site ni l'application : « unknown », ou « app » sans identifiant (journal antérieur au 24 oct. 2026)."""
+    return channel == "unknown" or (channel == "app" and not device)
+
+
+def _client_label(uid: int, logs: dict, unidentified: set) -> str:
+    if uid in unidentified:
+        return "non identifié"
+    return (logs[uid][1] or "?") if uid in logs else "avant journal"
+
+
+def build(since: datetime, until: Optional[datetime] = None, *, min_name: int = 3, min_block: int = 3, min_range: int = 5,
+          min_ip: int = 3, burst_minutes: int = 10, burst_size: int = 5) -> dict:
     until = until or timezone.now()
     rows = list(User.objects.filter(date_joined__gte=since, date_joined__lt=until, is_staff=False, is_superuser=False)
                 .values("id", "username", "first_name", "last_name", "phone", "is_verified", "is_active", "date_joined", "last_login"))
     ids = [r["id"] for r in rows]
     names = {r["id"]: normalize_name(r["first_name"], r["last_name"]) for r in rows}
     blocks = {r["id"]: phone_block(r["phone"] or "") for r in rows}
-    ips = dict(SignupLog.objects.filter(user_id__in=ids).exclude(ip=None).values_list("user_id", "ip"))
+    ranges = {r["id"]: phone_range(r["phone"] or "") for r in rows}
+    logs = {uid: (ip, channel, device) for uid, ip, channel, device
+            in SignupLog.objects.filter(user_id__in=ids).values_list("user_id", "ip", "channel", "device")}
+    ips = {uid: ip for uid, (ip, _, _) in logs.items() if ip}
+    unidentified = {uid for uid, (_, channel, device) in logs.items() if _unidentified(channel, device)}
     sms = dict(SmsLog.objects.filter(user_id__in=ids, status="sent").values("user_id").annotate(n=Count("id")).values_list("user_id", "n"))
     name_count = Counter(n for n in names.values() if n)
     block_count = Counter(b for b in blocks.values() if b)
+    range_count = Counter(b for b in ranges.values() if b)
     ip_count = Counter(ips.values())
     bursts = _bursts(rows, burst_minutes, burst_size)
     active = active_user_ids(ids)
@@ -87,10 +106,14 @@ def build(since: datetime, until: Optional[datetime] = None, *, min_name: int = 
             reasons.append(f"nom répété ×{name_count[names[uid]]}")
         if blocks[uid] and block_count[blocks[uid]] >= min_block:
             reasons.append(f"bloc de numéros ×{block_count[blocks[uid]]}")
+        if ranges[uid] and range_count[ranges[uid]] >= min_range:
+            reasons.append(f"plage de numéros ×{range_count[ranges[uid]]}")
         if uid in ips and ip_count[ips[uid]] >= min_ip:
             reasons.append(f"même IP ×{ip_count[ips[uid]]}")
         if uid in bursts:
             reasons.append("rafale")
+        if uid in unidentified:
+            reasons.append("client non identifié (ni site ni application)")
         if not r["is_verified"]:
             reasons.append("téléphone non vérifié")
         if r["last_login"] is None:
@@ -113,12 +136,14 @@ def build(since: datetime, until: Optional[datetime] = None, *, min_name: int = 
     sms_period = SmsLog.objects.filter(created_at__gte=since, created_at__lt=until)
     return {
         "criteria": {"since": since.isoformat(), "until": until.isoformat(), "min_name": min_name, "min_block": min_block,
-                     "min_ip": min_ip, "burst_minutes": burst_minutes, "burst_size": burst_size},
+                     "min_range": min_range, "min_ip": min_ip, "burst_minutes": burst_minutes, "burst_size": burst_size},
         "summary": {
             "accounts": len(rows), "candidates": len(candidates), "excluded_active": excluded_active,
             "excluded_verified": excluded_verified, "unverified": sum(1 for r in rows if not r["is_verified"]),
             "top_names": [[n, c] for n, c in name_count.most_common(10) if c > 1],
             "top_phone_blocks": [[f"+{b}xxx", c] for b, c in block_count.most_common(10) if c > 1],
+            "top_phone_ranges": [[f"+{b}xxxxx", c] for b, c in range_count.most_common(10) if c > 1],
+            "signups_by_client": dict(Counter(_client_label(uid, logs, unidentified) for uid in ids)),
             "top_ips": [[ip, c] for ip, c in ip_count.most_common(10) if c > 1],
             "signups_by_hour": sorted(by_hour.items()),
             "sms": {status: sms_period.filter(status=status).count() for status in ("sent", "blocked", "failed")},

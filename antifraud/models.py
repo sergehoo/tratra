@@ -38,7 +38,7 @@ class SignupLog(models.Model):
     user = models.OneToOneField(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="signup_log")
     ip = models.GenericIPAddressField(null=True, blank=True, db_index=True)
     device = models.CharField(max_length=64, blank=True, default="", db_index=True)   # empreinte de l'identifiant d'installation
-    channel = models.CharField(max_length=10, blank=True, default="")                 # web | app
+    channel = models.CharField(max_length=10, blank=True, default="")                 # web | app | unknown (ni site ni application)
     captcha = models.CharField(max_length=10, blank=True, default="")                 # ok | absent | failed | off
     accepted = models.BooleanField(default=True, db_index=True)
     reason = models.CharField(max_length=40, blank=True, default="", db_index=True)

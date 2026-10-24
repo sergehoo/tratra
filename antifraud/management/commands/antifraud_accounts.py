@@ -45,6 +45,7 @@ class Command(BaseCommand):
         r.add_argument("--out", default="")
         r.add_argument("--min-name", type=int, default=3)
         r.add_argument("--min-block", type=int, default=3)
+        r.add_argument("--min-range", type=int, default=5)
         r.add_argument("--min-ip", type=int, default=3)
         r.add_argument("--burst-minutes", type=int, default=10)
         r.add_argument("--burst-size", type=int, default=5)
@@ -66,8 +67,8 @@ class Command(BaseCommand):
     def _report(self, opts):
         since = _date(opts["since"])
         until = _date(opts["until"], end=True) if opts.get("until") else None
-        data = report.build(since, until, min_name=opts["min_name"], min_block=opts["min_block"], min_ip=opts["min_ip"],
-                            burst_minutes=opts["burst_minutes"], burst_size=opts["burst_size"])
+        data = report.build(since, until, min_name=opts["min_name"], min_block=opts["min_block"], min_range=opts["min_range"],
+                            min_ip=opts["min_ip"], burst_minutes=opts["burst_minutes"], burst_size=opts["burst_size"])
         s = data["summary"]
         w = self.stdout.write
         w(f"Période : {data['criteria']['since']} → {data['criteria']['until']}")
@@ -75,6 +76,8 @@ class Command(BaseCommand):
         w(f"CANDIDATS à la désactivation : {s['candidates']}  |  écartés car actifs : {s['excluded_active']}, vérifiés : {s['excluded_verified']}")
         w("Noms les plus répétés : " + ", ".join(f"{n} ×{c}" for n, c in s["top_names"]) if s["top_names"] else "Noms répétés : aucun")
         w("Blocs de numéros : " + ", ".join(f"{b} ×{c}" for b, c in s["top_phone_blocks"]) if s["top_phone_blocks"] else "Blocs de numéros : aucun")
+        w("Plages de 100 000 numéros : " + ", ".join(f"{b} ×{c}" for b, c in s["top_phone_ranges"]) if s["top_phone_ranges"] else "Plages de numéros : aucune répétée")
+        w(f"Inscriptions par client : {s['signups_by_client']}")
         w("IP d'inscription : " + ", ".join(f"{ip} ×{c}" for ip, c in s["top_ips"]) if s["top_ips"] else "IP d'inscription : aucune répétée (journal à partir du correctif)")
         w(f"SMS sur la période : {s['sms']}  bloqués par raison : {s['sms_blocked_by_reason']}")
         w("Inscriptions par heure : " + ", ".join(f"{h} : {c}" for h, c in s["signups_by_hour"][-24:]))

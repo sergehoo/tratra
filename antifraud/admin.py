@@ -25,13 +25,33 @@ class SmsLogAdmin(ReadOnly):
     raw_id_fields = ("user",)
 
 
+class DeviceFilter(admin.SimpleListFilter):
+    """Identifiant d'installation de l'application : absent sur le site et pour un script appelant l'API directement."""
+    title = "identifiant d'appareil"
+    parameter_name = "device"
+
+    def lookups(self, request, model_admin):
+        return (("yes", "Présent"), ("no", "Absent"))
+
+    def queryset(self, request, queryset):
+        if self.value() == "yes":
+            return queryset.exclude(device="")
+        if self.value() == "no":
+            return queryset.filter(device="")
+        return queryset
+
+
 @admin.register(SignupLog)
 class SignupLogAdmin(ReadOnly):
-    list_display = ("created_at", "accepted", "reason", "channel", "captcha", "ip", "user")
-    list_filter = ("accepted", "reason", "channel", "captcha")
+    list_display = ("created_at", "accepted", "reason", "channel", "captcha", "has_device", "ip", "user")
+    list_filter = ("accepted", "reason", "channel", "captcha", DeviceFilter)
     search_fields = ("ip", "user__username", "user__phone")
     date_hierarchy = "created_at"
     raw_id_fields = ("user",)
+
+    @admin.display(boolean=True, description="appareil")
+    def has_device(self, obj):
+        return bool(obj.device)
 
 
 class SuspensionInline(admin.TabularInline):
