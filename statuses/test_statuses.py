@@ -267,6 +267,41 @@ def test_feed_orders_unread_before_seen_and_flags_seen_after_a_view():
     assert f["contacts"][1]["statuses"][0]["seen"] is True
 
 
+def presence(user):
+    return {r["id"]: r for r in api(user).get("/handy/statuses/presence/").json()["results"]}
+
+
+def test_presence_marks_every_member_with_a_visible_status_and_counts_unseen_like_whatsapp_rings():
+    pro, cli = pair("st_pr")
+    stranger, shut = _client("st_pr_out"), _client("st_pr_shut")
+    post(pro, "un")
+    post(pro, "deux")
+    post(stranger, "pour tous", audience="extended")
+    post(shut, "contacts seulement")                                       # pas de lien avec cli : jamais visible
+    post(cli, "le mien")
+    got = presence(cli)
+    assert set(got) == {pro.id, stranger.id, cli.id}
+    assert (got[pro.id]["count"], got[pro.id]["unseen"]) == (2, 2) and got[stranger.id]["unseen"] == 1
+    assert got[cli.id]["mine"] is True and got[cli.id]["unseen"] == 0      # mon propre anneau : jamais « non lu »
+    api(cli).post(f"/handy/statuses/{Status.objects.filter(author=pro).first().pk}/view/")
+    assert presence(cli)[pro.id]["unseen"] == 1                            # cache invalidé par la vue
+    api(cli).post("/handy/me/blocks/", {"user": stranger.id}, format="json")
+    assert stranger.id not in presence(cli)
+    assert api().get("/handy/statuses/presence/").status_code in (401, 403)
+
+
+def test_author_statuses_open_a_members_ring_only_when_allowed():
+    pro, cli = pair("st_au")
+    stranger = _client("st_au_out")
+    post(pro, "pour mes contacts")
+    g = api(cli).get(f"/handy/statuses/authors/{pro.id}/").json()
+    assert g["author"]["id"] == pro.id and [s["text"] for s in g["statuses"]] == ["pour mes contacts"] and g["unseen"] == 1
+    assert api(stranger).get(f"/handy/statuses/authors/{pro.id}/").status_code == 404     # contacts seulement : rien à voir
+    assert api(cli).get(f"/handy/statuses/authors/{stranger.id}/").status_code == 404     # aucun statut
+    post(pro, "pour tous", audience="extended")
+    assert [s["text"] for s in api(stranger).get(f"/handy/statuses/authors/{pro.id}/").json()["statuses"]] == ["pour tous"]
+
+
 # ------------------------------------------------------------------------------------------------------------- vues
 
 def test_view_is_counted_once_per_member_and_never_by_loading_the_feed():

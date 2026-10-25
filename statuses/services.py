@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 BACKGROUNDS = ("green", "yellow", "night", "sky", "rose", "violet")
 FEED_CACHE_SECONDS = 30
 MAX_FEED_STATUSES = 400
+MAX_PRESENCE_AUTHORS = 500
 
 
 class StatusError(Exception):
@@ -327,6 +328,34 @@ def discover(viewer, request=None, page: int = 1, size: int = 20) -> Dict:
     rows = list(qs.filter(author_id__in=author_ids).select_related("author", "author__handyman_profile").order_by("created_at"))
     seen_ids = set(StatusView.objects.filter(viewer=viewer, status_id__in=[s.pk for s in rows]).values_list("status_id", flat=True))
     return {"results": _group(rows, viewer, request, seen_ids), "has_more": more, "next_page": page + 1 if more else None}
+
+
+def presence(viewer) -> Dict:
+    """Membres dont je peux voir au moins un statut actif (moi compris) : l'application pose l'anneau des statuts sur leur avatar PARTOUT
+    (accueil, messagerie, profils) — nombre de statuts et non lus, comme les anneaux de WhatsApp. Mêmes droits que le fil ; borné aux
+    auteurs les plus récents."""
+    key = _feed_key(viewer.pk, "presence")
+    hit = cache.get(key)
+    if hit is not None:
+        return hit
+    qs = visible_qs(viewer)
+    authors = list(qs.values("author_id").annotate(count=Count("id"), latest=Max("created_at")).order_by("-latest")[:MAX_PRESENCE_AUTHORS])
+    ids = [a["author_id"] for a in authors]
+    seen = dict(StatusView.objects.filter(viewer=viewer, status__in=qs.filter(author_id__in=ids)).values("status__author_id")
+                .annotate(n=Count("id")).values_list("status__author_id", "n"))
+    out = {"results": [{"id": a["author_id"], "count": a["count"], "unseen": 0 if a["author_id"] == viewer.pk else max(0, a["count"] - seen.get(a["author_id"], 0)),
+                        "latest_at": a["latest"].isoformat(), "mine": a["author_id"] == viewer.pk} for a in authors]}
+    cache.set(key, out, FEED_CACHE_SECONDS)
+    return out
+
+
+def author_statuses(viewer, author_id: int, request=None) -> Dict:
+    """Statuts actifs d'UN membre que je peux voir (toucher son avatar ouvre la visionneuse) ; aucun : introuvable."""
+    rows = list(visible_qs(viewer).filter(author_id=author_id).select_related("author", "author__handyman_profile").order_by("created_at"))
+    if not rows:
+        raise StatusError("not_found", "Aucun statut à afficher.", 404)
+    seen_ids = set(StatusView.objects.filter(viewer=viewer, status_id__in=[s.pk for s in rows]).values_list("status_id", flat=True))
+    return _group(rows, viewer, request, seen_ids)[0]
 
 
 # ------------------------------------------------------------------------------------------------------------------ vues

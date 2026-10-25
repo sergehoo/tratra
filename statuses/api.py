@@ -43,6 +43,25 @@ def feed(request):
 
 
 @never_cache
+@extend_schema(summary="Membres dont je peux voir un statut actif (anneau sur leur avatar) : nombre de statuts et non lus", **_DOC)
+@api_view(["GET"])
+@permission_classes(_AUTH)
+def presence(request):
+    return Response(services.presence(request.user))
+
+
+@never_cache
+@extend_schema(summary="Statuts actifs d'un membre que je peux voir (toucher son avatar)", **_DOC)
+@api_view(["GET"])
+@permission_classes(_AUTH)
+def author_statuses(request, user_id):
+    try:
+        return Response(services.author_statuses(request.user, user_id, request))
+    except StatusError as exc:
+        return _fail(exc)
+
+
+@never_cache
 @extend_schema(summary="Découvrir les statuts de membres qui ne sont pas mes contacts (audience élargie)", **_DOC)
 @api_view(["GET"])
 @permission_classes(_AUTH)
