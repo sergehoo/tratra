@@ -2,7 +2,7 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from handy.api import cash as cash_api
-from handy.api.catalog import public_catalog
+from handy.api.catalog import catalog_match, public_catalog
 from handy.api.kyc_flow import me_kyc, me_kyc_capture, me_kyc_restart, me_kyc_send
 from handy.api.phone_api import phone_defaults
 from handy.api.mobile_apps import public_mobile_apps
@@ -78,6 +78,7 @@ urlpatterns = [
     path('public/mobile-apps/', public_mobile_apps, name='public-mobile-apps'),
     # Catalogue unique des métiers (public, ETag) : web, application mobile, administration partagent cette source.
     path('catalog/', public_catalog, name='public-catalog'),
+    path('catalog/match/', catalog_match, name='catalog-match'),
     # Compte unifié : tableau de bord agrégé + création du profil professionnel du compte courant.
     path('me/dashboard/', me_dashboard, name='me-dashboard'),
     path('me/account/deletion/', me_account_deletion, name='me-account-deletion'),

@@ -2,6 +2,18 @@
 import pytest
 
 
+@pytest.fixture(scope="session")
+def django_db_setup(django_db_setup, django_db_blocker):
+    """La migration de données du référentiel des métiers (handy 0064) remplit le catalogue : la base de test repart d'un catalogue VIDE,
+    comme avant, et chaque test crée les catégories dont il a besoin. Le référentiel lui-même est testé par handy/test_catalog_reference.py,
+    qui l'applique explicitement (idempotence, aucun doublon, données existantes préservées)."""
+    with django_db_blocker.unblock():
+        from handy.models import CatalogFamily, ServiceCategory
+
+        ServiceCategory.objects.all().delete()
+        CatalogFamily.objects.all().delete()
+
+
 @pytest.fixture(autouse=True)
 def _evaluations_published_immediately(settings):
     """Les tests historiques créent des avis et en lisent aussitôt les statistiques : publication immédiate (délai 0).

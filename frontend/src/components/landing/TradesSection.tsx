@@ -36,7 +36,10 @@ export default function TradesSection() {
               description="Choisissez un métier : vous accédez directement aux offres publiées par les artisans, avec leurs tarifs."
             />
           </Reveal>
-          <Reveal delay={0.1} className="hidden shrink-0 md:block">
+          <Reveal delay={0.1} className="hidden shrink-0 gap-2 md:flex">
+            <CtaLink href="/panne" variant="outline">
+              J’ai une panne
+            </CtaLink>
             <CtaLink href="/metiers" variant="outline">
               Voir tous les métiers
               <ArrowRight aria-hidden className="h-4 w-4" />
@@ -140,6 +143,9 @@ export default function TradesSection() {
         </div>
 
         <div className="mt-8 md:hidden">
+          <CtaLink href="/panne" variant="outline" className="mb-2 w-full">
+            J’ai une panne
+          </CtaLink>
           <CtaLink href="/metiers" variant="outline" className="w-full">
             Voir tous les métiers
             <ArrowRight aria-hidden className="h-4 w-4" />

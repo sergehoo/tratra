@@ -17,6 +17,7 @@ import {
   Users,
   X,
   type LucideIcon,
+  Wrench,
 } from "lucide-react";
 import { BrandWordmark } from "@/components/ds/BrandWordmark";
 import { ButtonLink } from "@/components/ds/Button";
@@ -37,6 +38,7 @@ const NAV: NavItem[] = [
   { href: "/#urgences", label: "Urgences", icon: Siren },
   { href: "/#artisans", label: "Artisans", icon: Users },
   { href: "/#entreprises", label: "Entreprises", icon: Building2 },
+  { href: "/panne", label: "J’ai une panne", icon: Wrench },
 ];
 const SEARCH_ITEM: NavItem = { href: "/search", label: "Rechercher", icon: Search };
 

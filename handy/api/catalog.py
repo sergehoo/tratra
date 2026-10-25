@@ -30,3 +30,24 @@ def public_catalog(request):
 
 
 public_catalog.cls.throttle_scope = "catalog"
+
+
+MATCH_MAX_CHARS = 300
+
+
+@api_view(["GET"])
+@authentication_classes([])
+@permission_classes([AllowAny])
+@throttle_classes([ScopedRateThrottle])
+def catalog_match(request):
+    """« J'ai une panne » : `GET /handy/catalog/match/?q=mon frigo ne refroidit plus` → prestations et métiers pertinents (classés).
+
+    Le texte du client n'est ni enregistré ni journalisé ; la réponse ne contient que des catégories du catalogue public. Pour trouver les
+    artisans, le client enchaîne avec la recherche habituelle (`/services/?categories=…&commune=…` ou `/services/nearby/`)."""
+    text = (request.query_params.get("q") or "").strip()[:MATCH_MAX_CHARS]
+    response = Response(catalog.match(text))
+    response["Cache-Control"] = "no-store"
+    return response
+
+
+catalog_match.cls.throttle_scope = "catalog"

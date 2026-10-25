@@ -5,7 +5,8 @@ les mêmes noms, les mêmes icônes et la même arborescence. Aucune liste de m�
 
 | Niveau | Dans la base | Exemple |
 |---|---|---|
-| **Métier** | catégorie racine (`parent` vide) | Jardinage, Cuisine, Nounou |
+| **Famille** | `CatalogFamily` (navigation, sans offre) | Informatique & Numérique, Auto, moto & vélo |
+| **Métier** (= sous-catégorie) | catégorie racine (`parent` vide), rangée dans une famille (`family`, facultative) | Jardinage, Cuisine, Nounou |
 | **Prestation** | sous-catégorie (`parent` renseigné) | Entretien de fleurs (sous Jardinage) |
 | **Offre** | `Service` publié par un professionnel éligible, rattaché à une catégorie | « Taille de rosiers » |
 
@@ -73,3 +74,46 @@ une icône non reconnue.
 3. tratra.net : section « Métiers » (si mis en avant) et `/metiers` (toujours) ; l'application : « Tous les métiers ».
 4. Changer l'ordre, la visibilité ou la mise en avant dans l'administration : visible sur le web sous ~1 minute, dans l'application à l'expiration du cache (5 minutes)
    ou à l'actualisation par tirage.
+
+## Familles, synonymes et « J'ai une panne » (25 oct. 2026)
+
+**Structure** : famille → métier (sous-catégorie) → prestation. La famille est un regroupement de navigation administrable (`Familles de métiers`
+dans l'admin Django : nom, slug, icône, ordre, visibilité, synonymes) ; elle ne change ni l'identifiant ni la place d'un métier. Un métier sans famille
+(ou d'une famille masquée) s'affiche dans « Autres métiers ». Les prestations prennent la famille de leur métier.
+
+**Référentiel Côte d'Ivoire** (`handy/catalog_seed.py`, version `ci-2026-10`) : 11 familles — Informatique & Numérique (12 métiers : maintenance,
+réseaux/Wi-Fi, développement web/mobile, cybersécurité, vidéosurveillance, téléphonie, bureautique, cloud/serveurs, design numérique, marketing
+digital, formation, domotique) et 10 familles pour les 18 catégories de réparation et services de proximité (téléphones/électronique, électroménager
+et froid, auto/moto/vélo, électricité et plomberie, bâtiment, menuiserie/métallerie/serrurerie, nettoyage/jardin, couture/cordonnerie/tapisserie,
+transport/déménagement, équipements professionnels) — 33 métiers et environ 210 prestations avec leurs synonymes populaires (« frigo », « clim »,
+« écran cassé », « vulcanisateur », « compteur CIE », « SODECI »…).
+
+**Application idempotente** — migration `handy.0064` puis, si besoin, `python manage.py sync_catalog [--dry-run]` :
+- un métier qui existe déjà (même slug, slug historique — ex. `reparation-smartphone`, `ferronnerie`, `reparation-electromenager` — ou même nom sans
+  accents ni casse) est **réutilisé tel quel** : nom, ordre, mise en avant, visibilité et icône conservés ; seules sa famille (si vide), son icône
+  (si vide), les prestations manquantes et les synonymes manquants sont ajoutés ;
+- une prestation existe déjà si son métier en a une au même nom (sans accents ni casse) : aucun doublon ;
+- rien n'est supprimé, renommé ni déplacé ; profils (spécialités), offres et réservations ne sont pas touchés ; ré-appliquer ne change rien.
+- Répétition sur base jetable (ancien catalogue de 13 catégories) : 239 catégories après migration, 11 familles, Plomberie conservée (ordre 10, mise en
+  avant, icône), aucune prestation en double ; `sync_catalog` ensuite : 0 création ; retour à `handy 0062` puis ré-application OK.
+
+**Synonymes** (`keywords`, séparés par des virgules, éditables dans l'admin) : servis dans `GET /handy/catalog/` (`keywords` par entrée,
+`family` par entrée, liste `families`), utilisés par la recherche des services (`search=` couvre aussi les synonymes et le nom du métier d'une
+prestation), par la recherche du catalogue (web `/metiers`, application « Tous les métiers », autocomplétion des offres).
+
+**Filtres** : `family=<id ou slug>` (services et `services/nearby/`), en plus de `categories=`, `commune=`, `lat`/`lng`/`radius_km`. Un artisan peut avoir
+plusieurs spécialités (`HandymanProfile.skills`) et publier des offres dans plusieurs métiers et familles.
+
+**« J'ai une panne »** : `GET /handy/catalog/match/?q=<description>` (public, sans jeton, limité par `THROTTLE_CATALOG`, `Cache-Control: no-store`) renvoie
+les prestations et métiers pertinents, classés (score déterministe : couverture des mots utiles du client par le nom et les synonymes, bonus pour une
+expression entière, contexte du métier). Le texte n'est ni enregistré ni journalisé. Web : page `/panne` (description, commune facultative,
+prestations proposées, lien vers les artisans ou « Trouvez-moi un professionnel ») ; application : écran « J'ai une panne » (accueil, recherche,
+« Tous les métiers »), puis liste des offres filtrée par prestation et commune.
+
+**Icônes ajoutées** au vocabulaire commun : `phone`, `cloud`, `server`, `bullhorn`, `tablet-screen-button`, `radio`, `satellite-dish`, `network-wired`,
+`microchip`, `code`, `house-signal`, `shoe-prints`, `industry`, `truck-pickup`, `car-battery`, `bug` (Lucide sur le web, Font Awesome dans l'application ;
+tests de contrat des deux côtés).
+
+**Tests en base** : les migrations de données remplissent le catalogue ; le `conftest.py` racine remet la base de test à un catalogue vide après les
+migrations (les tests créent leurs catégories) ; `handy/test_catalog_reference.py` applique le référentiel explicitement.
+

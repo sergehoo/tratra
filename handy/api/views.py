@@ -344,7 +344,7 @@ def _badge_param(params):
 def apply_public_service_filters(qs, params, *, restrict=True):
     """Filtres de recherche publics communs à /services/ et /services/nearby/.
 
-    categories=1,2 · category__name=<nom> · commune=<commune ou quartier> · verified=1 · online=1 · urgent=1 · mode=one_off|recurring|contract · min_price · max_price
+    categories=1,2 · family=<id ou slug> · category__name=<nom> · commune=<commune ou quartier> · verified=1 · online=1 · urgent=1 · mode=one_off|recurring|contract · min_price · max_price
     """
     # Publication : seuls les services ACTIFS d'artisans éligibles (compte actif, profil approuvé,
     # KYC approuvé, profil complet) sont publics — règle unique : handy/eligibility.py.
@@ -356,6 +356,11 @@ def apply_public_service_filters(qs, params, *, restrict=True):
     if category_ids:
         # Choisir un MÉTIER couvre ses PRESTATIONS (sous-catégories actives) : même arbre que le catalogue public.
         qs = qs.filter(category_id__in=catalog.with_descendants(category_ids))
+
+    family = _text_param(params.get("family"))
+    if family:
+        # FAMILLE (identifiant ou slug) : tous ses métiers visibles et leurs prestations ; famille inconnue ou masquée = aucun résultat.
+        qs = qs.filter(category_id__in=catalog.with_descendants(catalog.family_trade_ids(family)))
 
     commune = _text_param(params.get("commune"))
     if commune:
@@ -413,6 +418,8 @@ SERVICE_SORTS = {
 _PUBLIC_SERVICE_FILTER_PARAMS = [
     OpenApiParameter("categories", OpenApiTypes.STR,
                      description="Ids de catégories séparés par des virgules (ex. 1,2,3)."),
+    OpenApiParameter("family", OpenApiTypes.STR,
+                     description="Famille de métiers (identifiant ou slug) : ses métiers et leurs prestations."),
     OpenApiParameter("commune", OpenApiTypes.STR,
                      description="Commune ou quartier de l'artisan (contient)."),
     OpenApiParameter("verified", OpenApiTypes.BOOL, description="1 = artisans vérifiés uniquement."),
@@ -859,8 +866,9 @@ class ServiceViewSet(viewsets.ModelViewSet):
     filterset_class = ServiceFilterSet
     # category__* : « plomberie », « ménage » (nom) ou « electricite » (slug sans accent)
     # trouvent le métier. Category est une FK : pas de doublon.
-    search_fields = ["title", "description", "category__name", "category__slug",
-                     "handyman__first_name", "handyman__last_name"]
+    # category__keywords / category__parent__* : synonymes et pannes courantes (« frigo », « écran cassé ») et nom du métier d'une prestation.
+    search_fields = ["title", "description", "category__name", "category__slug", "category__keywords", "category__parent__name",
+                     "category__parent__keywords", "handyman__first_name", "handyman__last_name"]
     ordering = ["-created_at"]
     pagination_class = DefaultPageNumberPagination
 

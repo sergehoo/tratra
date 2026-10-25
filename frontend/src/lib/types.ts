@@ -39,6 +39,31 @@ export interface Category {
   prestations_count?: number;
   /** Alias historique : offres publiées (avec les prestations dans le catalogue public). */
   services_count?: number | null;
+  /** Famille de navigation du métier (identifiant) ; absent ou null = « autres métiers ». */
+  family?: number | null;
+  /** Synonymes et pannes courantes (« frigo », « écran cassé ») : recherche et « J'ai une panne ». */
+  keywords?: string[];
+}
+
+/** Famille de métiers (`families` de `GET /handy/catalog/`) : regroupement de navigation, sans offre propre. */
+export interface CatalogFamily {
+  id: number;
+  name: string;
+  slug: string;
+  description?: string;
+  icon_key?: string | null;
+  keywords?: string[];
+  position?: number;
+  order?: number;
+  /** Métiers de la famille, dans l'ordre du catalogue. */
+  trades: number[];
+  offers_total?: number | null;
+}
+
+/** Réponse de `GET /handy/catalog/` : liste à plat (pagination DRF) + familles. */
+export interface CatalogPayload extends Paginated<Category> {
+  families?: CatalogFamily[];
+  version?: string;
 }
 
 export type PriceType = "hourly" | "fixed" | "quote";

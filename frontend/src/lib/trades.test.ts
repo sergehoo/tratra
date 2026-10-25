@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { DEFAULT_ICON, ICON_BY_KEY, featuredTrades, iconForCategory, resolveTrades } from "./trades.ts";
+import { DEFAULT_ICON, ICON_BY_KEY, OTHER_FAMILY_KEY, familiesOf, featuredTrades, foldText, iconForCategory, resolveFamilies, resolveTrades, searchCatalog } from "./trades.ts";
 
 type Item = Parameters<typeof resolveTrades>[0][number];
 const item = (id: number, name: string, slug: string, extra: Partial<Item> = {}): Item => ({ id, name, slug, is_active: true, parent: null, position: 100, ...extra });
@@ -104,3 +104,51 @@ test("aucun catalogue de métiers n'est écrit en dur dans le code web", () => {
     assert.ok(!/TRADE_FAMILIES|ICON_BY_SLUG|metier=plomberie|metier=electricite/.test(src), file);
   }
 });
+
+/** Catalogue avec familles : Informatique (2 métiers), Électroménager & froid (1), et Cuisine sans famille. */
+const WITH_FAMILIES: Item[] = [
+  item(1, "Maintenance informatique", "maintenance-informatique", { icon_key: "computer", kind: "trade", family: 100, keywords: ["ordinateur", "pc"] }),
+  item(11, "Récupération de données", "recuperation-de-donnees", { parent: 1, trade: 1, family: 100, keywords: ["fichiers perdus", "disque dur"] }),
+  item(2, "Réseaux & Wi-Fi", "reseaux-wifi", { icon_key: "wifi", kind: "trade", family: 100 }),
+  item(3, "Électroménager", "electromenager", { icon_key: "blender", kind: "trade", family: 200, offers_total: 3 }),
+  item(31, "Réparation de réfrigérateur et congélateur", "reparation-frigo", { parent: 3, trade: 3, family: 200, keywords: ["frigo", "ne refroidit plus"] }),
+  item(9, "Cuisine", "cuisine", { icon_key: "utensils", kind: "trade", family: null, offers_total: 1 }),
+];
+const PAYLOAD = {
+  count: WITH_FAMILIES.length, next: null, previous: null, results: WITH_FAMILIES,
+  families: [
+    { id: 200, name: "Électroménager & froid", slug: "electromenager-froid", icon_key: "snowflake", order: 1, trades: [3] },
+    { id: 100, name: "Informatique & Numérique", slug: "informatique-numerique", icon_key: "laptop", order: 0, trades: [1, 2] },
+    { id: 300, name: "Famille vide", slug: "vide", icon_key: "box", order: 2, trades: [] },
+  ],
+};
+
+test("familles : ordre du serveur, métiers rangés, « Autres métiers » en dernier, aucune famille vide", () => {
+  const families = resolveFamilies(familiesOf(PAYLOAD), resolveTrades(WITH_FAMILIES));
+  assert.deepEqual(families.map((f) => f.label), ["Informatique & Numérique", "Électroménager & froid", "Autres métiers"]);
+  assert.deepEqual(families[0].trades.map((t) => t.key), ["maintenance-informatique", "reseaux-wifi"]);
+  assert.equal(families[0].icon, ICON_BY_KEY["laptop"]);
+  assert.deepEqual(families[0].categories.map((c) => c.slug), ["maintenance-informatique", "recuperation-de-donnees", "reseaux-wifi"]);
+  assert.equal(families[2].key, OTHER_FAMILY_KEY);
+  assert.deepEqual(families[2].trades.map((t) => t.key), ["cuisine"]);
+  assert.equal(families[1].offersTotal, 3);
+});
+
+test("sans familles (ancien serveur) : un seul groupe « Tous les métiers », rien n'est perdu", () => {
+  const families = resolveFamilies(familiesOf(WITH_FAMILIES), resolveTrades(WITH_FAMILIES));
+  assert.equal(families.length, 1);
+  assert.equal(families[0].label, "Tous les métiers");
+  assert.equal(families[0].trades.length, 4);
+});
+
+test("recherche : nom d'abord, puis synonyme populaire, sans accents ni majuscules", () => {
+  const trades = resolveTrades(WITH_FAMILIES);
+  assert.equal(foldText("Électroménager & Froid"), "electromenager froid");
+  assert.deepEqual(searchCatalog(trades, "electro").map((h) => h.category.slug), ["electromenager"]);
+  const frigo = searchCatalog(trades, "FRIGO");
+  assert.deepEqual(frigo.map((h) => [h.category.slug, h.synonym]), [["reparation-frigo", "frigo"]]);
+  assert.equal(frigo[0].trade.key, "electromenager");
+  assert.deepEqual(searchCatalog(trades, "disque").map((h) => h.category.slug), ["recuperation-de-donnees"]);
+  assert.deepEqual(searchCatalog(trades, "x"), []);
+});
+

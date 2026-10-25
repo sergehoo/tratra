@@ -7,7 +7,7 @@ from django.dispatch import receiver
 
 from handy.media.sanitize import sanitize_new_upload
 from handy.models import (
-    ServiceImage, User, HandymanProfile, Review, Booking, CompanyProfile, Service, ReviewMedia, Message, Dispute, ServiceCategory,
+    ServiceImage, User, HandymanProfile, Review, Booking, CompanyProfile, Service, ReviewMedia, Message, Dispute, ServiceCategory, CatalogFamily,
 )
 from handy.tasks import notify_booking_status
 logger = logging.getLogger(__name__)
@@ -148,6 +148,8 @@ _register_announcement_image_sanitizer()
 
 @receiver(post_save, sender=ServiceCategory)
 @receiver(post_delete, sender=ServiceCategory)
+@receiver(post_save, sender=CatalogFamily)
+@receiver(post_delete, sender=CatalogFamily)
 def _catalog_changed(sender, **kwargs):
     """Le catalogue public est mis en cache quelques secondes : toute modification d'une catégorie (admin, Back-Office, API) l'invalide aussitôt."""
     from handy import catalog

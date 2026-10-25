@@ -36,8 +36,8 @@ import { useServiceSearch } from "@/components/search/useServiceSearch";
 import { formatCount, formatFCFA } from "@/lib/format";
 import { registerHref } from "@/lib/links";
 import { qs, resultsOf } from "@/lib/public";
-import { resolveTrades } from "@/lib/trades";
-import type { Category, Paginated } from "@/lib/types";
+import { familiesOf, resolveFamilies, resolveTrades } from "@/lib/trades";
+import type { CatalogPayload, Category, Paginated } from "@/lib/types";
 import { usePublicData } from "@/lib/usePublic";
 
 /*
@@ -76,11 +76,12 @@ export default function SearchClient() {
   const asideTitleId = useId();
 
   // ---- Catégories réelles (actives) -> slug -> id, familles de métiers ----
-  const cats = usePublicData<Paginated<Category> | Category[]>(CATEGORIES_PATH);
+  const cats = usePublicData<CatalogPayload | Paginated<Category> | Category[]>(CATEGORIES_PATH);
   const categories = useMemo(() => resultsOf(cats.data).filter((c) => c.is_active !== false), [cats.data]);
   const categoriesStatus: CategoriesStatus = cats.loading ? "loading" : cats.data ? "ready" : "error";
   const bySlug = useMemo(() => new Map(categories.map((c) => [c.slug, c])), [categories]);
   const trades = useMemo(() => resolveTrades(categories), [categories]);
+  const families = useMemo(() => resolveFamilies(familiesOf(cats.data), trades), [cats.data, trades]);
   const categoriesComplete =
     cats.data !== null && (Array.isArray(cats.data) || cats.data.count <= resultsOf(cats.data).length);
 
@@ -393,7 +394,7 @@ export default function SearchClient() {
 
   return (
     <>
-      <SearchHero state={state} update={update} trades={trades} categoriesStatus={categoriesStatus} />
+      <SearchHero state={state} update={update} trades={trades} families={families} categoriesStatus={categoriesStatus} />
 
       <div className={RESULTS_SHELL}>
         <div className={RESULTS_LAYOUT}>

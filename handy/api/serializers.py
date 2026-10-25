@@ -68,7 +68,8 @@ class ServiceCategorySerializer(serializers.ModelSerializer):
 
     class Meta:
         model = ServiceCategory
-        fields = ["id", "name", "slug", "description", "icon", "icon_key", "is_active", "parent", "kind", "position", "is_featured", "services_count"]
+        fields = ["id", "name", "slug", "description", "icon", "icon_key", "is_active", "parent", "family", "keywords", "kind", "position", "is_featured",
+                  "services_count"]
         read_only_fields = ["icon_key", "kind"]
 
     @extend_schema_field(OpenApiTypes.INT)

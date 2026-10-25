@@ -452,15 +452,39 @@ class DepositTransaction(models.Model):
 
 
 # ---- CATALOGUE ----
+class CatalogFamily(models.Model):
+    """FAMILLE de métiers : regroupement de navigation au-dessus des métiers (« Informatique & Numérique », « Auto, moto & vélo »…).
+
+    Catégorie → sous-catégorie → prestation = FAMILLE → MÉTIER (`ServiceCategory` racine) → PRESTATION (sous-catégorie). Une famille ne
+    porte aucune offre et ne change ni l'identifiant ni la place d'un métier dans l'arbre : un métier sans famille reste affiché (« Autres
+    métiers »). Administrable (Django Admin) ; `is_active` = visibilité, `position` = ordre."""
+    name = models.CharField(max_length=100, unique=True)
+    slug = models.SlugField(unique=True)
+    description = models.TextField(blank=True, default="")
+    icon = models.CharField(max_length=50, blank=True, default="", help_text="Nom Font Awesome, par exemple « fa-solid fa-laptop ».")
+    keywords = models.TextField(blank=True, default="", help_text="Synonymes de recherche, séparés par des virgules.")
+    position = models.PositiveIntegerField(default=100, db_index=True, help_text="Ordre d'affichage : le plus petit d'abord.")
+    is_active = models.BooleanField(default=True, db_index=True)
+
+    class Meta:
+        ordering = ("position", "name")
+        verbose_name = "Famille de métiers"
+        verbose_name_plural = "Familles de métiers"
+
+    def __str__(self):
+        return self.name
+
+
 class ServiceCategory(models.Model):
     """Catalogue unique (web, application mobile, administration), lu via `GET /handy/catalog/`.
 
     Trois niveaux, jamais mélangés :
-      - MÉTIER = catégorie RACINE (`parent` vide) : Jardinage, Cuisine, Nounou…
+      - MÉTIER = catégorie RACINE (`parent` vide) : Jardinage, Cuisine, Nounou… — rangé dans une FAMILLE (`family`, facultative) ;
       - PRESTATION = sous-catégorie (`parent` renseigné) : « Entretien de fleurs » sous Jardinage ;
       - OFFRE = `Service` publié par un professionnel, rattaché à une catégorie.
     Un métier ACTIF reste visible même sans aucune offre. `is_active` = visibilité, `position` = ordre (petit en premier),
-    `is_featured` = mise en avant sur la page d'accueil. Les identifiants ne changent jamais."""
+    `is_featured` = mise en avant sur la page d'accueil, `keywords` = synonymes et pannes courantes (recherche, « J'ai une panne »).
+    Les identifiants ne changent jamais."""
     name = models.CharField(max_length=100)
     slug = models.SlugField(unique=True)
     description = models.TextField(blank=True, null=True)
@@ -472,6 +496,10 @@ class ServiceCategory(models.Model):
     min_experience_years = models.PositiveSmallIntegerField(
         default=0, help_text="Expérience minimale (en années) exigée pour publier une offre de ce métier ; 0 = débutants acceptés. "
                              "S'applique aussi à ses prestations. La déclaration de l'artisan n'est jamais modifiée.")
+    family = models.ForeignKey(CatalogFamily, on_delete=models.SET_NULL, blank=True, null=True, related_name="trades",
+                               help_text="Famille de navigation (métiers uniquement ; ignorée pour une prestation).")
+    keywords = models.TextField(blank=True, default="", help_text="Synonymes et pannes courantes, séparés par des virgules "
+                                                                  "(« frigo, ne refroidit plus »). Servent à la recherche et à « J'ai une panne ».")
 
     class Meta:
         verbose_name_plural = "Service Categories"

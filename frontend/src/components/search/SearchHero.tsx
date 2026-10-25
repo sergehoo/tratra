@@ -4,7 +4,7 @@ import { CircleAlert, LayoutGrid, LocateFixed, MapPin, Search, X } from "lucide-
 import { buttonClass } from "@/components/ds/Button";
 import { cx } from "@/components/ds/cx";
 import { Spinner } from "@/components/ds/Spinner";
-import type { ResolvedTrade } from "@/lib/trades";
+import type { ResolvedFamily, ResolvedTrade } from "@/lib/trades";
 import { HERO_SHELL, HeroBackdrop, SEARCH_CARD, SearchIntro, TradeChipsSkeleton } from "./SearchSkeleton";
 import type { CategoriesStatus } from "./FiltersPanel";
 import {
@@ -77,11 +77,14 @@ export default function SearchHero({
   state,
   update,
   trades,
+  families = [],
   categoriesStatus,
 }: {
   state: SearchState;
   update: (patch: Partial<SearchState>) => void;
   trades: ResolvedTrade[];
+  /** Familles de navigation : puces compactes (12 au plus + « Autres métiers ») ; à défaut, une puce par métier. */
+  families?: ResolvedFamily[];
   categoriesStatus: CategoriesStatus;
 }) {
   const uid = useId();
@@ -141,14 +144,14 @@ export default function SearchHero({
     );
   }
 
-  function familyState(t: ResolvedTrade): boolean | "mixed" {
+  function familyState(t: { categories: { slug: string }[] }): boolean | "mixed" {
     const selected = new Set(state.metier);
     const hits = t.categories.filter((c) => selected.has(c.slug)).length;
     if (!hits) return false;
     return hits === t.categories.length ? true : "mixed";
   }
 
-  function toggleFamily(t: ResolvedTrade) {
+  function toggleFamily(t: { categories: { slug: string }[] }) {
     const slugs = t.categories.map((c) => c.slug);
     const next = new Set(state.metier);
     if (familyState(t) === true) slugs.forEach((s) => next.delete(s));
@@ -305,14 +308,14 @@ export default function SearchHero({
                 icon={LayoutGrid}
                 label="Tous les métiers"
               />
-              {trades.map((t) => (
+              {(families.length > 1 ? families : trades).map((t) => (
                 <TradeChip
                   key={t.key}
                   pressed={familyState(t)}
                   onClick={() => toggleFamily(t)}
                   icon={t.icon}
                   label={t.label}
-                  count={t.servicesCount}
+                  count={"servicesCount" in t ? t.servicesCount : t.offersTotal}
                 />
               ))}
             </div>

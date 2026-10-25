@@ -1,7 +1,7 @@
 from .admin_utils import ReadOnlyHistoryAdmin
 from handy.admin_safe_delete import SafeDeleteAdminMixin
 from .models import (
-    HandymanDocument, ServiceImage, Report, PaymentLog, Device, IPBlacklist, ServiceCategory, Service, Booking,
+    HandymanDocument, ServiceImage, Report, PaymentLog, Device, IPBlacklist, ServiceCategory, CatalogFamily, Service, Booking,
     Notification, Message, DepositTransaction, HeroSlide, Review, UserAddress,
 )
 from django import forms
@@ -302,23 +302,57 @@ class ServiceCategoryAdminForm(forms.ModelForm):
         return parent
 
 
+@admin.register(CatalogFamily)
+class CatalogFamilyAdmin(admin.ModelAdmin):
+    """Familles de navigation (« Informatique & Numérique », « Auto, moto & vélo »…) : 12 au plus pour garder une navigation compacte.
+    Une famille regroupe des MÉTIERS ; elle ne porte ni prestation ni offre. Masquer une famille laisse ses métiers visibles (« autres métiers »)."""
+    list_display = ('name', 'slug', 'position', 'is_active', 'trades_n', 'display_icon')
+    list_editable = ('position', 'is_active')
+    search_fields = ('name', 'slug', 'keywords')
+    prepopulated_fields = {'slug': ('name',)}
+    readonly_fields = ('display_icon',)
+    ordering = ('position', 'name')
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).annotate(trades_count=Count('trades', distinct=True))
+
+    @admin.display(description='Métiers', ordering='trades_count')
+    def trades_n(self, obj):
+        return obj.trades_count
+
+    @admin.display(description='Icône')
+    def display_icon(self, obj):
+        from handy import catalog
+
+        key = catalog.icon_key(obj.icon, "")
+        if not key:
+            return format_html('<span style="color:#b45309">Aucune icône : icône par défaut</span>')
+        if not catalog.icon_known(key):
+            return format_html('<code>{}</code> <span style="color:#b91c1c">non reconnue : icône par défaut affichée</span>', key)
+        return format_html('<code>{}</code> ✓', key)
+
+
 @admin.register(ServiceCategory)
 class ServiceCategoryAdmin(admin.ModelAdmin):
     """Catalogue unique : MÉTIER (catégorie racine), PRESTATION (sous-catégorie), OFFRE (service publié par un professionnel).
     Visibilité, ordre et mise en avant se règlent ici et se retrouvent à l'identique sur le site et dans l'application (`GET /handy/catalog/`)."""
     form = ServiceCategoryAdminForm
-    list_display = ('name', 'level', 'trade_name', 'slug', 'position', 'is_featured', 'is_active', 'offers', 'display_icon')
+    list_display = ('name', 'level', 'trade_name', 'family', 'slug', 'position', 'is_featured', 'is_active', 'offers', 'display_icon')
     list_editable = ('position', 'is_featured', 'is_active')
-    list_filter = (CategoryKindFilter, TradeFilter, 'is_active', 'is_featured')
-    search_fields = ('name', 'slug', 'description')
+    list_filter = (CategoryKindFilter, TradeFilter, 'family', 'is_active', 'is_featured')
+    search_fields = ('name', 'slug', 'description', 'keywords')
     prepopulated_fields = {'slug': ('name',)}
     readonly_fields = ('display_icon',)
     ordering = ('position', 'name')
     list_per_page = 100
     actions = ('feature', 'unfeature', 'show', 'hide')
     fieldsets = (
-        ('Identité', {'fields': ('name', 'slug', 'parent', 'description'),
-                      'description': "Sans parent : c'est un MÉTIER. Avec un parent : c'est une PRESTATION de ce métier. Les offres des professionnels se rattachent à une catégorie."}),
+        ('Identité', {'fields': ('name', 'slug', 'parent', 'family', 'description'),
+                      'description': "Sans parent : c'est un MÉTIER (rangé dans une famille de navigation, facultative). Avec un parent : c'est une PRESTATION "
+                                     "de ce métier (sa famille est celle du métier). Les offres des professionnels se rattachent à une catégorie."}),
+        ('Recherche', {'fields': ('keywords',),
+                       'description': "Synonymes et pannes courantes, séparés par des virgules (« frigo, ne refroidit plus, congélateur »). "
+                                      "Ils servent à la recherche et à « J'ai une panne » sur le site et dans l'application."}),
         ('Affichage', {'fields': ('is_active', 'is_featured', 'position'),
                        'description': "Actif = visible sur le site et dans l'application (même sans offre). Mise en avant = page d'accueil. Ordre : le plus petit d'abord."}),
         ('Publication', {'fields': ('min_experience_years',),
@@ -328,7 +362,7 @@ class ServiceCategoryAdmin(admin.ModelAdmin):
     )
 
     def get_queryset(self, request):
-        return super().get_queryset(request).select_related('parent').annotate(
+        return super().get_queryset(request).select_related('parent', 'family').annotate(
             offers_n=Count('services', filter=Q(services__is_active=True), distinct=True))
 
     @admin.display(description='Niveau', ordering='parent')

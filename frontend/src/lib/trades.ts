@@ -5,9 +5,10 @@ import {
   KeyRound, Laptop, Layers, Leaf, Lightbulb, Lock, Monitor, Music, Package, Boxes, Paintbrush, PaintRoller, Palette, PartyPopper, PawPrint, Pen, Pizza, Plug, Printer,
   Presentation, Recycle, Route, Ruler, Sandwich, Scissors, Settings, ShieldCheck, Shirt, ShowerHead, Smartphone, Snowflake, Soup, Sofa, Sparkles, SprayCan, Sprout,
   Star, Stethoscope, Store, Sun, Tag, Thermometer, TreeDeciduous, Tractor, Trash2, Truck, Tv, User, Users, Utensils, Video, Waves, Wifi, Wind, Wine, Wrench, Zap,
-  Armchair, Blend, Hammer, type LucideIcon,
+  Armchair, Blend, Hammer, Phone, Cloud, Server, Megaphone, TabletSmartphone, Radio, Satellite, Network, Cpu, Code, HousePlug, Footprints, Factory,
+  BatteryCharging, Bug, LayoutGrid, type LucideIcon,
 } from "lucide-react";
-import type { Category } from "./types";
+import type { CatalogFamily, CatalogPayload, Category, Paginated } from "./types";
 
 /**
  * Catalogue des métiers : AUCUNE liste écrite en dur. La source unique est la base (Django `ServiceCategory`), lue via `GET /handy/catalog/` :
@@ -33,6 +34,9 @@ export const ICON_BY_KEY: Record<string, LucideIcon> = {
   truck: Truck, "truck-ramp-box": Truck, "truck-fast": Truck, car: Car, "car-side": CarFront, taxi: CarTaxiFront, bus: Bus, motorcycle: Bike, bicycle: Bike, "gas-pump": Fuel,
   road: Route, "van-shuttle": Bus,
   laptop: Laptop, "laptop-code": Laptop, computer: Monitor, "mobile-screen-button": Smartphone, wifi: Wifi, camera: Camera, video: Video, tv: Tv, headphones: Headphones, print: Printer,
+  phone: Phone, cloud: Cloud, server: Server, bullhorn: Megaphone, "tablet-screen-button": TabletSmartphone, radio: Radio, "satellite-dish": Satellite,
+  "network-wired": Network, microchip: Cpu, code: Code, "house-signal": HousePlug,
+  "shoe-prints": Footprints, industry: Factory, "truck-pickup": Truck, "car-battery": BatteryCharging, bug: Bug,
   music: Music, guitar: Guitar, book: BookOpen, "graduation-cap": GraduationCap, "chalkboard-user": Presentation, pen: Pen, palette: Palette, "camera-retro": Camera,
   futbol: Star, dumbbell: Dumbbell, "champagne-glasses": PartyPopper, gift: Gift, ring: Gem,
   paw: PawPrint, dog: Dog, cat: Cat, seedling: Sprout, leaf: Leaf, tree: TreeDeciduous, tractor: Tractor, sun: Sun, "water-ladder": Waves, "person-swimming": Waves, spa: Flower2,
@@ -70,6 +74,10 @@ export interface ResolvedTrade {
   servicesCount: number | null;
   /** Lien de recherche réel : /search?metier=slug1,slug2 */
   href: string;
+  /** Famille de navigation (identifiant) ; null = « autres métiers ». */
+  family: number | null;
+  /** Synonymes du métier (recherche). */
+  keywords: string[];
 }
 
 const DEFAULT_POSITION = 100;
@@ -124,8 +132,96 @@ export function resolveTrades(items: Category[]): ResolvedTrade[] {
       offersTotal: total,
       servicesCount: total,
       href: `/search?metier=${categories.map((c) => c.slug).join(",")}`,
+      family: root.family ?? null,
+      keywords: root.keywords ?? [],
     };
   });
+}
+
+/** Une famille de navigation prête à afficher (« Informatique & Numérique ») : ses métiers et toutes leurs catégories. */
+export interface ResolvedFamily {
+  /** Slug de la famille (stable), « autres-metiers » pour les métiers sans famille. */
+  key: string;
+  id: number | null;
+  label: string;
+  icon: LucideIcon;
+  description: string;
+  trades: ResolvedTrade[];
+  /** Métiers + prestations de la famille (filtre de recherche). */
+  categories: Category[];
+  offersTotal: number | null;
+}
+
+export const OTHER_FAMILY_KEY = "autres-metiers";
+
+/** Familles servies par le catalogue (`families`) ; [] si le serveur n'en fournit pas encore. */
+export function familiesOf(data: CatalogPayload | Paginated<Category> | Category[] | null | undefined): CatalogFamily[] {
+  return data && !Array.isArray(data) && "families" in data && Array.isArray(data.families) ? data.families : [];
+}
+
+/**
+ * Navigation compacte : les familles du serveur dans leur ordre, chacune avec ses métiers ; les métiers sans famille (ou d'une famille masquée)
+ * sont regroupés dans « Autres métiers », toujours affiché en dernier. Aucun métier n'est perdu.
+ */
+export function resolveFamilies(families: CatalogFamily[], trades: ResolvedTrade[]): ResolvedFamily[] {
+  const byId = new Map(trades.map((t) => [t.id, t]));
+  const placed = new Set<number>();
+  const out: ResolvedFamily[] = [];
+  for (const f of [...families].sort((a, b) => (a.order ?? 0) - (b.order ?? 0))) {
+    const members = f.trades.map((id) => byId.get(id)).filter((t): t is ResolvedTrade => Boolean(t) && !placed.has((t as ResolvedTrade).id));
+    if (!members.length) continue;
+    members.forEach((t) => placed.add(t.id));
+    out.push(family(f.slug, f.id, f.name, (f.icon_key && ICON_BY_KEY[f.icon_key]) || DEFAULT_ICON, f.description ?? "", members));
+  }
+  const others = trades.filter((t) => !placed.has(t.id));
+  if (others.length) out.push(family(OTHER_FAMILY_KEY, null, out.length ? "Autres métiers" : "Tous les métiers", LayoutGrid, "", others));
+  return out;
+}
+
+function family(key: string, id: number | null, label: string, icon: LucideIcon, description: string, trades: ResolvedTrade[]): ResolvedFamily {
+  const totals = trades.map((t) => t.offersTotal);
+  return {
+    key, id, label, icon, description, trades,
+    categories: trades.flatMap((t) => t.categories),
+    offersTotal: totals.every((n) => n === null) ? null : totals.reduce<number>((sum, n) => sum + (n ?? 0), 0),
+  };
+}
+
+/** Texte comparable : minuscules, sans accents ni ponctuation (« Électricité » = « electricite »). */
+export function foldText(text: string): string {
+  return text.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+export interface CatalogHit {
+  category: Category;
+  trade: ResolvedTrade;
+  /** Synonyme reconnu (« frigo ») quand le nom lui-même ne correspond pas. */
+  synonym?: string;
+}
+
+/**
+ * Recherche dans le catalogue : métiers et prestations par NOM, puis par SYNONYME (« clim » → Climatisation, « frigo » → Réparation de
+ * réfrigérateur). Sans accents ni majuscules ; débuts de mot d'abord.
+ */
+export function searchCatalog(trades: ResolvedTrade[], query: string, limit = 12): CatalogHit[] {
+  const q = foldText(query);
+  if (q.length < 2) return [];
+  const starts: CatalogHit[] = [], contains: CatalogHit[] = [], synonyms: CatalogHit[] = [];
+  for (const trade of trades) {
+    for (const category of trade.categories) {
+      const name = foldText(category.name);
+      if (name.startsWith(q) || name.includes(` ${q}`)) starts.push({ category, trade });
+      else if (name.includes(q)) contains.push({ category, trade });
+      else {
+        const synonym = (category.keywords ?? []).find((k) => {
+          const f = foldText(k);
+          return f.startsWith(q) || f.includes(` ${q}`);
+        });
+        if (synonym) synonyms.push({ category, trade, synonym });
+      }
+    }
+  }
+  return [...starts, ...contains, ...synonyms].slice(0, limit);
 }
 
 /** Métiers mis en avant (page d'accueil) ; si l'administration n'en a marqué aucun, les premiers du catalogue — la page n'est jamais vide. */
