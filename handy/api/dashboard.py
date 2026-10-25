@@ -302,6 +302,7 @@ def me_services(request):
             "description": s.description or "",
             "price": str(s.price) if s.price is not None else None, "price_type": s.price_type,
             "duration": s.duration, "is_active": s.is_active,
+            "modes": s.modes,  # ponctuel, récurrent, contractuel (mensuel)
             "published": bool(s.is_active and publishable),  # visible dans le catalogue public
             "publication": publication(s),
             "bookings_count": s.bookings_count,

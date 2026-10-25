@@ -5,6 +5,7 @@ export function todoHref(t: TodoItem): string {
   const c = t.contract_id;
   switch (t.kind) {
     case "accept_contract":
+    case "sign_contract":
     case "answer_amendment":
       return `/dashboard/engagements/contracts/${c}`;
     case "confirm_payment":
@@ -17,6 +18,8 @@ export function todoHref(t: TodoItem): string {
       return `/dashboard/engagements/contracts/${c}?tab=planning`;
     case "answer_replacement":
       return "/dashboard/engagements/replacements";
+    case "answer_invitation":
+      return "/dashboard/engagements/offers"; // invitations reçues : candidater ou décliner en tête de la page des offres
     case "review_applications":
     case "answer_interview":
       return t.posting_id ? `/dashboard/engagements/postings/${t.posting_id}` : "/dashboard/engagements";

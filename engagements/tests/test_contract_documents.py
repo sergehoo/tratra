@@ -128,6 +128,7 @@ def test_articles_are_frozen_per_trade_and_part_of_the_accepted_terms():
     titles = [a["title"] for a in c.articles]
     assert "Garde d'enfants" in titles and c.articles[0]["number"] == 1
     assert "{{" not in str(c.articles) and "Famille Test" in c.articles[0]["body"]
+    assert ".." not in str(c.articles)                       # texte libre terminé par un point inséré sans doubler la ponctuation
     assert contracts.snapshot(c)["articles"] == c.articles and contracts.terms_hash(c) == c.terms_hash
 
 
@@ -166,6 +167,9 @@ def test_signature_requires_consent_and_each_party_signs_once():
     contracts.accept(c, worker, c.terms_hash, today=TODAY)
     c.refresh_from_db()
     assert c.status == "accepted" and c.installments.count() == 0
+    def to_sign(u):
+        return [t["contract_id"] for t in api(u).get("/handy/engagements/me/overview/").json()["todo"] if t["kind"] == "sign_contract"]
+    assert to_sign(worker) == [c.pk] and to_sign(principal) == [c.pk]      # « à faire » des deux parties
     with pytest.raises(EngagementError) as e:
         contracts.sign(c, worker, consent=False, today=TODAY)
     assert e.value.code == "consent_required"
@@ -173,6 +177,7 @@ def test_signature_requires_consent_and_each_party_signs_once():
     assert r.status_code == 200 and r.json()["signatures"]["worker"] and not r.json()["signatures"]["principal"]
     api(worker).post(f"/handy/engagements/contracts/{c.pk}/sign/", {"consent": True}, format="json")    # rejeu : sans effet
     assert ContractSignature.objects.filter(contract=c).count() == 1
+    assert to_sign(worker) == [] and to_sign(principal) == [c.pk]           # seule la partie qui n'a pas signé garde la tâche
     stranger = person("curieux")
     assert api(stranger).post(f"/handy/engagements/contracts/{c.pk}/sign/", {"consent": True}, format="json").status_code == 404
 
@@ -222,6 +227,7 @@ def test_the_document_to_sign_is_superseded_and_a_revoked_document_says_so():
     assert r.status_code == 200
     body = api().get(f"/handy/public/contracts/verify/{token_of(final)}/").json()
     assert body["state"] == "revoked" and body["revoked_at"]
+    assert documents.public_result(first)["state"] == "superseded"           # le brouillon ne redevient pas « authentique »
     support = staff("sup_rev", "support")
     assert api(support).post(f"/handy/backoffice/engagements/documents/{first.pk}/revoke/", {"reason": "Tentative non autorisée."},
                              format="json").status_code == 403

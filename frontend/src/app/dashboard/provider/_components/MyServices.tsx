@@ -5,6 +5,8 @@ import { apiErrorMessage, patch } from "@/lib/api";
 import { formatFCFA } from "@/lib/format";
 import { useData } from "@/lib/useData";
 import { Alert, Badge, Button, ButtonLink, Card, EmptyState, SkeletonList } from "@/components/ds";
+import { modesLabel, type ServiceMode } from "@/lib/serviceModes";
+import { ServiceModesField, useModeRules } from "./ServiceModesField";
 
 interface MyService {
   id: number;
@@ -13,6 +15,8 @@ interface MyService {
   price: string | null;
   price_type: string;
   duration: number | null;
+  category_id: number | null;
+  modes: ServiceMode[];
   is_active: boolean;
   published: boolean;
   bookings_count: number;
@@ -28,6 +32,7 @@ export function MyServices() {
   );
   const [busy, setBusy] = useState<number | null>(null);
   const [failure, setFailure] = useState("");
+  const [editing, setEditing] = useState<number | null>(null);
 
   async function toggle(s: MyService) {
     setBusy(s.id);
@@ -81,11 +86,11 @@ export function MyServices() {
             const price = s.price_type === "quote" || !s.price ? "Sur devis" : `${formatFCFA(s.price) ?? s.price}${PRICE_SUFFIX[s.price_type] ?? ""}`;
             return (
               <li key={s.id}>
-                <Card padding="sm" radius="panel" className="flex flex-wrap items-center gap-3 sm:flex-nowrap">
+                <Card padding="sm" radius="panel" className={`flex flex-wrap items-center gap-3 ${editing === s.id ? "" : "sm:flex-nowrap"}`}>
                   <div className="min-w-0 flex-1">
                     <p className="truncate font-display text-[15px] font-bold text-ink">{s.title}</p>
                     <p className="mt-0.5 text-xs text-ash">
-                      {[s.category, price, `${s.bookings_count} réservation${s.bookings_count > 1 ? "s" : ""}`].filter(Boolean).join(" · ")}
+                      {[s.category, price, modesLabel(s.modes), `${s.bookings_count} réservation${s.bookings_count > 1 ? "s" : ""}`].filter(Boolean).join(" · ")}
                     </p>
                   </div>
                   {s.published ? (
@@ -95,9 +100,13 @@ export function MyServices() {
                   ) : (
                     <Badge tone="gray" dot>Désactivé</Badge>
                   )}
+                  <Button size="sm" variant="ghost" aria-expanded={editing === s.id} onClick={() => setEditing(editing === s.id ? null : s.id)}>Modes</Button>
                   <Button size="sm" variant="outline" loading={busy === s.id} onClick={() => void toggle(s)}>
                     {s.is_active ? "Désactiver" : "Activer"}
                   </Button>
+                  {editing === s.id ? (
+                    <ModesEditor service={s} onCancel={() => setEditing(null)} onDone={async () => { setEditing(null); await reload(); }} />
+                  ) : null}
                 </Card>
               </li>
             );
@@ -105,5 +114,37 @@ export function MyServices() {
         </ul>
       )}
     </section>
+  );
+}
+
+/** Modifier les modes d'une offre existante (le serveur refuse un mode que le métier n'ouvre pas). */
+function ModesEditor({ service, onDone, onCancel }: { service: MyService; onDone: () => Promise<void>; onCancel: () => void }) {
+  const rules = useModeRules(service.category_id);
+  const [modes, setModes] = useState<ServiceMode[]>(service.modes?.length ? service.modes : ["one_off"]);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  async function save() {
+    if (!modes.length) {
+      setError("Choisissez au moins un mode.");
+      return;
+    }
+    setSaving(true);
+    setError("");
+    try {
+      await patch(`/services/${service.id}/`, { modes });
+      await onDone();
+    } catch (e) {
+      setError(apiErrorMessage(e, "Les modes n’ont pas pu être enregistrés."));
+      setSaving(false);
+    }
+  }
+  return (
+    <div className="w-full basis-full space-y-3 pt-2">
+      <ServiceModesField value={modes} onChange={setModes} rules={rules} error={error} disabled={saving} />
+      <div className="flex gap-2">
+        <Button size="sm" loading={saving} onClick={() => void save()}>Enregistrer les modes</Button>
+        <Button size="sm" variant="ghost" disabled={saving} onClick={onCancel}>Annuler</Button>
+      </div>
+    </div>
   );
 }

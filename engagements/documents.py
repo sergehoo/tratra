@@ -220,7 +220,9 @@ def public_result(doc, *, check_file: bool = True) -> Dict:
     check = _signature_check(doc)
     newer_final = None
     if doc.kind == "contract" and doc.stage == "for_signature":
-        newer_final = contract.documents.filter(kind="contract", stage="final", version=doc.version, revoked_at__isnull=True).first()
+        # Une fois le contrat final émis, la version à signer reste « remplacée », même si ce final est révoqué ensuite
+        # (sinon le brouillon redeviendrait « authentique » et pourrait être présenté comme le contrat en vigueur).
+        newer_final = contract.documents.filter(kind="contract", stage="final", version=doc.version).first()
     if doc.revoked_at:
         state, label = "revoked", "Document révoqué par Tratra"
     elif check_file and not stored_file_intact(doc):

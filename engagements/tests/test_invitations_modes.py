@@ -38,11 +38,14 @@ def test_invite_a_verified_professional_who_applies_by_accepting():
     assert r.status_code == 201 and r.json()["status"] == "sent"
     assert Notification.objects.filter(user=worker, dedupe_key__startswith="eng-invite:").exists()
     assert api(owner).post(f"/handy/engagements/postings/{p.pk}/invitations/", {"invitee": worker.pk}, format="json").status_code == 409
+    todo = api(worker).get("/handy/engagements/me/overview/").json()["todo"]
+    assert [(t["kind"], t["posting_id"]) for t in todo] == [("answer_invitation", p.pk)]                # « à faire » du pro invité
     mine = api(worker).get("/handy/engagements/invitations/mine/").json()["results"]
     assert len(mine) == 1 and mine[0]["can_respond"] and mine[0]["posting"]["title"] == p.title
     r = api(worker).post(f"/handy/engagements/invitations/{mine[0]['id']}/respond/", {"accept": True, "message": "Disponible dès lundi."}, format="json")
     assert r.status_code == 200 and r.json()["status"] == "accepted" and r.json()["application_id"]
     assert EngagementApplication.objects.get(pk=r.json()["application_id"]).applicant == worker
+    assert all(t["kind"] != "answer_invitation" for t in api(worker).get("/handy/engagements/me/overview/").json()["todo"])
 
 
 def test_invitations_are_limited_to_the_publisher_and_to_verified_professionals():
@@ -59,6 +62,16 @@ def test_invitations_are_limited_to_the_publisher_and_to_verified_professionals(
     assert inv.status == "declined" and not EngagementApplication.objects.filter(posting=p, applicant=worker).exists()
     with pytest.raises(EngagementError):
         postings.respond_invitation(inv, worker, True)                                   # une seule réponse
+    with pytest.raises(EngagementError) as e:
+        postings.invite(p, owner, worker.pk)                                             # décliné : pas d'insistance
+    assert e.value.code == "already_invited"
+    other_pro = pro("pro_retire")
+    first = postings.invite(p, owner, other_pro.pk)
+    r = api(owner).post(f"/handy/engagements/invitations/{first.pk}/cancel/")
+    assert r.status_code == 200 and r.json()["status"] == "cancelled"
+    again = postings.invite(p, owner, other_pro.pk, message="Finalement, nous aimerions vous rencontrer.")   # retirée : peut être renvoyée
+    assert again.pk == first.pk and again.status == "sent" and again.responded_at is None
+    assert Notification.objects.filter(user=other_pro, dedupe_key__startswith=f"eng-invite:{first.pk}").count() == 2
 
 
 def test_a_service_offers_several_modes_within_the_trade_rules():
@@ -70,6 +83,7 @@ def test_a_service_offers_several_modes_within_the_trade_rules():
     assert r.status_code == 201, r.content
     s = Service.objects.get(pk=r.json()["id"])
     assert (s.offers_one_off, s.offers_recurring, s.offers_contract) == (True, False, True) and r.json()["modes"] == ["one_off", "contract"]
+    assert [row["modes"] for row in c.get("/handy/me/services/").json()["results"]] == [["one_off", "contract"]]   # espace pro
     listing = api().get(f"/handy/services/?mode=contract&handyman={worker.pk}").json()
     assert [row["id"] for row in listing["results"]] == [s.pk]
     assert api().get(f"/handy/services/?mode=recurring&handyman={worker.pk}").json()["results"] == []

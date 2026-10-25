@@ -271,7 +271,7 @@ export default function PostingPage() {
           <Card padding="md">
             <Facts items={[
               ["Rémunération", `${fcfa(p.amount, p.currency)} ${PERIOD_FR[p.period]}`], ["Nature", RELATIONSHIP_FR[p.work_relationship]], ["Début souhaité", dateFr(p.start_date)],
-              ["Fin souhaitée", p.end_date ? dateFr(p.end_date) : "Durée indéterminée"], ["Planning", scheduleLabel(p.schedule)], ["Heures par semaine", p.hours_per_week ? `${Number(p.hours_per_week)} h` : "—"],
+              ["Fin souhaitée", p.end_date ? dateFr(p.end_date) : p.duration_months ? "Selon la durée envisagée" : "Durée indéterminée"], ["Planning", scheduleLabel(p.schedule)], ["Heures par semaine", p.hours_per_week ? `${Number(p.hours_per_week)} h` : "—"],
               ["Candidatures jusqu’au", p.application_deadline ? dateFr(p.application_deadline) : "Sans date limite"], ["Zone", p.location_note],
               ["Durée", p.duration_months ? `${p.duration_months} mois` : "—"], ["Avantages", p.benefits || "—"],
             ]} />

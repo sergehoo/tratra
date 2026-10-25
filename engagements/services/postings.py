@@ -294,12 +294,17 @@ def invite(posting: EngagementPosting, user, invitee_id, message: str = "") -> E
     v.raise_if()
     if EngagementApplication.objects.filter(posting=posting, applicant=invitee).exists():
         raise conflict("already_applied", "Ce professionnel a déjà candidaté à ce besoin.")
-    invitation, created = EngagementInvitation.objects.get_or_create(posting=posting, invitee=invitee,
-                                                                     defaults={"invited_by": user, "message": message})
+    invitation, created = EngagementInvitation.objects.select_for_update().get_or_create(posting=posting, invitee=invitee,
+                                                                                         defaults={"invited_by": user, "message": message})
     if not created:
-        raise conflict("already_invited", "Ce professionnel est déjà invité.", invitation_id=invitation.pk)
+        # Une invitation RETIRÉE par l'auteur peut être renvoyée ; une invitation déclinée par le professionnel ne l'est pas (pas d'insistance).
+        if invitation.status != "cancelled":
+            raise conflict("already_invited", "Ce professionnel est déjà invité." if invitation.status == "sent" else
+                           "Ce professionnel a déjà répondu à votre invitation.", invitation_id=invitation.pk)
+        invitation.status, invitation.invited_by, invitation.message, invitation.responded_at = "sent", user, message, None
+        invitation.save(update_fields=["status", "invited_by", "message", "responded_at"])
     notify(invitee, "engagement_application", f"{public_name(user)} vous invite à candidater : « {posting.title} ».", title="Invitation à candidater",
-           data={"kind": "posting", "id": posting.pk}, dedupe_key=f"eng-invite:{invitation.pk}")
+           data={"kind": "posting", "id": posting.pk}, dedupe_key=f"eng-invite:{invitation.pk}" + ("" if created else f":{timezone.now():%Y%m%d%H%M%S}"))
     return invitation
 
 

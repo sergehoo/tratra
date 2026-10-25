@@ -4,6 +4,9 @@ import { Button } from "@/components/ds";
 import { VerifyCard } from "@/components/trust/VerifyCard";
 import { verifyContractFile, type ContractVerification } from "@/lib/contractVerify";
 
+/** État de la clé qui a scellé le document (une clé retirée vérifie toujours ses documents ; une clé révoquée, non). */
+const KEY_STATUS_FR: Record<string, string> = { retired: "clé retirée, toujours valable pour ses documents", revoked: "clé révoquée" };
+
 const TONE = { authentic: "ok", superseded: "warn", key_revoked: "warn", revoked: "danger", altered: "danger", invalid_signature: "danger", unknown: "danger" } as const;
 const TITLE: Record<string, string> = {
   authentic: "Document authentique",
@@ -42,7 +45,7 @@ export function ContractVerifyResult({ result }: { result: ContractVerification 
           <dt className="text-ash">Scellement Tratra</dt>
           <dd className="text-ink">
             {result.seal?.valid ? "valide" : "invalide"} ({result.seal?.algorithm}, clé {result.seal?.kid}
-            {result.seal?.key_status && result.seal.key_status !== "active" ? `, ${result.seal.key_status}` : ""})
+            {result.seal?.key_status && result.seal.key_status !== "active" ? `, ${KEY_STATUS_FR[result.seal.key_status] ?? result.seal.key_status}` : ""})
           </dd>
           {result.stage === "final" ? (
             <>
@@ -53,7 +56,9 @@ export function ContractVerifyResult({ result }: { result: ContractVerification 
           {result.superseded_by ? (
             <>
               <dt className="text-ash">Remplacé par</dt>
-              <dd className="font-mono text-ink">{result.superseded_by}</dd>
+              <dd className="text-ink">
+                {result.superseded_by === result.reference ? "le contrat signé (même référence, document final scellé)" : <span className="font-mono">{result.superseded_by}</span>}
+              </dd>
             </>
           ) : null}
           {result.revoked_at ? (
@@ -89,6 +94,7 @@ export function ContractVerifyResult({ result }: { result: ContractVerification 
 export function PdfCheck({ expectedReference }: { expectedReference?: string }) {
   const [state, setState] = useState<"idle" | "checking" | "error">("idle");
   const [result, setResult] = useState<ContractVerification | null>(null);
+  const [inputKey, setInputKey] = useState(0); // remet le sélecteur de fichier à zéro (re-choisir le même fichier relance la vérification)
 
   async function check(file: File | undefined) {
     if (!file) return;
@@ -107,6 +113,7 @@ export function PdfCheck({ expectedReference }: { expectedReference?: string }) 
       </label>
       <p className="text-xs text-ash">Le fichier n’est pas conservé : seule son empreinte est comparée aux documents émis par Tratra.</p>
       <input
+        key={inputKey}
         id="contract-pdf"
         type="file"
         accept="application/pdf,.pdf"
@@ -132,9 +139,11 @@ export function PdfCheck({ expectedReference }: { expectedReference?: string }) 
           Ce fichier appartient à un autre contrat que celui du QR code.
         </p>
       ) : null}
-      <Button variant="ghost" size="sm" onClick={() => setResult(null)} disabled={!result}>
-        Effacer le résultat
-      </Button>
+      {result || state === "error" ? (
+        <Button variant="ghost" size="sm" onClick={() => { setResult(null); setState("idle"); setInputKey((k) => k + 1); }}>
+          Effacer le résultat
+        </Button>
+      ) : null}
     </div>
   );
 }

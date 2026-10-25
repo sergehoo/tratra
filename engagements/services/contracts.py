@@ -340,13 +340,18 @@ def _values(c: EngagementContract) -> dict:
     principal_role, worker_role = ROLE_WORDS.get(c.work_relationship, ROLE_WORDS["independent"])
     slots = [f"{DAYS[int(s.get('weekday', 0)) % 7]} {s.get('start', '')}–{s.get('end', '')}" for s in (c.schedule or []) if isinstance(s, dict)]
     period = dict(EngagementContract.PERIODS).get(c.period, c.period).lower()
+
+    def text(value, empty):
+        # Texte libre inséré au milieu d'une phrase de l'article : sans point final (sinon « réparations.. »).
+        return (value or "").strip().rstrip(".").strip() or empty
+
     return {"reference": c.reference or "—", "principal_role": principal_role, "worker_role": worker_role, "principal_name": _person(c.principal),
-            "worker_name": _person(c.worker), "category": c.category.name, "title": c.title, "missions": c.description or "—",
+            "worker_name": _person(c.worker), "category": c.category.name, "title": c.title, "missions": text(c.description, "—"),
             "location_city": c.location_city or "—", "start_date": c.start_date.strftime("%d/%m/%Y"),
             "end_date": f"jusqu'au {c.end_date:%d/%m/%Y}" if c.end_date else "indéterminée", "schedule": ", ".join(slots) or "à convenir dans le planning",
             "hours_per_week": str(c.hours_per_week or "—"), "amount": f"{int(c.amount):,} {c.currency}".replace(",", " "), "period": period,
-            "payment_day": str(c.payment_day) if c.payment_day else "jour convenu", "benefits": c.benefits or "aucun",
-            "conditions": c.conditions or "aucune", "notice_period_days": str(c.notice_period_days)}
+            "payment_day": str(c.payment_day) if c.payment_day else "jour convenu", "benefits": text(c.benefits, "aucun"),
+            "conditions": text(c.conditions, "aucune"), "notice_period_days": str(c.notice_period_days)}
 
 
 def render_articles(c: EngagementContract) -> None:

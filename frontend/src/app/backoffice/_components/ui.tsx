@@ -168,6 +168,7 @@ export function ReasonModal({
   reasonLabel = "Motif",
   reasonKey = "reason",
   fields = [],
+  minReason = MIN_REASON,
   onClose,
   onDone,
   request,
@@ -181,6 +182,8 @@ export function ReasonModal({
   reasonLabel?: string;
   reasonKey?: string;
   fields?: ExtraField[];
+  /** Longueur minimale du motif exigée par le serveur pour cette action. */
+  minReason?: number;
   onClose: () => void;
   onDone: () => void;
   /** Envoie la requête avec le corps construit ; lève en cas d'échec (le message est affiché). */
@@ -201,7 +204,7 @@ export function ReasonModal({
   }, [open]);
 
   const reason = (values[reasonKey] ?? "").trim();
-  const missing = reason.length < MIN_REASON || fields.some((f) => f.required && (values[f.key] ?? "").trim().length < (f.minLength ?? 1));
+  const missing = reason.length < minReason || fields.some((f) => f.required && (values[f.key] ?? "").trim().length < (f.minLength ?? 1));
 
   async function submit() {
     setBusy(true);
@@ -258,7 +261,7 @@ export function ReasonModal({
             rows={3}
             value={values[reasonKey] ?? ""}
             onChange={(e) => setValues((v) => ({ ...v, [reasonKey]: e.target.value }))}
-            placeholder={`Au moins ${MIN_REASON} caractères — conservé dans le journal d’audit`}
+            placeholder={`Au moins ${minReason} caractères — conservé dans le journal d’audit`}
             invalid={Boolean(errors[reasonKey])}
           />
           {errors[reasonKey] ? <span role="alert" className="mt-1 block text-xs font-medium text-dangerInk">{errors[reasonKey]}</span> : null}

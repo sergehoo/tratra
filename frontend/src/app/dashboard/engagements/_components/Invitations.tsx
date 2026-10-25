@@ -19,6 +19,7 @@ const STATUS_FR = { sent: "Envoyée", accepted: "Candidature reçue", declined: 
 export function InvitePanel({ postingId }: { postingId: number }) {
   const { data, error, loading, reload } = useLoad(() => eng.get<{ results: Invitation[] }>(`/postings/${postingId}/invitations/`), [postingId]);
   const [worker, setWorker] = useState<PickedWorker | null>(null);
+  const [pickerKey, setPickerKey] = useState(0); // nouvelle recherche vierge après chaque invitation envoyée
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
@@ -29,6 +30,7 @@ export function InvitePanel({ postingId }: { postingId: number }) {
     try {
       await eng.post(`/postings/${postingId}/invitations/`, { invitee: worker.id, message: message.trim() });
       setWorker(null);
+      setPickerKey((k) => k + 1);
       setMessage("");
       await reload();
     } catch (e) {
@@ -42,7 +44,7 @@ export function InvitePanel({ postingId }: { postingId: number }) {
       <CardHeader title="Inviter un professionnel" icon={<MailPlus className="h-5 w-5" />}
         description="Seuls les professionnels vérifiés peuvent être invités. L’invitation leur propose de candidater ; vous choisissez ensuite parmi les candidatures." />
       <div className="space-y-3">
-        <WorkerPicker label="Professionnel vérifié" picked={worker} onPick={setWorker} />
+        <WorkerPicker key={pickerKey} label="Professionnel vérifié" picked={worker} onPick={setWorker} />
         <TextareaField label="Message" optional rows={2} maxLength={500} value={message} onChange={(e) => setMessage(e.target.value)} />
         {err ? <Alert tone="danger">{err}</Alert> : null}
         <Button leftIcon={<Send aria-hidden className="h-4 w-4" />} disabled={!worker} loading={busy} onClick={() => void invite()}>Envoyer l’invitation</Button>
@@ -66,7 +68,7 @@ export function InvitePanel({ postingId }: { postingId: number }) {
 }
 
 /** Professionnel : invitations reçues (candidater ou décliner). Rien n'est affiché sans invitation réelle. */
-export function ReceivedInvitations() {
+export function ReceivedInvitations({ onResponded }: { onResponded?: () => void }) {
   const { data, reload } = useLoad(() => eng.get<{ results: Invitation[] }>("/invitations/mine/"), []);
   const [err, setErr] = useState("");
   const open = (data?.results ?? []).filter((i) => i.can_respond);
@@ -76,6 +78,7 @@ export function ReceivedInvitations() {
     try {
       await eng.post(`/invitations/${i.id}/respond/`, { accept });
       await reload();
+      onResponded?.(); // « Candidature envoyée » sur l'offre concernée
     } catch (e) {
       setErr(apiErrorMessage(e, "Réponse impossible."));
     }

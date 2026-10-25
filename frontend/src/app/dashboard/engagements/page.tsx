@@ -57,7 +57,7 @@ function ContractRow({ c }: { c: Contract }) {
 
 function Contracts() {
   const [filter, setFilter] = useState<"live" | "ended">("live");
-  const live = "pending_acceptance,accepted,active,suspended,notice,draft";
+  const live = "pending_acceptance,accepted,signed,active,suspended,notice,draft";
   const ended = "terminated,completed,cancelled";
   const { data, error, loading, reload } = useLoad(() => eng.get<Page<Contract>>(`/contracts/?status=${filter === "live" ? live : ended}&limit=50`), [filter]);
   return (

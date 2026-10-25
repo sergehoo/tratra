@@ -6,12 +6,16 @@ import { useDashboard } from "@/lib/dashboard";
 import { useData } from "@/lib/useData";
 import type { Category, Paginated } from "@/lib/types";
 import { Alert, Button, Card, PageHeader, SelectField, Skeleton, TextField, TextareaField } from "@/components/ds";
+import type { ServiceMode } from "@/lib/serviceModes";
+import { ServiceModesField, useModeRules } from "../../_components/ServiceModesField";
 
 export default function NewServicePage() {
   const router = useRouter();
   const dash = useDashboard();
   const cats = useData<Paginated<Category>>("/categories/?page_size=100&ordering=name");
   const [f, setF] = useState({ title: "", description: "", category: "", price_type: "fixed", price: "", duration: "" });
+  const [modes, setModes] = useState<ServiceMode[]>(["one_off"]);
+  const rules = useModeRules(f.category);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [failure, setFailure] = useState("");
   const [busy, setBusy] = useState(false);
@@ -30,6 +34,7 @@ export default function NewServicePage() {
     if (!f.category) next.category = "Choisissez un métier.";
     if (!f.description.trim()) next.description = "Décrivez le service proposé.";
     if (f.price_type !== "quote" && !(Number(f.price) > 0)) next.price = "Indiquez un tarif supérieur à 0.";
+    if (!modes.length) next.modes = "Choisissez au moins un mode.";
     setErrors(next);
     if (Object.keys(next).length) return;
     setBusy(true);
@@ -42,6 +47,7 @@ export default function NewServicePage() {
         price_type: f.price_type,
         ...(f.price_type !== "quote" ? { price: f.price } : {}),
         ...(Number(f.duration) > 0 ? { duration: Number(f.duration) } : {}),
+        modes,
       });
       router.push("/dashboard/provider");
     } catch (err) {
@@ -85,6 +91,7 @@ export default function NewServicePage() {
               ) : null}
             </div>
             <TextField label="Durée estimée (minutes)" optional inputMode="numeric" value={f.duration} onChange={set("duration")} placeholder="90" />
+            <ServiceModesField value={modes} onChange={setModes} rules={rules} error={errors.modes} />
             <div className="flex flex-wrap gap-3 pt-1">
               <Button type="submit" size="lg" loading={busy}>Enregistrer le service</Button>
               <Button type="button" variant="outline" size="lg" onClick={() => router.push("/dashboard/provider")}>Annuler</Button>

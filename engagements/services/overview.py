@@ -4,7 +4,8 @@ from django.db.models import Q
 from django.utils import timezone
 
 from engagements.models import (
-    ContractAmendment, ContractInstallment, EngagementApplication, EngagementContract, EngagementInterview, EngagementPosting, InstallmentLine, InstallmentPayment, ScheduleEvent,
+    ContractAmendment, ContractInstallment, EngagementApplication, EngagementContract, EngagementInterview, EngagementInvitation, EngagementPosting, InstallmentLine,
+    InstallmentPayment, ScheduleEvent,
 )
 from engagements.services.common import contracts_for, managed_org_ids, party_of
 
@@ -32,6 +33,12 @@ def todo_for(user) -> list:
         done = set(c.acceptances.filter(terms_version=c.terms_version).values_list("role", flat=True))
         if role_of(c) and role_of(c) not in done:
             items.append(_item("accept_contract", "Contrat à relire et accepter", c, when=c.updated_at))
+    # Contrat sur modèle validé, accepté : chaque partie signe le document « à signer » de la version en vigueur.
+    for c in mine.filter(status="accepted", signature_required=True).select_related("principal", "worker", "organization")[:CAP]:
+        signed = set(c.signatures.filter(document__kind="contract", document__stage="for_signature", document__version=c.terms_version)
+                     .values_list("role", flat=True))
+        if role_of(c) and role_of(c) not in signed:
+            items.append(_item("sign_contract", "Contrat à signer", c, when=c.updated_at))
     live = list(mine.filter(status__in=LIVE).select_related("principal", "worker", "organization"))
     by_id = {c.pk: c for c in live}
     for a in ContractAmendment.objects.filter(contract_id__in=by_id, status="proposed").select_related("proposed_by")[:CAP]:
@@ -73,6 +80,8 @@ def todo_for(user) -> list:
         n = EngagementApplication.objects.filter(posting_id=a.posting_id, status="submitted").count()
         if n:
             items.append(_item("review_applications", f"{n} candidature(s) à examiner", None, when=a.created_at, posting_id=a.posting_id, title=a.posting.title))
+    for inv in EngagementInvitation.objects.filter(invitee=user, status="sent", posting__status="open").select_related("posting")[:CAP]:
+        items.append(_item("answer_invitation", "Invitation à candidater", None, when=inv.created_at, posting_id=inv.posting_id, title=inv.posting.title))
     for i in EngagementInterview.objects.filter(status="proposed").filter(Q(application__applicant=user) | Q(application__posting__publisher=user, application__posting__organization__isnull=True) | Q(application__posting__organization_id__in=managed_org_ids(user))).exclude(proposed_by=user).select_related("application__posting")[:CAP]:
         items.append(_item("answer_interview", "Entretien proposé à confirmer", None, when=i.created_at, posting_id=i.application.posting_id, title=i.application.posting.title))
     items.sort(key=lambda x: (x["at"] is None, x["at"] or timezone.now()))

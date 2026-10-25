@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Banknote, Check, Eye, EyeOff, FileSignature, Gavel, Hourglass, Scale, Trash2, Undo2, Users } from "lucide-react";
 import { Alert, Badge, Button, Card, Checkbox, Modal, PageHeader, SelectField, SkeletonStats, Tabs, TextField } from "@/components/ds";
 import { bo, boError, fieldErrors, moneyLabel } from "@/lib/bo";
+import { CONTRACT_EVENT_FR } from "@/lib/engagements";
 import { useBo } from "@/lib/BoProvider";
 import { useCounts, useManagedList } from "@/lib/useBoList";
 import { DocumentsBlock, KeysTab, TemplatesTab } from "./ContractsLegal";
@@ -93,7 +94,7 @@ function ContractPanel({ id, onClose, onChanged }: { id: number | null; onClose:
     try { setD(await bo.get(`/engagements/contracts/${id}/`)); } catch (e) { setError(boError(e, "Ce contrat n’a pas pu être chargé.")); }
   }, [id]);
   useEffect(() => { setD(null); void load(); }, [load]);
-  const live = d && ["accepted", "active", "suspended", "notice"].includes(d.status);
+  const live = d && ["accepted", "signed", "active", "suspended", "notice"].includes(d.status);
   const adminSuspended = d?.suspensions.some((s) => s.source === "admin" && !s.ends_on);
   return (
     <>
@@ -117,11 +118,12 @@ function ContractPanel({ id, onClose, onChanged }: { id: number | null; onClose:
             {d.admin_actions.length ? <div><h3 className="mb-1 text-sm font-bold text-ink">Décisions de la plateforme</h3><ul className="space-y-0.5 text-sm text-inkSoft">{d.admin_actions.map((a, i) => <li key={i}>{a.action.replace("backoffice.engagement.", "")} · {a.by} · {dt(a.at)} — {a.reason}</li>)}</ul></div> : null}
             <div>
               <h3 className="mb-1 text-sm font-bold text-ink">Historique récent</h3>
-              <ul className="max-h-48 space-y-0.5 overflow-y-auto text-xs text-inkSoft">{d.events.slice(0, 40).map((e) => <li key={e.id}>{dt(e.at)} · {e.type} · {e.actor}</li>)}</ul>
+              <ul className="max-h-48 space-y-0.5 overflow-y-auto text-xs text-inkSoft">{d.events.slice(0, 40).map((e) => <li key={e.id}>{dt(e.at)} · {CONTRACT_EVENT_FR[e.type] ?? e.type} · {e.actor}</li>)}</ul>
             </div>
             {can("engagements.manage") ? (
               <div className="flex flex-wrap gap-2 border-t border-lineSoft pt-4">
-                {live && !adminSuspended && d.status !== "suspended" ? <Button variant="outline" onClick={() => setDecision("suspend")}>Suspendre</Button> : null}
+                {/* Le serveur ne suspend qu'un contrat en cours (ou en préavis) : le bouton n'apparaît que dans ce cas. */}
+                {d && ["active", "notice"].includes(d.status) && !adminSuspended ? <Button variant="outline" onClick={() => setDecision("suspend")}>Suspendre</Button> : null}
                 {adminSuspended ? <Button variant="outline" onClick={() => setDecision("resume")}>Lever la suspension</Button> : null}
                 {live ? <Button variant="danger" onClick={() => setDecision("terminate")}>Résilier</Button> : null}
               </div>

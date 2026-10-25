@@ -210,7 +210,7 @@ export function KeysTab() {
           ))}
         </ul>
       </Card>
-      <ReasonModal open={revoke !== null} tone="danger" title="Révoquer cette clé ?" confirmLabel="Révoquer"
+      <ReasonModal open={revoke !== null} tone="danger" title="Révoquer cette clé ?" confirmLabel="Révoquer" minReason={10}
         description="Tous les documents qu’elle a scellés seront signalés « clé révoquée » à la vérification. Si c’est la clé active, une nouvelle clé la remplace."
         request={(body) => bo.post("/engagements/signing-keys/", { ...body, action: "revoke", kid: revoke })} onClose={() => setRevoke(null)} onDone={() => { setRevoke(null); void load(); }} />
     </div>
@@ -240,7 +240,7 @@ export function DocumentsBlock({ contractId }: { contractId: number }) {
           </li>
         ))}
       </ul>
-      <ReasonModal open={revoke !== null} tone="danger" title="Révoquer ce document ?" confirmLabel="Révoquer définitivement"
+      <ReasonModal open={revoke !== null} tone="danger" title="Révoquer ce document ?" confirmLabel="Révoquer définitivement" minReason={10}
         description="La vérification publique affichera « révoqué ». Le fichier et son empreinte restent conservés ; la révocation ne peut pas être annulée."
         request={(body) => bo.post(`/engagements/documents/${revoke}/revoke/`, body)} onClose={() => setRevoke(null)} onDone={() => { setRevoke(null); void load(); }} />
     </div>

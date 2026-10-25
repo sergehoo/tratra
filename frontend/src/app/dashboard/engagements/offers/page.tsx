@@ -29,7 +29,7 @@ export default function OffersPage() {
     <>
       <PageHeader back={{ href: "/dashboard/engagements", label: "Engagements" }} title="Offres de longue durée"
         description="Missions régulières ou sur plusieurs mois. Chaque offre est publiée par un compte Tratra ; postuler exige un profil vérifié." />
-      <ReceivedInvitations />
+      <ReceivedInvitations onResponded={() => void reload()} />
       <div className="mb-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <TextField label="Recherche" type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Gardien, ménage, jardinier…" leading={<Search className="h-4 w-4" />} />
         <TextField label="Ville" value={city} onChange={(e) => setCity(e.target.value)} />
