@@ -41,6 +41,7 @@ export const NOTIFICATION_CATEGORIES: { id: string; label: string }[] = [
   { id: "business", label: "Entreprise" },
   { id: "engagement", label: "Contrats et engagements" },
   { id: "announcement", label: "Annonces" },
+  { id: "tips", label: "Conseils" },
   { id: "system", label: "Infos" },
 ];
 

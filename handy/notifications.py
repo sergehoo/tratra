@@ -40,6 +40,8 @@ CATEGORY_BY_TYPE: Dict[str, str] = {
     # Tratra Flash : propositions aux professionnels (alerte prioritaire), devis et suites côté client.
     "new_mission": "flash", "mission_paused": "flash", "mission_quote": "booking", "mission_unfulfilled": "booking", "mission_choice": "booking",
     "trust_penalty": "account",
+    # Engagement automatisé (campagnes) : catégorie propre, désactivable (désinscription), jamais prioritaire.
+    "campaign": "tips",
 }
 
 # Catégories dont le push ne peut pas être désactivé (vérification d'identité, sécurité du compte).
@@ -51,7 +53,7 @@ CHANNEL_BY_CATEGORY = {
     "booking": "tratra_activity", "message": "tratra_activity", "live": "tratra_activity", "payment": "tratra_activity",
     "account": "tratra_activity", "review": "tratra_updates", "business": "tratra_updates", "system": "tratra_updates",
     "engagement": "tratra_activity",
-    "announcement": "tratra_announcements",
+    "announcement": "tratra_announcements", "tips": "tratra_announcements",
     "flash": "tratra_new_missions",
 }
 FLASH_CHANNEL, FLASH_SOUND, FLASH_IOS_CATEGORY = "tratra_new_missions", "tratra_flash", "NEW_MISSION"
@@ -81,7 +83,7 @@ def push_text(notification) -> tuple:
 
 
 # Durée de vie d'un push non délivré (appareil éteint) : un « artisan en route » périmé n'a aucun intérêt.
-TTL_BY_CATEGORY = {"live": 900, "message": 86400, "announcement": 259200}
+TTL_BY_CATEGORY = {"live": 900, "message": 86400, "announcement": 259200, "tips": 259200}
 
 TYPE_LABELS = dict(Notification.TYPES)
 CATEGORY_LABELS = dict(Notification.CATEGORIES)
@@ -207,7 +209,7 @@ def notify_bulk(user_ids: List[int], ntype: str, message: str, *, title: str = "
 # nouvelles missions Tratra Flash sur « flash » (90 s pour répondre : jamais derrière autre chose), diffusions de masse sur « bulk »
 # (une annonce à des centaines de milliers de comptes ne retarde ni un message ni une réservation), le reste sur « default ».
 PUSH_QUEUE, FLASH_PUSH_QUEUE, BULK_PUSH_QUEUE = "default", "flash", "bulk"
-QUEUE_BY_CATEGORY = {"flash": FLASH_PUSH_QUEUE, "announcement": BULK_PUSH_QUEUE}
+QUEUE_BY_CATEGORY = {"flash": FLASH_PUSH_QUEUE, "announcement": BULK_PUSH_QUEUE, "tips": BULK_PUSH_QUEUE}
 
 
 def push_queue(category: str) -> str:

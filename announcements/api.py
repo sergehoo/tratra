@@ -52,7 +52,7 @@ class AnnouncementAdminViewSet(viewsets.ModelViewSet):
     parser_classes = [JSONParser, MultiPartParser, FormParser]
 
     def get_queryset(self):
-        qs = super().get_queryset()
+        qs = super().get_queryset().filter(source="manual")         # les annonces support des campagnes se gèrent dans « Engagement »
         params = self.request.query_params
         for field in ("status", "kind"):
             if params.get(field):

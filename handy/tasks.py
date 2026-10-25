@@ -64,19 +64,23 @@ def send_notification_push(self, notification_id, collapse_key=None):
     if not notifications.push_enabled(n.user_id, n.category):
         Notification.objects.filter(pk=n.pk).update(push_status='disabled')
         return {"skipped": "disabled"}
-    if n.notification_type == "announcement":
-        # Annonce annulée/expirée, ou promotion dont le consentement a été retiré entre-temps : jamais de push.
+    if n.notification_type in ("announcement", "campaign"):
+        # Annonce annulée/expirée (ou campagne désactivée : son annonce support l'est aussi), ou promotion dont le consentement a été
+        # retiré entre-temps : jamais de push.
         from announcements.models import Announcement
 
         a = Announcement.objects.filter(pk=(n.data or {}).get("id")).first()
         if a is None or a.status != "published" or (a.kind == "promotion" and not notifications.has_marketing_consent(n.user_id)):
             Notification.objects.filter(pk=n.pk).update(push_status='disabled')
             return {"skipped": "announcement_not_deliverable"}
-    payload = {"t": n.notification_type, "cat": n.category, "nid": n.pk, "deeplink": notifications.deeplink(n.data), **(n.data or {})}
+    # Message de campagne = son annonce support pour l'application : « t » reste « announcement », seul type que le récepteur Android
+    # affiche en message de données (FlashMessageReceiver) et que l'application compte comme ouvert — builds déjà installés compris.
+    kind = "announcement" if n.notification_type == "campaign" else n.notification_type
+    payload = {"t": kind, "cat": n.category, "nid": n.pk, "deeplink": notifications.deeplink(n.data), **(n.data or {})}
     title, body = notifications.push_text(n)          # texte neutre pour les catégories sensibles (écran verrouillé)
     ttl, extra = notifications.TTL_BY_CATEGORY.get(n.category, 86400), {}
-    if n.notification_type == "announcement":
-        # Annonce : le toucher ouvre l'écran de son action (registre central) ; image 2:1 publique si disponible. Les appareils qui
+    if n.notification_type in ("announcement", "campaign"):
+        # Annonce (ou message de campagne, porté par son annonce support) : le toucher ouvre l'écran de son action (registre central) ; image 2:1 publique si disponible. Les appareils qui
         # savent construire l'alerte eux-mêmes (« rich1 » : grande image téléchargée, logo, bouton d'action) reçoivent un message de
         # DONNÉES ; les autres une notification classique avec la même image (affichée par Firebase).
         from announcements import push_image as announcement_image

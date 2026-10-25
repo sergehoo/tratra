@@ -2,7 +2,7 @@ from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
 from announcements.api import AnnouncementAdminViewSet
-from backoffice import api_contracts, api_core, api_engagements, api_flash, api_mfa, api_money, api_ops, api_people, api_system, api_transport, api_reputation, api_intelligence, api_biometrics, api_messaging, api_statuses, api_assistant
+from backoffice import api_campaigns, api_contracts, api_core, api_engagements, api_flash, api_mfa, api_money, api_ops, api_people, api_system, api_transport, api_reputation, api_intelligence, api_biometrics, api_messaging, api_statuses, api_assistant
 
 router = DefaultRouter()
 router.register("announcements", AnnouncementAdminViewSet, basename="bo-announcements")
@@ -91,6 +91,11 @@ urlpatterns = [
     path("engagements/contracts/<int:pk>/documents/", api_contracts.ContractDocuments.as_view(), name="bo-contract-documents"),
     path("engagements/documents/<int:pk>/revoke/", api_contracts.DocumentRevoke.as_view(), name="bo-contract-document-revoke"),
     path("engagements/templates/", api_contracts.TemplateList.as_view(), name="bo-contract-templates"),
+    path("campaigns/", api_campaigns.CampaignList.as_view(), name="bo-campaigns"),
+    path("campaigns/run/", api_campaigns.CampaignRun.as_view(), name="bo-campaigns-run"),
+    path("campaigns/<int:pk>/", api_campaigns.CampaignDetail.as_view(), name="bo-campaign"),
+    path("campaigns/<int:pk>/sends/", api_campaigns.CampaignSends.as_view(), name="bo-campaign-sends"),
+    path("campaigns/<int:pk>/<str:action>/", api_campaigns.CampaignAction.as_view(), name="bo-campaign-action"),
     path("engagements/templates/<int:pk>/", api_contracts.TemplateDetail.as_view(), name="bo-contract-template"),
     path("engagements/templates/<int:pk>/<str:action>/", api_contracts.TemplateAction.as_view(), name="bo-contract-template-action"),
     path("engagements/signing-keys/", api_contracts.SigningKeys.as_view(), name="bo-contract-signing-keys"),

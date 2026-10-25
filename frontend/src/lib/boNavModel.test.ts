@@ -11,8 +11,8 @@ function serverModules(): ModuleLike[] {
   return rows.map(([, id, label, path]) => ({ id, label, path }));
 }
 
-test("le registre serveur est lu en entier (21 modules, dont Tratra Flash)", () => {
-  assert.equal(serverModules().length, 21);
+test("le registre serveur est lu en entier (22 modules, dont Tratra Flash et l’engagement automatisé)", () => {
+  assert.equal(serverModules().length, 22);
 });
 
 test("7 rubriques, dans l'ordre demandé", () => {
@@ -93,4 +93,11 @@ test("fil d'Ariane", () => {
   assert.deepEqual(breadcrumb(nav, "/backoffice/users/12", null).map((c) => c.label), ["Back-Office", "Utilisateurs & Identités", "Utilisateurs", "Fiche #12"]);
   assert.equal(breadcrumb(nav, "/backoffice/users/12", null, "Awa K.").at(-1)?.label, "Awa K.");
   assert.equal(breadcrumb(nav, "/backoffice/users/12", null)[2].href, "/backoffice/users");
+});
+
+test("l'engagement automatisé est rangé dans Communication, après les annonces, et trouvable par « relance »", () => {
+  const nav = buildNav(serverModules());
+  const ids = nav.find((g) => g.id === "communication")!.items.map((i) => i.id);
+  assert.equal(ids.indexOf("campaigns"), ids.indexOf("announcements") + 1);
+  assert.ok(searchLocal(searchEntries(nav), "relance").some((e) => e.href === "/backoffice/campaigns"));
 });

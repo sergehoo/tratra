@@ -42,10 +42,10 @@ def test_me_refuses_everyone_without_a_role_and_lists_only_the_modules_of_the_ro
     assert api(user("c_plain")).get("/handy/backoffice/me/").status_code == 403
     assert api(staff("c_norole")).get("/handy/backoffice/me/").status_code == 403            # personnel sans rôle
     ok = api(staff("c_mkt", "marketing")).get("/handy/backoffice/me/").json()
-    assert ok["roles"] == ["marketing"] and {m["id"] for m in ok["modules"]} == {"dashboard", "announcements", "notifications", "analytics"}
+    assert ok["roles"] == ["marketing"] and {m["id"] for m in ok["modules"]} == {"dashboard", "announcements", "campaigns", "notifications", "analytics"}
     assert "finance.manage" not in ok["permissions"] and ok["user"]["name"] == "C_Mkt A."
     root = api(staff("c_root", superuser=True)).get("/handy/backoffice/me/").json()
-    assert len(root["modules"]) == 21 and root["roles"] == ["super_admin"]   # 18 modules du cahier des charges + Engagements + Messagerie + Tratra Flash
+    assert len(root["modules"]) == 22 and root["roles"] == ["super_admin"]   # 18 modules du cahier des charges + Engagements + Messagerie + Tratra Flash + Engagement automatisé
     for module in root["modules"]:
         assert set(module) == {"id", "label", "permission", "icon", "path"} and module["path"].startswith("/backoffice")
 

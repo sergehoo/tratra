@@ -28,7 +28,7 @@ export const GROUPS: readonly GroupDef[] = [
   { id: "missions", label: "Prestations & Missions", modules: ["services", "bookings", "flash", "live", "reviews", "engagements", "continuity"] },
   { id: "business", label: "Tratra Business", modules: ["business"] },
   { id: "finance", label: "Finances", modules: ["finance"] },
-  { id: "communication", label: "Communication", modules: ["messages", "announcements", "notifications", "support"] },
+  { id: "communication", label: "Communication", modules: ["messages", "announcements", "campaigns", "notifications", "support"] },
   { id: "administration", label: "Administration", modules: ["settings", "security"] },
 ];
 
@@ -104,6 +104,7 @@ export const KEYWORDS: Record<string, string> = {
   finance: "paiements commissions remboursements retraits factures séquestre",
   messages: "messagerie écrire message membre destinataires envoi individuel réponses boîte",
   announcements: "annonces campagnes bandeaux publication",
+  campaigns: "engagement relances automatiques bienvenue profil kyc inactivité avis nouveautés push",
   notifications: "push sms e-mail envois historique",
   support: "tickets réclamations médiation notes",
   settings: "réglages tarifs annulation coupons règles intégrations",

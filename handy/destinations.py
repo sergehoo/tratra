@@ -52,6 +52,7 @@ REGISTRY = (
     Destination("service", "Une offre précise", DISCOVER, param="service", param_required=True),
     Destination("search", "Recherche", DISCOVER, web="/search"),
     Destination("urgent", "Dépannages urgents", DISCOVER, web="/search"),
+    Destination("panne", "J'ai une panne (décrire un problème)", DISCOVER, web="/panne"),
     # Commander (Tratra Flash / Hybrid Matching)
     Destination("flash_order", "Trouvez-moi un professionnel (nouvelle demande)", ORDER, web="/dashboard/commander"),
     Destination("favorites", "Mes professionnels favoris", ORDER, web="/dashboard/favoris"),

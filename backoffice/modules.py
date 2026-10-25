@@ -19,6 +19,7 @@ MODULES = [
     ("finance", "Finances", "finance.view", "wallet", "/backoffice/finance"),
     ("messages", "Messagerie", "messages.send", "message-square", "/backoffice/messages"),
     ("announcements", "Annonces", "announcements.manage", "megaphone", "/backoffice/announcements"),
+    ("campaigns", "Engagement automatisé", "announcements.manage", "sparkles", "/backoffice/campaigns"),
     ("notifications", "Notifications", "notifications.view", "bell", "/backoffice/notifications"),
     ("continuity", "Continuité", "continuity.view", "refresh-cw", "/backoffice/continuity"),
     ("support", "Support", "support.manage", "life-buoy", "/backoffice/support"),

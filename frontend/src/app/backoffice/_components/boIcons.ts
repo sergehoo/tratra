@@ -1,6 +1,6 @@
 import {
   Award, BarChart3, Bell, Briefcase, Building2, CalendarCheck, FileSignature, IdCard, LayoutDashboard, LifeBuoy, Lock, MapPin, Megaphone, MessageSquare, RefreshCw, Settings,
-  ShieldCheck, Star, Users, Wallet, Zap, type LucideIcon,
+  ShieldCheck, Sparkles, Star, Users, Wallet, Zap, type LucideIcon,
 } from "lucide-react";
 import type { GroupId } from "@/lib/boNavModel";
 
@@ -8,7 +8,7 @@ import type { GroupId } from "@/lib/boNavModel";
 export const MODULE_ICONS: Record<string, LucideIcon> = {
   "layout-dashboard": LayoutDashboard, users: Users, "shield-check": ShieldCheck, award: Award, "id-card": IdCard, briefcase: Briefcase,
   "calendar-check": CalendarCheck, "map-pin": MapPin, star: Star, "building-2": Building2, wallet: Wallet, megaphone: Megaphone, "message-square": MessageSquare, bell: Bell,
-  "file-signature": FileSignature, "refresh-cw": RefreshCw, "life-buoy": LifeBuoy, "bar-chart-3": BarChart3, settings: Settings, lock: Lock, zap: Zap,
+  "file-signature": FileSignature, "refresh-cw": RefreshCw, "life-buoy": LifeBuoy, "bar-chart-3": BarChart3, settings: Settings, lock: Lock, zap: Zap, sparkles: Sparkles,
 };
 
 /** Icône de chaque rubrique. */

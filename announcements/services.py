@@ -23,6 +23,18 @@ BATCH = 500
 
 # ------------------------------------------------------------------------------------------------------ validation
 
+def role_q(role: str) -> Q:
+    """Rôle d'un compte unique : artisan (profil professionnel), entreprise (profil ou adhésion Business), client (sans profil
+    professionnel, ou ayant réservé)."""
+    if role == destinations.ARTISANS:
+        return Q(handyman_profile__isnull=False)
+    if role == destinations.COMPANIES:
+        return Q(company_profile__isnull=False) | Q(business_memberships__is_active=True)
+    if role == destinations.CLIENTS:
+        return Q(handyman_profile__isnull=True, company_profile__isnull=True) | Q(client_bookings__isnull=False)
+    return Q(pk__in=[])
+
+
 def roles_of(a) -> List[str]:
     """Rôles destinataires d'une annonce (ou d'un dictionnaire de champs du formulaire)."""
     get = a.get if isinstance(a, dict) else (lambda k, d=None: getattr(a, k, d))
@@ -66,22 +78,23 @@ def audience_queryset(a: Announcement):
     adhésion Business ; client : compte sans profil professionnel ou ayant réservé). Géographie = villes/communes
     DÉCLARÉES uniquement. Promotion = consentement marketing obligatoire."""
     q = Q()
-    if a.to_artisans:
-        q |= Q(handyman_profile__isnull=False)
-    if a.to_companies:
-        q |= Q(company_profile__isnull=False) | Q(business_memberships__is_active=True)
-    if a.to_clients:
-        q |= (Q(handyman_profile__isnull=True, company_profile__isnull=True) | Q(client_bookings__isnull=False))
+    for role in roles_of(a):
+        q |= role_q(role)
     users = User.objects.filter(is_active=True, is_staff=False)
     users = users.filter(q) if q else users.none()
     if a.kind == "promotion":
         users = users.filter(marketing_consent__granted=True)
-    cities = [c.strip().lower() for c in (a.cities or []) if str(c).strip()]
-    if cities:
-        users = users.annotate(_city=Lower("city"), _commune=Lower("handyman_profile__commune"), _company=Lower("company_profile__city"),
-                               _org=Lower("business_memberships__organization__city")).filter(
-            Q(_city__in=cities) | Q(_commune__in=cities) | Q(_company__in=cities) | Q(_org__in=cities))
-    return users.distinct()
+    return in_cities(users, a.cities).distinct()
+
+
+def in_cities(users, cities):
+    """Comptes dont une ville / commune DÉCLARÉE (profil, profil professionnel, entreprise) est dans `cities` ; vide = tous. Jamais le GPS."""
+    cities = [c.strip().lower() for c in (cities or []) if str(c).strip()]
+    if not cities:
+        return users
+    return users.annotate(_city=Lower("city"), _commune=Lower("handyman_profile__commune"), _company=Lower("company_profile__city"),
+                          _org=Lower("business_memberships__organization__city")).filter(
+        Q(_city__in=cities) | Q(_commune__in=cities) | Q(_company__in=cities) | Q(_org__in=cities))
 
 
 # ---------------------------------------------------------------------------------------------------- cycle de vie

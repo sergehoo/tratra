@@ -1240,6 +1240,7 @@ class Notification(models.Model):
         ('business_reminder', 'Rappel de maintenance'),
         ('announcement', 'Annonce'),
         ('system', 'Information Tratra'),
+        ('campaign', 'Conseil Tratra (message automatique)'),
         ('engagement_application', "Candidature à un besoin longue durée"),
         ('engagement_interview', "Entretien d'embauche ou de prestation"),
         ('engagement_selected', 'Candidature retenue'),
@@ -1278,6 +1279,8 @@ class Notification(models.Model):
         ('system', 'Informations'),
         ('engagement', 'Contrats et engagements'),
         ('flash', 'Nouvelles missions (Tratra Flash)'),
+        # Messages d'engagement automatiques (bienvenue, rappels, nouveautés) : désactiver cette catégorie = désinscription (application et push).
+        ('tips', 'Conseils, rappels et nouveautés'),
     ]
     PUSH_STATUSES = [
         ('', 'Non concerné'), ('queued', 'En file'), ('sending', 'Envoi en cours'), ('sent', 'Envoyé'), ('no_device', 'Aucun appareil'),

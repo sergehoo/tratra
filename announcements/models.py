@@ -22,6 +22,10 @@ class Announcement(models.Model):
     push_image = models.ImageField(upload_to="announcements/push/", blank=True, null=True, editable=False)
     push_image_source = models.CharField(max_length=255, blank=True, default="", editable=False)   # image d'origine de la variante
     kind = models.CharField(max_length=12, choices=KIND_CHOICES, default="service", db_index=True)
+    # « campaign » : annonce SUPPORT d'une campagne d'engagement automatique (campaigns) — jamais diffusée en masse, livrée à chaque
+    # destinataire par le moteur des campagnes ; absente de la liste des annonces du Back-Office (gérée depuis « Engagement »).
+    SOURCES = [("manual", "Annonce manuelle"), ("campaign", "Campagne automatique")]
+    source = models.CharField(max_length=10, choices=SOURCES, default="manual", db_index=True)
 
     action_kind = models.CharField(max_length=10, choices=ACTION_CHOICES, default="none")
     action_label = models.CharField(max_length=40, blank=True, default="")

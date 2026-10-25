@@ -24,7 +24,7 @@ APP_KEYS = {
     "home", "explore", "categories", "category", "services", "service", "search", "urgent", "flash_order", "favorites", "bookings",
     "messages", "notifications", "announcement", "reviews", "engagements", "profile", "addresses", "kyc", "pro", "reputation", "badge",
     "availability", "replacements", "business", "booking", "mission", "conversation", "contract", "posting", "business_request",
-    "flash_offer", "flash_request", "trust_penalty",
+    "flash_offer", "flash_request", "trust_penalty", "panne",
 }
 
 

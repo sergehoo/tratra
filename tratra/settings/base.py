@@ -93,6 +93,7 @@ INSTALLED_APPS = [
     'live',
     'business',
     'announcements',
+    'campaigns',
     'continuity',
     'engagements',
     'transport',
@@ -655,6 +656,7 @@ CELERY_TASK_ROUTES = {
     'flash.tasks.*': {'queue': 'flash'},
     'handy.tasks.notify_arrival_imminent': {'queue': 'otp'},
     'announcements.tasks.deliver_announcement': {'queue': 'bulk'},
+    'campaigns.tasks.tick': {'queue': 'bulk'},
     'backoffice.tasks.deliver_batch': {'queue': 'bulk'},
     'backoffice.tasks.purge_assistant_history': {'queue': 'bulk'},
     'trust.tasks.reevaluate_all_profiles': {'queue': 'bulk'},
@@ -710,6 +712,11 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'announcements.tasks.tick',
         'schedule': 60.0,
     },
+    # Engagement automatisé : programmation, envoi (heures autorisées, quotas, priorité opérationnelle), conversions.
+    'campaigns-tick': {
+        'task': 'campaigns.tasks.tick',
+        'schedule': 600.0,
+    },
     # Tratra Flash : échéances des propositions, vagues suivantes, fenêtres de choix des devis (filet de sécurité des comptes à rebours).
     'flash-tick': {
         'task': 'flash.tasks.tick',
@@ -763,6 +770,13 @@ CONTRACT_SIGNING_KEK = config('CONTRACT_SIGNING_KEK', default='')
 # Mentions légales imprimées en pied de page des contrats PDF (raison sociale, RCCM, siège…), séparées par « | ». Vide = aucune mention :
 # rien n'est jamais inventé. Exemple : « Tratra SAS au capital de … | RCCM CI-ABJ-… | Siège : … ».
 CONTRACT_PDF_LEGAL_MENTIONS = config('CONTRACT_PDF_LEGAL_MENTIONS', default='')
+
+# Engagement automatisé (campagnes) : 2 push d'engagement par semaine et par compte au plus (campagnes + annonces promotionnelles),
+# envoi seulement entre ces heures (fuseau TIME_ZONE), fonctions DÉCLARÉES déployées (une campagne qui annonce une fonction absente de
+# cette liste, ou qui ouvre son écran, ne peut pas être activée). Exemple : DEPLOYED_FEATURES=flash,favorites,tratra_id,engagements
+CAMPAIGN_PUSH_WEEKLY_LIMIT = int(config('CAMPAIGN_PUSH_WEEKLY_LIMIT', default='2'))
+CAMPAIGN_SEND_HOURS = config('CAMPAIGN_SEND_HOURS', default='9-20')
+DEPLOYED_FEATURES = config('DEPLOYED_FEATURES', default='')
 MFA_MAX_FAILURES = int(config('MFA_MAX_FAILURES', default='5'))
 MFA_LOCK_SECONDS = int(config('MFA_LOCK_SECONDS', default='900'))
 
