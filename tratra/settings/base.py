@@ -760,6 +760,9 @@ MFA_ENCRYPTION_KEY = config('MFA_ENCRYPTION_KEY', default='')
 # Contrats : clé de chiffrement des clés PRIVÉES de scellement (Ed25519) stockées en base — à défaut SECRET_KEY. La changer rend les
 # clés existantes illisibles : procéder d'abord à une rotation (manage.py contract_keys rotate), voir docs/contrats-anti-falsification.md.
 CONTRACT_SIGNING_KEK = config('CONTRACT_SIGNING_KEK', default='')
+# Mentions légales imprimées en pied de page des contrats PDF (raison sociale, RCCM, siège…), séparées par « | ». Vide = aucune mention :
+# rien n'est jamais inventé. Exemple : « Tratra SAS au capital de … | RCCM CI-ABJ-… | Siège : … ».
+CONTRACT_PDF_LEGAL_MENTIONS = config('CONTRACT_PDF_LEGAL_MENTIONS', default='')
 MFA_MAX_FAILURES = int(config('MFA_MAX_FAILURES', default='5'))
 MFA_LOCK_SECONDS = int(config('MFA_LOCK_SECONDS', default='900'))
 

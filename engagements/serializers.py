@@ -8,6 +8,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from engagements import rules as rules_mod
+from engagements.services.quality import coherence_warnings
 from engagements.models import (
     ContractAmendment, ContractEvent, ContractInstallment, EngagementApplication, EngagementContract, EngagementDispute, EngagementEvaluation,
     EngagementInterview, EngagementPosting, InstallmentLine, InstallmentPayment, ScheduleEvent,
@@ -149,6 +150,8 @@ def contract(c: EngagementContract, user, *, detail: bool = False) -> dict:
                     "bookings_mode": c.bookings_mode, "legal_notice_ack": c.legal_notice_ack, "end_reason": c.end_reason, "notice_given_by": person(c.notice_given_by),
                     "notice_given_at": c.notice_given_at, "suspensions": suspensions, "service_id": c.service_id, "posting_id": c.posting_id,
                     "rules": rules(c.category_id),
+                    # Avant la proposition : cohérence métier / missions (avertissement pour l'auteur, jamais un blocage).
+                    "quality_warnings": coherence_warnings(c) if c.status in ("draft", "pending_acceptance") and role == "principal" else [],
                     "legal_notice": ("Emploi salarié : Tratra met en relation et garde la trace des accords, mais ne calcule ni cotisations, ni impôts, ni congés payés."
                                      if c.work_relationship == "employment" else
                                      "Prestation indépendante : aucune relation de travail salarié n'est créée par Tratra.")})

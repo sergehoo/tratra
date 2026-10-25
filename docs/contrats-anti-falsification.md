@@ -96,3 +96,33 @@ Toutes ces actions sont journalisées (`trust.audit`).
    Aucune donnée existante modifiée ; les prestations existantes restent « ponctuelles ».
 3. Faire relire et compléter les modèles par un juriste, puis les valider au Back-Office (rôle « legal »).
 4. La première clé est créée automatiquement au premier scellement ; `contract_keys list` pour la contrôler.
+
+## 9. Présentation du PDF (modèle A4 institutionnel, 25 oct. 2026)
+
+Moteur `engagements/pdf.py` (sans dépendance, Helvetica standard, rendu DÉTERMINISTE) et composition `engagements/contract_pdf.py`, pour les contrats
+salariés et indépendants et pour les avenants :
+
+- **en-tête de chaque page** : logo officiel (`static/img/tratra_logo.webp`), TRATRA, nature du document, référence, version, date d'émission, étape ;
+- **page d'identification** : titre selon la nature juridique (« Contrat de travail » / « Contrat de prestation de services »), QR code, modèle et
+  statut de sa revue juridique, deux encadrés des parties (nom, prénom(s), Tratra ID, téléphone, adresse, qualité, profession, vérification ;
+  entreprise, RCCM, siège si le donneur d'ordre est une organisation) — **aucune pièce KYC** n'est reproduite ;
+- **synthèse contractuelle** : métier, intitulé, missions, lieu, durée, horaires, rémunération, échéances, préavis, avantages, conditions particulières
+  (une ligne de tableau n'est jamais coupée entre deux pages) ;
+- **articles** : texte EXACT des articles figés du modèle validé (titres numérotés, paragraphes espacés, continuation sur les pages suivantes, jamais
+  tronqués) ; seules les ponctuations doublées (« .. », « ,, ») et les espaces multiples sont corrigés à l'affichage ;
+- **signatures** : deux blocs (signataire, qualité, consentement, date et heure, preuve `SIG-nnnnnn`, empreinte du document signé) ;
+- **sécurité** : QR code, référence unique, version, horodatage, clé Ed25519 qui scelle (`signing.sign(..., key=)` : même clé que celle imprimée),
+  empreintes des conditions et du document signé, adresse de vérification complète. L'empreinte SHA-256 du fichier lui-même et sa signature Ed25519
+  sont calculées après le rendu, comme avant : **mécanisme cryptographique inchangé** ;
+- **pied de page de chaque page** : TRATRA + référence + version, « Page X/Y », mention de vérification, et mentions légales de
+  `CONTRACT_PDF_LEGAL_MENTIONS` (séparées par « | » ; vide = aucune mention, rien n'est inventé).
+
+Les documents déjà scellés ne sont jamais régénérés : seuls les nouveaux documents utilisent ce modèle (un contrat dont la version à signer a été émise
+avec l'ancien rendu reçoit un exemplaire final au nouveau format, qui cite l'empreinte du document réellement signé).
+
+**Cohérence métier / missions** (`engagements/services/quality.py`) : avant la proposition, l'auteur voit un avertissement si les missions sont vides
+ou sans rapport avec le vocabulaire du métier (noms et synonymes du catalogue) — jamais un blocage ni une réécriture.
+
+**Contrôle visuel** : `pdftoppm` de ce poste remplace Helvetica-Bold par la version normale (substitution système) ; le contrôle se fait avec PDFKit
+(rendu Quartz), qui affiche fidèlement les polices standard.
+

@@ -66,6 +66,8 @@ export interface ContractDetail extends Contract {
   renewal_count: number; non_renewal_at: string | null; non_renewal_deadline: string | null; proration_mode: string; overtime_hourly_rate: string | null; notice_period_days: number;
   bookings_mode: string; legal_notice_ack: boolean; end_reason: string; notice_given_by: Person | null; notice_given_at: string | null;
   suspensions: { starts_on: string; ends_on: string | null; reason: string; source: "agreed" | "admin" }[]; service_id: number | null; posting_id: number | null; rules: Rules; legal_notice: string;
+  /** Avant la proposition (auteur) : cohérence métier / missions — avertissements, jamais un blocage. */
+  quality_warnings?: string[];
 }
 
 export interface Evidence { name: string; url: string }

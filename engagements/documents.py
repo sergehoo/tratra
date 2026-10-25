@@ -23,7 +23,7 @@ from django.db import transaction
 from django.db.models import F
 from django.utils import timezone
 
-from engagements import pdf, signing
+from engagements import contract_pdf, pdf, signing
 
 TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]{32,64}$")
 ROLE_LABELS = {"employment": ("Employeur", "Salarié(e)"), "independent": ("Client", "Prestataire")}
@@ -79,55 +79,6 @@ def _person(user) -> str:
     return " ".join(p for p in ((user.first_name or "").strip(), (user.last_name or "").strip()) if p) or "Membre Tratra"
 
 
-def _contract_blocks(contract, stage: str, signatures: List, issued_at: datetime, for_signature_sha: str = "", url: str = "") -> List[Tuple[str, str]]:
-    from engagements.services.contracts import snapshot
-
-    principal_role, worker_role = ROLE_LABELS.get(contract.work_relationship, ROLE_LABELS["independent"])
-    template = contract.template
-    blocks = [("p", f"Référence : {contract.reference} · Version des conditions : {contract.terms_version} · Émis le {_fmt(issued_at)}"),
-              ("p", "Nature : " + ("contrat de travail (emploi salarié)" if contract.work_relationship == "employment"
-                                    else "contrat de prestation de services (indépendant)")),
-              ("p", f"{principal_role} : {_person(contract.principal)} · {worker_role} : {_person(contract.worker)} · Lieu : "
-                    f"{contract.location_city or '—'}")]
-    if template is not None:
-        reviewed = (f"validé par revue juridique le {_fmt(template.reviewed_at)} (version {template.version})"
-                    if template.status == template.VALIDATED and template.reviewed_at else "NON VALIDÉ juridiquement — document non définitif")
-        blocks.append(("small", f"Modèle « {template.title} » : {reviewed}."))
-    for article in contract.articles or []:
-        blocks += [("h2", f"Article {article['number']} — {article['title']}"), ("p", article["body"])]
-    if not contract.articles:
-        terms = snapshot(contract)
-        blocks += [("h2", "Conditions"), ("p", "\n".join(f"{k} : {v}" for k, v in terms.items() if v not in (None, "", [], {})))]
-    refs = (template.legal_references if template is not None else []) or []
-    if refs:
-        blocks.append(("h2", "Références juridiques"))
-        blocks += [("small", f"{r.get('label', '')} : {r.get('citation', '')} ({r.get('status', '')})") for r in refs]
-    blocks.append(("h2", "Signatures"))
-    if stage == "for_signature":
-        blocks.append(("p", f"Document à signer électroniquement sur Tratra par {principal_role.lower()} et {worker_role.lower()}."))
-    for s in signatures:
-        label = principal_role if s.role == "principal" else worker_role
-        blocks.append(("p", f"{label} : {_person(s.user)} — signé électroniquement le {_fmt(s.signed_at)} (signature électronique simple)."))
-    if for_signature_sha:
-        blocks.append(("small", f"Empreinte SHA-256 du document signé par les parties : {for_signature_sha}"))
-    blocks.append(("small", f"Empreinte des conditions acceptées : {contract.terms_hash}. Scellement numérique de la plateforme Tratra "
-                            f"(Ed25519) : vérifiable avec le QR code ou à l'adresse {url}"))
-    return blocks
-
-
-def _amendment_blocks(contract, amendment, original, issued_at: datetime, url: str = "") -> List[Tuple[str, str]]:
-    from engagements.services.contracts import json_safe
-
-    changes = json_safe(amendment.changes or {})
-    return [("p", f"Avenant au contrat {original.reference} (document original inchangé, empreinte {original.sha256}). Émis le {_fmt(issued_at)}."),
-            ("h2", f"Objet de l'avenant — {amendment.get_kind_display()}"),
-            ("p", "\n".join(f"{k} : {v}" for k, v in changes.items()) or "—"),
-            ("p", f"Prise d'effet : {amendment.effective_date:%d/%m/%Y}. Motif : {amendment.reason or '—'}"),
-            ("p", f"Proposé le {_fmt(amendment.created_at)} ; accepté par l'autre partie le {_fmt(amendment.responded_at or issued_at)}."),
-            ("small", f"Version des conditions après l'avenant : {contract.terms_version} — empreinte : {contract.terms_hash}."),
-            ("small", f"Vérifier cet avenant : {url}")]
-
-
 def issue(contract, *, kind: str = "contract", stage: str = "for_signature", amendment=None, actor=None):
     """Émet, scelle et enregistre un document. Renvoie le document (le jeton de vérification n'existe en clair que dans le PDF)."""
     from engagements.models import ContractDocument, ContractEvent, ContractSignature
@@ -137,27 +88,27 @@ def issue(contract, *, kind: str = "contract", stage: str = "for_signature", ame
     issued_at = timezone.now().replace(microsecond=0)
     token = secrets.token_urlsafe(32)
     url = verify_url(token)
+    key = signing.active_key()                       # la clé imprimée dans le document est celle qui le scelle
     if kind == "amendment":
         original = contract.documents.filter(kind="contract", stage="final").order_by("-issued_at").first()
         if original is None:
             raise DocumentError("no_original", "Aucun contrat signé : l'avenant ne peut pas être scellé.", 409)
         n = contract.documents.filter(kind="amendment").count() + 1
         reference, parent = f"{contract.reference}-AV{n}", original
-        title = f"Avenant n° {n} — {contract.title}"
-        blocks = _amendment_blocks(contract, amendment, original, issued_at, url)
+        data = contract_pdf.render_amendment(contract, amendment, original, number=n, reference=reference, issued_at=issued_at, url=url, kid=key.kid)
     else:
         reference, parent = contract.reference, None
-        title = (contract.template.title if contract.template_id else contract.title)
         signatures, signed_sha = [], ""
         if stage == "final":
             source = contract.documents.filter(kind="contract", stage="for_signature", version=contract.terms_version).order_by("-issued_at").first()
             signatures = list(ContractSignature.objects.filter(document=source).select_related("user").order_by("role")) if source else []
             signed_sha, parent = (source.sha256 if source else ""), source
-        blocks = _contract_blocks(contract, stage, signatures, issued_at, signed_sha, url)
-    data = pdf.render(title, blocks, footer=f"{reference} — version {contract.terms_version}", qr=url, qr_caption="Vérifier ce document")
+        data = contract_pdf.render_contract(contract, stage=stage, reference=reference, issued_at=issued_at, url=url, kid=key.kid,
+                                            signatures=signatures, signed_sha=signed_sha)
+    # Scellement INCHANGÉ : empreinte SHA-256 des octets du PDF final, puis signature Ed25519 de la charge utile canonique.
     fields = {"reference": reference, "kind": kind, "stage": stage, "version": contract.terms_version, "sha256": pdf.sha256(data),
               "terms_hash": contract.terms_hash, "issued_at": issued_at.isoformat()}
-    kid, signature = signing.sign(_payload(fields))
+    kid, signature = signing.sign(_payload(fields), key=key)
     doc = ContractDocument(contract=contract, kind=kind, stage=stage, reference=reference, version=contract.terms_version, parent=parent,
                            amendment=amendment, sha256=fields["sha256"], size=len(data), terms_hash=contract.terms_hash,
                            token_hash=_hash_token(token), signing_key_id=kid, signature=signature, issued_at=issued_at, issued_by=actor)

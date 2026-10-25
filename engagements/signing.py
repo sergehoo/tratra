@@ -88,9 +88,10 @@ def revoke_key(kid: str, *, actor=None, reason: str = ""):
     return key
 
 
-def sign(payload: Dict) -> Tuple[str, str]:
-    """(identifiant de clé, signature base64) de la charge utile canonique, avec la clé active."""
-    key = active_key()
+def sign(payload: Dict, key=None) -> Tuple[str, str]:
+    """(identifiant de clé, signature base64) de la charge utile canonique, avec la clé active — ou la clé `key` déjà lue (celle dont
+    l'identifiant est imprimé dans le document) : même algorithme, même charge utile."""
+    key = key or active_key()
     private = Ed25519PrivateKey.from_private_bytes(_fernet().decrypt(key.private_key_encrypted.encode("ascii")))
     return key.kid, _b64(private.sign(canonical(payload)))
 

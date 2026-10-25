@@ -211,6 +211,11 @@ export function Summary({ c, reload, goTab, openAmend }: { c: ContractDetail; re
       {c.status === "pending_acceptance" && iAccepted ? (
         <Alert tone="info" className="mb-6" title="En attente de l’autre partie">{c.counterpart.name} doit relire et accepter ces conditions. Vous serez prévenu(e) dès sa réponse.</Alert>
       ) : null}
+      {c.quality_warnings?.length ? (
+        <Alert tone="warning" className="mb-6" title="À vérifier avant de proposer" icon={<ShieldAlert />}>
+          <ul className="list-disc space-y-1 pl-5">{c.quality_warnings.map((w) => <li key={w}>{w}</li>)}</ul>
+        </Alert>
+      ) : null}
       {c.status === "draft" ? <Alert tone="brand" className="mb-6" title="Brouillon">Ce contrat n’est visible que de vous. « Proposer » l’envoie à {c.worker.name}, qui peut l’accepter, demander une modification ou le refuser.</Alert> : null}
       {c.pending_amendment ? <div className="mb-6"><AmendmentBanner a={c.pending_amendment} onChanged={reload} /></div> : null}
       {c.status === "notice" ? <Alert tone="warning" className="mb-6" icon={<Hourglass />} title={`Préavis en cours : fin le ${dateFr(c.ends_on)}`}>{c.end_reason}</Alert> : null}
