@@ -9,8 +9,11 @@ Règle : `TRUSTED_PROXY_COUNT` reverse proxies de confiance (Traefik = 1) ajoute
 `TRUSTED_PROXY_COUNT=0` (poste de développement, accès direct) : on ignore `X-Forwarded-For` et on prend `REMOTE_ADDR`.
 C'est la même règle que `NUM_PROXIES` de Django REST framework (limitation de débit)."""
 import ipaddress
+import re
 
 from django.conf import settings
+from django.core.exceptions import DisallowedHost
+from django.http import JsonResponse
 
 
 def _valid(value: str):
@@ -82,4 +85,63 @@ class CloudflareClientIPMiddleware:
                 request.META["HTTP_X_FORWARDED_FOR"] = visitor
                 if int(getattr(settings, "TRUSTED_PROXY_COUNT", 0) or 0) <= 0:
                     request.META["REMOTE_ADDR"] = visitor
+        return self.get_response(request)
+
+
+# ---- Hôte d'envoi direct des fichiers de l'application (UPLOAD_HOST) ----------------------------------------------------------
+# Sur certains réseaux (Wi-Fi d'entreprise), les envois de fichiers d'un téléphone vers Cloudflare sont coupés au bout de 15 s alors que
+# le même envoi passe en direct vers le serveur (mesuré le 26 oct. 2026 sur un Galaxy S10+ : 0 envoi sur 3 par Cloudflare, 3 sur 3 en
+# direct, corps lu en entier). L'application envoie donc ses fichiers par un hôte en « DNS seulement » qui sert la même API. Cet hôte
+# échappe aux règles de Cloudflare : il n'accepte QUE les envois de fichiers de l'application (multipart, chemins ci-dessous, mêmes
+# authentification et contrôles que d'habitude) ; connexion, codes SMS et tout le reste y répondent 404 et restent derrière Cloudflare.
+# Un nouvel envoi de fichier de l'application s'ajoute ici (test : handy/test_upload_host.py).
+UPLOAD_PATHS = tuple(re.compile(p) for p in (
+    r"^/handy/statuses/$",                                         # statut photo ou vidéo
+    r"^/handy/me/conversations/\d+/send/$",                        # pièce jointe d'un message
+    r"^/handy/me/kyc/capture/$",                                   # photo de pièce d'identité
+    r"^/handy/kyc/biometric/sessions/\d+/captures/$",              # vérification faciale
+    r"^/handy/handyman-docs/$",                                    # justificatif professionnel
+    r"^/handy/bookings/\d+/payment/cash/$",                        # reçu d'un paiement en espèces
+    r"^/handy/reviews/\d+/photos/$",                               # photo d'un avis
+    r"^/handy/users/\d+/$",                                        # photo de profil
+    r"^/handy/handymen/\d+/$",                                     # photo du professionnel
+    r"^/handy/engagements/installments/\d+/(payments|lines)/$",    # justificatif d'un engagement
+))
+UPLOAD_METHODS = ("POST", "PATCH", "PUT")
+
+
+def _request_host(request) -> str:
+    try:
+        return request.get_host().rsplit(":", 1)[0].lower()
+    except DisallowedHost:
+        return ""                         # hôte inconnu : Django le refusera lui-même plus loin
+
+
+def is_upload_request(request) -> bool:
+    if request.method == "GET" and request.path_info == "/healthz":
+        return True                       # vérification de la route d'envoi (Traefik, certificat)
+    content_type = (request.META.get("CONTENT_TYPE") or "").lower()
+    return (request.method in UPLOAD_METHODS and content_type.startswith("multipart/form-data")
+            and any(p.match(request.path_info) for p in UPLOAD_PATHS))
+
+
+class UploadHostMiddleware:
+    """Sur l'hôte d'envoi direct : envois de fichiers de l'application seulement (404 sinon). Une requête admise est ensuite traitée sous
+    l'hôte public de l'API (API_PUBLIC_HOST), pour que les liens absolus des réponses ne pointent jamais vers l'hôte d'envoi."""
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        upload_host = getattr(settings, "UPLOAD_HOST", "")
+        if upload_host and _request_host(request) == upload_host:
+            if not is_upload_request(request):
+                refused = JsonResponse({"detail": "Adresse réservée aux envois de fichiers de l'application.", "code": "upload_host_only"},
+                                       status=404)
+                refused["X-Upload-Host"] = "refused"     # l'application repasse alors par l'API habituelle
+                return refused
+            api_host = getattr(settings, "API_PUBLIC_HOST", "")
+            if api_host and api_host in settings.ALLOWED_HOSTS:
+                request.META["HTTP_HOST"] = api_host
+                request.META.pop("HTTP_X_FORWARDED_HOST", None)
         return self.get_response(request)

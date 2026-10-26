@@ -61,6 +61,14 @@ def check(env: dict):
     for var in ("tratraweb_HOST", "FRONTEND_HOST", "MINIO_API_HOST"):
         if not get(var):
             err(var, "absente (utilisée par les routeurs Traefik du compose)")
+    upload = get("UPLOAD_HOST")
+    if not upload:
+        warn("UPLOAD_HOST", "absente : l'application envoie ses photos et vidéos par Cloudflare seulement (coupées sur certains Wi-Fi) — "
+                            "créer « upload » en DNS seulement vers le serveur puis UPLOAD_HOST=upload.<domaine>")
+    elif "://" in upload or "/" in upload:
+        err("UPLOAD_HOST", "un NOM d'hôte nu, sans https:// ni chemin (ex. upload.tratra.net)")
+    elif upload in (api, front, get("MINIO_API_HOST")):
+        err("UPLOAD_HOST", "doit être un hôte DÉDIÉ (ni l'API, ni le site, ni MinIO) : Django n'y accepte que les envois de fichiers")
     hosts = [h.strip() for h in get("ALLOWED_HOSTS").split(",") if h.strip()]
     if not hosts or "*" in hosts:
         err("ALLOWED_HOSTS", "doit lister explicitement les hôtes de production (pas de *)")

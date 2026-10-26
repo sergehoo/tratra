@@ -148,6 +148,14 @@ services:
       # Middlewares
       - traefik.http.routers.tratraweb.middlewares=tratraweb-sec-headers@docker,tratraweb-compress@docker,tratraweb-rl@docker
 
+      # Hôte d'envoi DIRECT des fichiers de l'application (UPLOAD_HOST, enregistrement DNS « DNS seulement », hors Cloudflare) : même
+      # service et mêmes protections Traefik ; Django n'y accepte que les envois de fichiers de l'application (UploadHostMiddleware).
+      - traefik.http.routers.tratraupload.rule=Host(`${UPLOAD_HOST}`)
+      - traefik.http.routers.tratraupload.entrypoints=websecure
+      - traefik.http.routers.tratraupload.tls.certresolver=lets
+      - traefik.http.routers.tratraupload.service=tratraweb-svc
+      - traefik.http.routers.tratraupload.middlewares=tratraweb-sec-headers@docker,tratraweb-rl@docker
+
       - traefik.http.middlewares.tratraweb-sec-headers.headers.stsSeconds=31536000
       - traefik.http.middlewares.tratraweb-sec-headers.headers.stsIncludeSubdomains=true
       - traefik.http.middlewares.tratraweb-sec-headers.headers.stsPreload=true

@@ -72,6 +72,15 @@ ALLOWED_HOSTS = env_list(
     "tratra.net,www.tratra.net,tratra.ci,www.tratra.ci,127.0.0.1,localhost,tratraweb",
 )
 
+# Hôte d'envoi DIRECT des fichiers de l'application (« DNS seulement », hors Cloudflare) : sur certains Wi-Fi, les envois d'un téléphone
+# vers Cloudflare sont coupés au bout de 15 s. Cet hôte sert la même API mais n'accepte QUE les envois de fichiers de l'application
+# (handy/security.py, UploadHostMiddleware). Vide = désactivé. API_PUBLIC_HOST : hôte de l'API derrière Cloudflare, sous lequel une
+# requête reçue par l'hôte d'envoi est traitée (liens absolus des réponses).
+UPLOAD_HOST = config("UPLOAD_HOST", default="").strip().lower()
+API_PUBLIC_HOST = (config("API_PUBLIC_HOST", default="") or config("tratraweb_HOST", default="")).strip().lower()
+if UPLOAD_HOST and UPLOAD_HOST not in ALLOWED_HOSTS:
+    ALLOWED_HOSTS.append(UPLOAD_HOST)
+
 # Pendant l’accès provisoire en HTTP sur :1934, ne force pas HTTPS
 
 # CSRF (pas strictement nécessaire pour /admin en même origine, mais utile si tu postes depuis un front)
@@ -156,6 +165,7 @@ CORS_EXPOSE_HEADERS = ["Idempotent-Replay"]
 
 MIDDLEWARE = [
     'handy.security.CloudflareClientIPMiddleware',   # adresse réelle du visiteur derrière Cloudflare (CLOUDFLARE_PROXY)
+    'handy.security.UploadHostMiddleware',           # hôte d'envoi direct : envois de fichiers de l'application seulement (UPLOAD_HOST)
     'django.middleware.security.SecurityMiddleware',
     "whitenoise.middleware.WhiteNoiseMiddleware",
     'corsheaders.middleware.CorsMiddleware',

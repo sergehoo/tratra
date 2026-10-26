@@ -137,3 +137,30 @@ Préparé le 23 oct. 2026, **sans effet tant que les serveurs DNS ne sont pas ba
   de médias sont signées et privées). Limite Cloudflare Free : 100 Mo par requête (pièces KYC limitées à 10 Mo). Retour arrière :
   repasser l'enregistrement en « DNS only ». L'IP 147.93.84.26 reste connue de l'historique DNS : seul un pare-feu n'acceptant que
   les adresses Cloudflare sur 80/443 la protège vraiment (attention aux autres sites hébergés sur ce serveur).
+
+### Hôte d'envoi direct des fichiers de l'application (`upload`, 26 oct. 2026)
+
+**Constat** (Galaxy S10+, Wi-Fi de bureau, sonde avec un faux jeton : rien n'est publié) : les envois de fichiers vers Cloudflare
+(point de présence de Paris) sont coupés au bout de 15 s sans réponse — 0 sur 3 vers `api.tratra.net`, et aussi vers
+`speed.cloudflare.com` — alors que le même envoi en direct vers le serveur passe (3 sur 3, corps de 43 Ko lu en entier) et qu'un envoi
+vers un site hors Cloudflare passe aussi. En 4G (point de présence d'Abidjan), tout passe. Le Mac sur le même Wi-Fi passe. Le texte
+seul passe toujours (un seul petit paquet). Aucune de ces requêtes n'atteint Django : elles ne laissent aucune trace dans les journaux.
+Ni le serveur, ni MinIO (`exists` 0,19 s, écriture 0,21 s depuis l'API), ni le DNS `minioapi` ne sont en cause.
+
+**Parade** : l'application envoie ses fichiers (statuts, pièces jointes, KYC, biométrie, justificatifs, reçus, photos d'avis et de
+profil) par `upload.tratra.net`, en **DNS seulement** vers le serveur, qui sert la même API. Django n'y accepte QUE ces envois
+(multipart, chemins de `handy/security.py`, `UPLOAD_PATHS`) : connexion, codes SMS et tout le reste y répondent 404 et restent derrière
+Cloudflare. Mêmes authentification, contrôles des fichiers et limite de débit Traefik ; les réponses sont produites sous l'hôte de l'API.
+Si l'hôte d'envoi est injoignable (adresse inconnue, connexion refusée, certificat, route absente), l'application repasse aussitôt par
+l'API habituelle (la requête n'a jamais atteint le serveur : aucun doublon).
+
+**Mise en place** (dans cet ordre) :
+1. Cloudflare → DNS → `A upload 147.93.84.26`, **DNS only** (nuage gris).
+2. `.env` du serveur : `UPLOAD_HOST=upload.tratra.net` (ajouté seul à `ALLOWED_HOSTS`), puis `python3 scripts/check_env.py .env`.
+3. Déployer : `docker compose up -d tratraweb` (routeur Traefik `tratraupload`, certificat Let's Encrypt demandé au premier appel).
+4. Vérifier : `curl -s https://upload.tratra.net/healthz` → `{"status": "ok"}` ; `curl -s https://upload.tratra.net/handy/statuses/feed/`
+   → 404 `upload_host_only` (l'hôte n'ouvre rien d'autre que les envois).
+5. Publier une version de l'application qui utilise cet hôte (build 13 et suivants).
+
+**Retour arrière** : supprimer l'enregistrement `upload` (ou vider `UPLOAD_HOST`) — l'application revient d'elle-même à l'API.
+Ne PAS passer `upload` en « Proxied » : ce serait revenir au chemin coupé.

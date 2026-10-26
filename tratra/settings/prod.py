@@ -27,6 +27,8 @@ if SECRET_KEY.startswith('django-insecure-'):
 ALLOWED_HOSTS = _production_list('ALLOWED_HOSTS')
 if not ALLOWED_HOSTS or '*' in ALLOWED_HOSTS:
     raise ImproperlyConfigured('ALLOWED_HOSTS must explicitly list production hosts and cannot contain *.')
+if UPLOAD_HOST and UPLOAD_HOST not in ALLOWED_HOSTS:   # hôte d'envoi direct des fichiers de l'application (voir base.py)
+    ALLOWED_HOSTS.append(UPLOAD_HOST)
 
 # Production requires an external private object store.  This avoids silently
 # persisting identity documents in an ephemeral container volume.
