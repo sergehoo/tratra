@@ -2,7 +2,7 @@
 depuis le Back-Office (« Engagement »).
 
 Règles de rédaction : aucune promesse invérifiable (« des centaines d'artisans », « mieux classé »…), aucune fonction non déployée (les
-nouveautés portent `feature` : activables seulement si la fonction figure dans DEPLOYED_FEATURES), chaque bouton ouvre un écran du
+nouveautés portent `feature` : elles ne visent que les comptes dont l'application a la fonction, handy.features), chaque bouton ouvre un écran du
 registre central accessible à l'audience visée. Installation idempotente : un modèle existant (même `key`) n'est jamais réécrit."""
 from typing import Dict, List
 
@@ -96,7 +96,7 @@ TEMPLATES: List[Dict] = [
     T("inactif-entreprise-30", "Entreprise inactive — 30 jours", "inactive", E, "Vos sites ont-ils besoin d'un entretien ?",
       "Programmez vos interventions et suivez-les depuis l'Espace Business, avec validation par votre équipe.",
       "Espace Business", "business", inactive=30, age=7, priority=70),
-    # ── Nouveautés (activables seulement si la fonction est déployée) ────────────────────────────────────────────────────────
+    # ── Nouveautés (envoyées aux seuls comptes dont l'application a la fonction) ────────────────────────────────────────────────────────
     T("nouveau-trouvez-moi-un-pro", "Nouveauté — Trouvez-moi un professionnel", "news", C, "Nouveau : « Trouvez-moi un professionnel »",
       "Décrivez votre besoin : Tratra prévient les artisans vérifiés disponibles et vous confirme le premier qui accepte.",
       "Essayer", "flash_order", age=7, feature="flash", priority=90),

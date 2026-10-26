@@ -2,7 +2,8 @@
 délais et fréquence, programmation, activation / désactivation, aperçu, statistiques et historique des envois.
 
 Droit : `announcements.manage` (rôle marketing, Super Admin). Chaque modification et chaque (dés)activation est journalisée ; une
-modification concurrente est refusée (version). Activer exige un message valide, un écran ouvert à l'audience et une fonction DÉPLOYÉE."""
+modification concurrente est refusée (version). Activer exige un message valide et un écran ouvert à l'audience ; une campagne qui
+annonce une fonction récente ne vise que les comptes dont l'application l'a (handy.features) — l'adoption est affichée."""
 from django.core.exceptions import ValidationError
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
@@ -11,7 +12,7 @@ from rest_framework.response import Response
 from backoffice.common import BOView, audit_op, bad_request, paginate
 from campaigns import engine, triggers
 from campaigns.models import AUDIENCES, Campaign, CampaignSend
-from handy import destinations
+from handy import destinations, features
 
 EDITABLE_TEXT = ("name", "title", "body", "action_label", "action_value")
 EDITABLE_INT = {"delay_hours": (0, 24 * 60), "inactive_days": (1, 365), "max_age_days": (1, 90), "min_gap_hours": (0, 24 * 30), "priority": (1, 999)}
@@ -25,7 +26,7 @@ def serialize(c: Campaign, *, detail: bool = False) -> dict:
         "id": c.id, "key": c.key, "name": c.name, "trigger": c.trigger, "trigger_label": c.get_trigger_display(), "audience": c.audience,
         "audience_label": c.get_audience_display(), "goal": trigger.goal_label if trigger else "", "is_active": c.is_active,
         "marketing": c.marketing, "send_push": c.send_push, "feature": c.feature or None,
-        "features": sorted(engine.required_features(c)), "missing_features": engine.missing_features(c), "priority": c.priority,
+        "features": engine.describe_features(engine.required_features(c)), "priority": c.priority,
         "title": c.title, "body": c.body, "action_label": c.action_label, "action_value": c.action_value,
         "starts_at": c.starts_at, "ends_at": c.ends_at, "activated_at": c.activated_at, "version": c.version, "updated_at": c.updated_at,
     }
@@ -42,7 +43,8 @@ def meta() -> dict:
                          for k, v in Campaign.TRIGGERS],
             "audiences": [{"id": k, "label": v} for k, v in AUDIENCES],
             "progress": [{"id": k, "label": v} for k, v in Campaign.PROGRESS],
-            "destinations": destinations.catalog(), "deployed_features": sorted(engine.deployed_features()),
+            "destinations": destinations.catalog(),
+            "features": [{"code": f.code, "label": f.label, **features.adoption([f.code])} for f in features.FEATURES],
             "rules": {"weekly_push_limit": engine.weekly_push_limit(), "send_hours": "%dh-%dh" % engine.send_hours(), "sms": False}}
 
 
@@ -58,9 +60,13 @@ class CampaignList(BOView):
             qs = qs.filter(audience=params["audience"])
         if params.get("active") in ("0", "1"):
             qs = qs.filter(is_active=params["active"] == "1")
-        rows = []
+        rows, adoption = [], {}
         for c in qs.order_by("priority", "key"):
             row = serialize(c)
+            needed = frozenset(engine.required_features(c))
+            if needed and needed not in adoption:
+                adoption[needed] = features.adoption(needed)
+            row["app"] = adoption.get(needed)       # téléphones dont l'application ouvre la fonction annoncée
             sent = CampaignSend.objects.filter(campaign=c, status="sent")
             row["sent"], row["converted"] = sent.count(), sent.filter(converted_at__isnull=False).count()
             rows.append(row)
@@ -79,7 +85,9 @@ class CampaignDetail(BOView):
         if c is None:
             return bad_request("not_found", "Campagne introuvable.", 404)
         data = serialize(c, detail=True)
-        data["audience_estimate"] = engine.audience_estimate(c) if c.is_active or request.query_params.get("estimate") == "1" else None
+        reach = engine.audience(c) if c.is_active or request.query_params.get("estimate") == "1" else None
+        data["audience_estimate"] = reach["new"] if reach else None
+        data["audience_waiting_update"] = reach["waiting_update"] if reach else None
         return Response(data)
 
     def patch(self, request, pk):
@@ -134,7 +142,7 @@ class CampaignDetail(BOView):
         if errors:
             return Response({"code": "invalid", "detail": "Vérifiez les champs signalés.", "fields": errors}, status=400)
         try:
-            engine.validate(c, check_feature=c.is_active)
+            engine.validate(c)
         except ValidationError as exc:
             return bad_request("invalid", " ".join(exc.messages), 400)
         c.version += 1

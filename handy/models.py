@@ -1286,6 +1286,7 @@ class Notification(models.Model):
         ('', 'Non concerné'), ('queued', 'En file'), ('sending', 'Envoi en cours'), ('sent', 'Envoyé'), ('no_device', 'Aucun appareil'),
         ('disabled', 'Désactivé par l\'utilisateur'), ('unconfigured', 'Firebase non configuré'), ('failed', 'Échec'),
         ('obsolete', 'Non envoyé : mission déjà attribuée ou expirée'),
+        ('outdated_app', 'Non envoyé : application à mettre à jour'),
     ]
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notifications', db_index=True)
     notification_type = models.CharField(max_length=50, choices=TYPES, db_index=True)

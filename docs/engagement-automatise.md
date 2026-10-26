@@ -56,13 +56,23 @@ Ciblage : audience (rôle du compte unique), communes **déclarées** (jamais le
   réservation en cours ou dans les 24 h, ni dans les 2 h suivant une notification Flash, réservation, compte, suivi ou paiement.
 - **Fréquence** : écart minimal (`min_gap_hours`) avec le précédent message d'engagement reçu.
 
-## Fonctions non déployées
+## Nouveautés et versions de l'application
 
-Une campagne ne peut pas être activée si elle **annonce** une fonction (`feature`) ou **ouvre l'écran** d'une fonction
-(`flash_order` → `flash`, `panne` → `panne`, `favorites` → `favorites`, `badge` → `tratra_id`, `engagements` → `engagements`)
-absente de `DEPLOYED_FEATURES`. Codes reconnus : `flash`, `panne`, `favorites`, `tratra_id`, `engagements`, `service_modes`,
-`catalogue_families`. Ne déclarer une fonction qu'une fois le backend, le site **et** la version de l'application qui la contient
-publiés.
+Le serveur et le site sont livrés ensemble : une fonction récente est en ligne côté serveur et web dès que la version qui la contient
+est déployée. L'application, elle, n'est à jour que lorsque chaque utilisateur l'a mise à jour. Le registre `handy/features.py`
+liste les fonctions qu'une campagne peut **annoncer** (`feature`) ou **ouvrir** (`flash_order` → `flash`, `panne` → `panne`,
+`favorites` → `favorites`, `badge` → `tratra_id`, `engagements` → `engagements`) ; codes : `flash`, `panne`, `favorites`,
+`tratra_id`, `engagements`, `service_modes`, `catalogue_families`.
+
+- L'application annonce au serveur les fonctions dont elle a l'écran (capacités de l'appareil, `POST /devices/`, à chaque
+  démarrage) — à partir du build 13.
+- Une campagne qui annonce ou ouvre une fonction ne programme que les comptes qui peuvent l'ouvrir : un téléphone dont l'application
+  la connaît, ou aucun téléphone (compte qui n'utilise que le site). Les autres **attendent** : ils sont visés au premier passage qui
+  suit leur mise à jour (rien n'est enregistré pour eux d'ici là).
+- Le push d'une annonce ou d'une campagne qui conduit à une fonction ne part que vers les téléphones à jour (statut
+  `outdated_app` sinon) : jamais un bouton qui n'ouvre rien sur une ancienne version.
+- Le Back-Office affiche, par campagne, les téléphones à jour (« Appli à jour : n / N téléphones ») et, dans l'estimation, les
+  comptes qui attendent la mise à jour. Une fonction inconnue du registre empêche l'activation.
 
 ## Bibliothèque
 
@@ -91,11 +101,12 @@ modification est versionnée (409 en cas de conflit) et journalisée.
 
 1. Migrations : `handy 0065`, `announcements 0003`, `campaigns 0001` et `0002` (installe les 30 modèles désactivés).
 2. Beat Celery : `campaigns-tick` (toutes les 10 minutes, file `bulk`) — le worker `bulk` doit tourner.
-3. Variables : `CAMPAIGN_PUSH_WEEKLY_LIMIT`, `CAMPAIGN_SEND_HOURS`, `DEPLOYED_FEATURES`.
+3. Variables : `CAMPAIGN_PUSH_WEEKLY_LIMIT`, `CAMPAIGN_SEND_HOURS` (l'ancienne `DEPLOYED_FEATURES` n'est plus lue).
+   Migration `handy 0066` (statut de push « application à mettre à jour »).
 4. Rien n'est envoyé tant qu'aucune campagne n'est activée dans le Back-Office.
 
 ## Tests
 
 `campaigns/test_campaigns.py` : déclencheurs, ciblage, idempotence, consentement et désinscription, limite de push, heures,
-priorité opérationnelle, écart minimal, arrêt après objectif, désactivation, fonctions non déployées, bibliothèque, compatibilité
+priorité opérationnelle, écart minimal, arrêt après objectif, désactivation, nouveautés réservées aux applications à jour, bibliothèque, compatibilité
 FCM (serveur simulé) et Back-Office.

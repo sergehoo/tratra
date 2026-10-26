@@ -46,6 +46,18 @@ def send_push(user_id, title, body, data=None):
     return push.send_to_user(user_id, title, body, data)
 
 
+def _announced_features(announcement):
+    """Fonctions récentes qu'ouvre une annonce (son bouton) ou qu'annonce sa campagne : seuls les téléphones dont l'application les
+    connaît en reçoivent le push (handy.features)."""
+    from handy import features
+    from campaigns.models import Campaign
+
+    needed = features.for_destination(announcement.action_value) if announcement.action_kind == "deeplink" else set()
+    if announcement.source == "campaign":
+        needed |= {f for f in Campaign.objects.filter(announcement=announcement).values_list("feature", flat=True) if f}
+    return needed
+
+
 @shared_task(bind=True, max_retries=3)
 def send_notification_push(self, notification_id, collapse_key=None):
     """Diffuse UNE notification enregistrée sur tous les appareils du compte (FCM), de façon idempotente :
@@ -92,7 +104,8 @@ def send_notification_push(self, notification_id, collapse_key=None):
         image = announcement_image.public_url(a)
         if image:
             payload["image"] = image
-        extra = {"image": image, "data_only_capability": push.RICH_CAPABILITY}
+        extra = {"image": image, "data_only_capability": push.RICH_CAPABILITY,
+                 "require_capabilities": sorted(_announced_features(a))}
     if n.notification_type == "new_mission":
         # Tratra Flash : jamais d'alerte pour une proposition déjà attribuée, retirée ou expirée ; durée de vie = délai de réponse restant.
         from flash.notify import FLASH_CAPABILITY, deliverable_ttl
@@ -118,6 +131,8 @@ def send_notification_push(self, notification_id, collapse_key=None):
             Notification.objects.filter(pk=n.pk, push_status='sending').update(push_status='queued')   # rendue au prochain essai
             raise self.retry(countdown=30 * (2 ** self.request.retries))
         status = "failed"
+    elif result["skipped"] == "outdated_app":
+        status = "outdated_app"
     elif result["skipped"] in ("no_device",) or result["removed"]:
         status = "no_device"
     else:

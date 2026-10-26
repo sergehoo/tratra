@@ -11,10 +11,14 @@ import { Drawer, FilterSelect, KV, dd, useNotice } from "../_components/ui";
 
 interface Campaign {
   id: number; key: string; name: string; trigger: string; trigger_label: string; audience: Role; audience_label: string; goal: string; is_active: boolean;
-  marketing: boolean; send_push: boolean; feature: string | null; features: string[]; missing_features: string[]; priority: number; title: string; body: string;
+  marketing: boolean; send_push: boolean; feature: string | null; features: Feature[]; priority: number; title: string; body: string;
   action_label: string; action_value: string; starts_at: string | null; ends_at: string | null; activated_at: string | null; version: number; updated_at: string;
-  sent?: number; converted?: number;
+  sent?: number; converted?: number; app?: Adoption | null;
 }
+/** Nouveauté annoncée ou ouverte par la campagne (registre du serveur). */
+interface Feature { code: string; label: string }
+/** Téléphones enregistrés et, parmi eux, ceux dont l’application ouvre la nouveauté. */
+interface Adoption { phones: number; ready: number }
 interface Stats {
   scheduled: number; sent: number; push: number; goal_met_before_send: number; skipped: number; skipped_reasons: Record<string, number>; cancelled: number;
   opened: number; converted: number; open_rate: number | null; conversion_rate: number | null;
@@ -23,18 +27,18 @@ interface Stats {
 interface Preview {
   in_app: { title: string; body: string; action: null | { label: string; destination: { label: string; detail?: string }; app: string; web: string | null } };
   push: { enabled: boolean; title: string; body: string; channel: string; deeplink: string; weekly_limit: number };
-  rules: { marketing: boolean; consent_required: boolean; send_hours: string; timezone: string; min_gap_hours: number; features: string[]; missing_features: string[] };
+  rules: { marketing: boolean; consent_required: boolean; send_hours: string; timezone: string; min_gap_hours: number; features: Feature[]; app: Adoption | null };
 }
 interface Detail extends Campaign {
   communes: string[]; progress: string[]; delay_hours: number; inactive_days: number; max_age_days: number; min_gap_hours: number;
-  stats: Stats; preview: Preview; audience_estimate: number | null;
+  stats: Stats; preview: Preview; audience_estimate: number | null; audience_waiting_update: number | null;
 }
 interface Meta {
   triggers: { id: string; label: string; audiences: Role[]; goal: string }[];
   audiences: { id: Role; label: string }[];
   progress: { id: string; label: string }[];
   destinations: AppDestination[];
-  deployed_features: string[];
+  features: (Feature & Adoption)[];
   rules: { weekly_push_limit: number; send_hours: string; sms: boolean };
 }
 interface Send { id: number; user: string; ref: string; status: string; status_label: string; reason: string; push: boolean; due_at: string; sent_at: string | null; converted_at: string | null; created_at: string }
@@ -46,6 +50,17 @@ const REASONS: Record<string, string> = {
 };
 const SEND_TONE: Record<string, "gray" | "info" | "success" | "warning" | "danger"> = { scheduled: "info", sent: "success", skipped: "warning", goal_met: "gray", cancelled: "gray" };
 const reason = (r: string) => REASONS[r] ?? r;
+const phones = (a: Adoption) => `${a.ready} téléphone${a.ready > 1 ? "s" : ""} sur ${a.phones}`;
+/** Nouveautés : serveur et site en ligne ; l’application, seulement chez ceux qui l’ont mise à jour. */
+const featureNote = (list: Feature[], app: Adoption | null) =>
+  `Nouveauté (${list.map((x) => x.label).join(", ")}) : en ligne sur le site ; dans l’application, à jour sur ${app ? phones(app) : "0 téléphone"}. `
+  + "Les autres comptes recevront le message après la mise à jour de leur application ; aucun push ne part vers une version qui ne saurait pas l’ouvrir.";
+/** Un seul chiffre si toutes les nouveautés arrivent avec la même version de l’application, sinon une par une. */
+const adoptionSummary = (list: (Feature & Adoption)[]) => {
+  if (!list.length) return "aucune nouveauté";
+  const same = list.every((x) => x.ready === list[0].ready && x.phones === list[0].phones);
+  return same ? `application à jour sur ${phones(list[0])} aujourd’hui` : list.map((x) => `${x.label} ${x.ready}/${x.phones}`).join(" · ");
+};
 const localInput = (iso: string | null) => (iso ? new Date(new Date(iso).getTime() - new Date(iso).getTimezoneOffset() * 60000).toISOString().slice(0, 16) : "");
 const toIso = (local: string) => (local ? new Date(local).toISOString() : null);
 const num = (v: string) => (v === "" ? "" : Number(v));
@@ -186,7 +201,7 @@ function Editor({ id, meta, manage, onClose, onChanged }: { id: number | null; m
                 actionKind={item.preview.in_app.action ? "deeplink" : "none"} actionLabel={item.preview.in_app.action?.label ?? ""}
                 destination={item.preview.in_app.action?.destination ?? null} webHref={item.preview.in_app.action?.web}
                 notes={[
-                  ...(item.preview.rules.missing_features.length ? [{ tone: "danger" as const, text: `Fonction non déclarée déployée (${item.preview.rules.missing_features.join(", ")}) : activation impossible.` }] : []),
+                  ...(item.preview.rules.features.length ? [{ tone: "info" as const, text: featureNote(item.preview.rules.features, item.preview.rules.app) }] : []),
                   { tone: "info" as const, text: `Envoi entre ${item.preview.rules.send_hours} (${item.preview.rules.timezone}), au plus ${item.preview.push.weekly_limit} push d’engagement par semaine et par compte ; aucun SMS.` },
                   ...(item.preview.rules.consent_required ? [{ tone: "info" as const, text: "Message marketing : seuls les comptes ayant donné leur consentement le reçoivent." }] : []),
                 ]} />
@@ -195,7 +210,8 @@ function Editor({ id, meta, manage, onClose, onChanged }: { id: number | null; m
           ) : null}
           {tab === "stats" ? (
             <div className="space-y-4">
-              <KV items={[["Nouveaux destinataires au prochain passage (estimation)", item.audience_estimate ?? "—"], ["Programmés", item.stats.scheduled], ["Envoyés", item.stats.sent], ["Dont push", item.stats.push],
+              <KV items={[["Nouveaux destinataires au prochain passage (estimation)", item.audience_estimate ?? "—"],
+                ...(item.features.length ? [["En attente d’une mise à jour de l’application", item.audience_waiting_update ?? "—"] as [string, number | string]] : []), ["Programmés", item.stats.scheduled], ["Envoyés", item.stats.sent], ["Dont push", item.stats.push],
                 ["Ouverts", `${item.stats.opened} (${pct(item.stats.open_rate)})`], ["Objectif atteint après envoi", `${item.stats.converted} (${pct(item.stats.conversion_rate)})`],
                 ["Objectif atteint avant envoi", item.stats.goal_met_before_send], ["Annulés", item.stats.cancelled]]} />
               <div><h3 className="mb-1 text-sm font-bold text-ink">Non envoyés ({item.stats.skipped})</h3>
@@ -241,7 +257,7 @@ export default function CampaignsAdminPage() {
   const [filters, setFilters] = useState({ active: "", audience: "", trigger: "" });
   const [failure, setFailure] = useState("");
   const [openId, setOpenId] = useState<number | null>(null);
-  const [toggle, setToggle] = useState<{ item: Campaign; estimate: number | null } | null>(null);
+  const [toggle, setToggle] = useState<{ item: Campaign; estimate: number | null; waiting: number | null } | null>(null);
   const [runAsk, setRunAsk] = useState(false);
   const [busy, setBusy] = useState(false);
 
@@ -261,10 +277,15 @@ export default function CampaignsAdminPage() {
   async function askToggle(item: Campaign) {
     setFailure("");
     let estimate: number | null = null;
+    let waiting: number | null = null;
     if (!item.is_active) {
-      try { estimate = (await bo.get<Detail>(`/campaigns/${item.id}/?estimate=1`)).audience_estimate; } catch { /* estimation facultative */ }
+      try {
+        const d = await bo.get<Detail>(`/campaigns/${item.id}/?estimate=1`);
+        estimate = d.audience_estimate;
+        waiting = d.audience_waiting_update;
+      } catch { /* estimation facultative */ }
     }
-    setToggle({ item, estimate });
+    setToggle({ item, estimate, waiting });
   }
   async function doToggle() {
     if (!toggle) return;
@@ -295,20 +316,26 @@ export default function CampaignsAdminPage() {
     }
   }
 
-  const deployed = (c: Campaign) => !c.missing_features.length;
   const columns: Column<Campaign>[] = [
     { key: "name", header: "Campagne", primary: true, cell: (c) => <span className="min-w-0"><span className="block font-semibold text-ink">{c.name}</span><span className="block text-xs text-ash">{c.trigger_label}</span></span> },
     { key: "aud", header: "Audience", cell: (c) => <Badge tone={c.audience === "artisans" ? "accent" : c.audience === "companies" ? "night" : "primary"}>{c.audience_label}</Badge> },
     { key: "goal", header: "Objectif", hideOnMobile: true, cell: (c) => <span className="text-sm text-inkSoft">{c.goal}</span> },
     { key: "res", header: "Résultats", hideOnMobile: true, cell: (c) => <span className="whitespace-nowrap text-sm"><span className="block text-ink">{c.sent ?? 0} envoyé{(c.sent ?? 0) > 1 ? "s" : ""}</span><span className="block text-xs text-ash">{c.converted ?? 0} objectif{(c.converted ?? 0) > 1 ? "s" : ""} atteint{(c.converted ?? 0) > 1 ? "s" : ""}</span></span> },
-    { key: "status", header: "Statut", cell: (c) => (c.is_active ? <Badge tone="success">Active</Badge> : !deployed(c) ? <span title={`Non déclarée déployée : ${c.missing_features.join(", ")}`}><Badge tone="warning">Fonction non déployée</Badge></span> : <Badge tone="gray">Désactivée</Badge>) },
+    {
+      key: "status", header: "Statut", cell: (c) => (
+        <span className="inline-flex flex-col items-start gap-1">
+          {c.is_active ? <Badge tone="success">Active</Badge> : <Badge tone="gray">Désactivée</Badge>}
+          {c.app ? <span className="whitespace-nowrap text-xs text-ash" title={`Nouveauté : ${c.features.map((x) => x.label).join(", ")}. Téléphones dont l’application l’ouvre ; les comptes qui n’utilisent que le site la reçoivent aussi.`}>Appli à jour : {c.app.ready}/{c.app.phones} tél.</span> : null}
+        </span>
+      ),
+    },
     {
       key: "act", header: "Actions", align: "right", cell: (c) => (
         <span className="inline-flex flex-nowrap justify-end gap-2 whitespace-nowrap">
           <Button size="sm" variant="outline" leftIcon={manage ? <Pencil aria-hidden className="h-4 w-4" /> : <BarChart3 aria-hidden className="h-4 w-4" />} onClick={() => setOpenId(c.id)}>{manage ? "Modifier" : "Voir"}</Button>
           {manage ? (c.is_active
             ? <Button size="sm" variant="outline" leftIcon={<PowerOff aria-hidden className="h-4 w-4" />} onClick={() => void askToggle(c)}>Désactiver</Button>
-            : <Button size="sm" disabled={!deployed(c)} leftIcon={<Power aria-hidden className="h-4 w-4" />} onClick={() => void askToggle(c)}>Activer</Button>) : null}
+            : <Button size="sm" leftIcon={<Power aria-hidden className="h-4 w-4" />} onClick={() => void askToggle(c)}>Activer</Button>) : null}
         </span>
       ),
     },
@@ -325,7 +352,7 @@ export default function CampaignsAdminPage() {
         <Alert tone="info" className="mb-4">
           Règles appliquées à chaque envoi : au plus {meta.rules.weekly_push_limit} push d’engagement par semaine et par compte, envoi entre {meta.rules.send_hours}, priorité absolue à Tratra Flash,
           aux réservations et aux alertes de sécurité, consentement exigé pour le marketing, désinscription par la catégorie « Conseils, rappels et nouveautés ».
-          {" "}Fonctions déclarées déployées : {meta.deployed_features.length ? meta.deployed_features.join(", ") : "aucune"}.
+          {" "}Les nouveautés ne visent que les comptes dont l’application ouvre la fonction (ou qui n’utilisent que le site) : {adoptionSummary(meta.features)}.
         </Alert>
       ) : null}
       <div className="mb-4 flex flex-wrap items-end gap-3">
@@ -346,6 +373,8 @@ export default function CampaignsAdminPage() {
           : <div className="space-y-2 text-sm text-inkSoft">
             <p><span className="font-semibold text-ink">{toggle.item.title}</span> — {toggle.item.body}</p>
             <p>{toggle.estimate !== null ? `Environ ${toggle.estimate} nouveau(x) destinataire(s) au prochain passage. ` : ""}Les règles (consentement, limite de push, heures, priorité opérationnelle) s’appliquent à chaque envoi.</p>
+            {toggle.item.features.length ? <p>{toggle.waiting ? `${toggle.waiting} autre(s) compte(s) le recevront après la mise à jour de leur application. ` : ""}
+              {`Application à jour aujourd’hui sur ${toggle.item.app ? phones(toggle.item.app) : "0 téléphone"} ; aucun push ne part vers une version qui ne saurait pas ouvrir ${toggle.item.features.map((x) => x.label).join(", ")}.`}</p> : null}
           </div>) : null}
       </Modal>
       <ConfirmDialog open={runAsk} onClose={() => setRunAsk(false)} loading={busy} onConfirm={() => void doRun()} tone="primary" confirmLabel="Exécuter maintenant"

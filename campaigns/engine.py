@@ -9,6 +9,7 @@
    Canaux : message dans l'application (module Annonces, annonce SUPPORT de la campagne) + push FCM ; JAMAIS de SMS.
 3. MESURER : un envoi dont l'objectif est atteint ensuite est marqué « converti »."""
 import logging
+from copy import copy
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 from zoneinfo import ZoneInfo
@@ -23,7 +24,7 @@ from django.utils import timezone
 from announcements.models import Announcement, AnnouncementDelivery
 from campaigns import triggers
 from campaigns.models import Campaign, CampaignSend
-from handy import destinations, notifications
+from handy import destinations, features, notifications
 
 logger = logging.getLogger(__name__)
 User = get_user_model()
@@ -46,28 +47,17 @@ def send_hours() -> tuple:
     return int(start or 9), int(end or 20)
 
 
-def deployed_features() -> set:
-    return {f.strip() for f in str(setting("DEPLOYED_FEATURES", "") or "").split(",") if f.strip()}
-
-
-# Écrans qui relèvent d'une fonction récente : y envoyer un utilisateur, c'est annoncer la fonction (même règle que `feature`).
-DESTINATION_FEATURES = {"flash_order": "flash", "panne": "panne", "favorites": "favorites", "badge": "tratra_id", "engagements": "engagements"}
-
-
 def required_features(campaign: Campaign) -> set:
-    key = (campaign.action_value or "").split("/", 1)[0]
-    return {f for f in (campaign.feature, DESTINATION_FEATURES.get(key)) if f}
-
-
-def missing_features(campaign: Campaign) -> List[str]:
-    return sorted(required_features(campaign) - deployed_features())
+    """Fonctions récentes que la campagne annonce (`feature`) ou dont elle ouvre l'écran (handy.features) : serveur et site en ligne
+    avec cette version ; l'application, seulement chez ceux qui l'ont mise à jour — eux seuls sont visés (voir `schedule`)."""
+    return ({campaign.feature} if campaign.feature else set()) | features.for_destination(campaign.action_value)
 
 
 # ── Validation et annonce support ─────────────────────────────────────────────────────────────────────────────────────────────
 
-def validate(campaign: Campaign, *, check_feature: bool = True) -> None:
+def validate(campaign: Campaign) -> None:
     """Règles d'activation : message complet, déclencheur compatible avec l'audience, écran du registre ouvert à cette audience,
-    fonction annoncée DÉPLOYÉE, période cohérente."""
+    fonction annoncée connue du registre (handy.features), période cohérente."""
     if not (campaign.title or "").strip() or not (campaign.body or "").strip():
         raise ValidationError("Titre et message sont obligatoires.")
     trigger = triggers.trigger_for(campaign)
@@ -77,10 +67,9 @@ def validate(campaign: Campaign, *, check_feature: bool = True) -> None:
         raise ValidationError(f"Le déclencheur « {campaign.get_trigger_display()} » ne concerne pas les {campaign.get_audience_display().lower()}.")
     if campaign.action_value:
         destinations.validate_for_announcement(campaign.action_value, [campaign.audience])
-    missing = missing_features(campaign) if check_feature else []
-    if missing:
-        raise ValidationError(f"Fonction non déclarée déployée (DEPLOYED_FEATURES) : {', '.join(missing)}. Une campagne ne doit jamais "
-                              "annoncer une fonction indisponible, ni y conduire.")
+    unknown = features.unknown([campaign.feature])
+    if unknown:
+        raise ValidationError(f"Fonction inconnue : {', '.join(unknown)}. Une campagne ne doit jamais annoncer une fonction indisponible.")
     if campaign.starts_at and campaign.ends_at and campaign.ends_at <= campaign.starts_at:
         raise ValidationError("La fin doit suivre le début.")
     unknown = [p for p in campaign.progress or [] if p not in dict(Campaign.PROGRESS)]
@@ -161,10 +150,12 @@ def _schedule_batch(campaign, trigger, batch, now) -> int:
     if not fresh:
         return 0
     users = {u.pk: u for u in User.objects.filter(pk__in=[u for u, _ in fresh]).select_related("handyman_profile")}
+    # Application à mettre à jour : le compte n'est pas programmé ; il l'est au premier passage qui suit sa mise à jour.
+    reachable = features.reachable_user_ids(users, required_features(campaign))
     rows = []
     for uid, ref in fresh:
         user = users.get(uid)
-        if user is None or not trigger.start_ok(user, ref):
+        if user is None or uid not in reachable or not trigger.start_ok(user, ref):
             continue
         if campaign.progress and triggers.progress_of(user) not in campaign.progress:
             continue
@@ -303,20 +294,31 @@ def stats(campaign: Campaign) -> Dict:
             "conversion_rate": round(converted / total_sent, 4) if total_sent else None}
 
 
-def audience_estimate(campaign: Campaign, now=None, limit: int = 5000) -> int:
+def audience(campaign: Campaign, now=None, limit: int = 5000) -> Dict[str, int]:
     """NOUVEAUX destinataires au prochain passage : événements dans la fenêtre, hors envois déjà programmés ou faits (borné :
-    estimation ; l'objectif et la progression sont vérifiés à la programmation)."""
+    estimation ; l'objectif et la progression sont vérifiés à la programmation) — `waiting_update` : ceux dont l'application doit
+    d'abord être mise à jour pour ouvrir la fonction (ils seront visés ensuite)."""
     now = now or timezone.now()
     trigger = triggers.trigger_for(campaign)
     if trigger is None:
-        return 0
+        return {"new": 0, "waiting_update": 0}
+    if campaign.trigger == "news" and not (campaign.starts_at or campaign.activated_at):
+        campaign = copy(campaign)              # nouveauté pas encore activée : estimée comme si elle démarrait maintenant
+        campaign.activated_at = now
     pairs = []
     for pair in trigger.candidates(campaign, now):
         pairs.append(pair)
         if len(pairs) >= limit:
             break
     known = set(CampaignSend.objects.filter(campaign=campaign, user_id__in=[u for u, _ in pairs]).values_list("user_id", "ref"))
-    return sum(1 for pair in pairs if pair not in known)
+    fresh = [pair for pair in pairs if pair not in known]
+    reachable = features.reachable_user_ids({u for u, _ in fresh}, required_features(campaign))
+    new = sum(1 for u, _ in fresh if u in reachable)
+    return {"new": new, "waiting_update": len(fresh) - new}
+
+
+def audience_estimate(campaign: Campaign, now=None, limit: int = 5000) -> int:
+    return audience(campaign, now, limit)["new"]
 
 
 def preview(campaign: Campaign) -> Dict:
@@ -331,4 +333,9 @@ def preview(campaign: Campaign) -> Dict:
                      else "tratra://announcement", "weekly_limit": weekly_push_limit()},
             "rules": {"marketing": campaign.marketing, "consent_required": campaign.marketing, "send_hours": "%dh-%dh" % send_hours(),
                       "timezone": settings.TIME_ZONE, "min_gap_hours": campaign.min_gap_hours,
-                      "features": sorted(required_features(campaign)), "missing_features": missing_features(campaign)}}
+                      "features": describe_features(required_features(campaign)),
+                      "app": features.adoption(required_features(campaign)) if required_features(campaign) else None}}
+
+
+def describe_features(codes) -> List[Dict[str, str]]:
+    return [{"code": c, "label": features.label(c)} for c in sorted(codes)]

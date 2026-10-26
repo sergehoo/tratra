@@ -21,6 +21,7 @@ from drf_spectacular.utils import extend_schema_field
 from drf_spectacular.types import OpenApiTypes
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
+from handy import features
 from handy.auth_tokens import SessionAwareRefreshToken, apply_remember, wants_remember
 from handy.api.errors import CodedAPIException, field_error
 from handy.api.staff_access import staff_may
@@ -1119,10 +1120,11 @@ class ReportSerializer(serializers.ModelSerializer):
 
 
 class DeviceSerializer(serializers.ModelSerializer):
-    # flash1 : alerte Tratra Flash construite par l'application ; rich1 : annonce avec grande image (handy.push.RICH_CAPABILITY).
-    KNOWN_CAPABILITIES = ("flash1", "rich1")
+    # flash1 : alerte Tratra Flash construite par l'application ; rich1 : annonce avec grande image (handy.push.RICH_CAPABILITY) ;
+    # puis les fonctions dont l'application a l'écran (handy.features : messages et push qui y conduisent).
+    KNOWN_CAPABILITIES = ("flash1", "rich1", *features.BY_CODE)
     user_detail = UserMiniSerializer(source="user", read_only=True)
-    capabilities = serializers.ListField(child=serializers.CharField(max_length=20), required=False, max_length=10)
+    capabilities = serializers.ListField(child=serializers.CharField(max_length=20), required=False, max_length=30)
 
     class Meta:
         model = Device

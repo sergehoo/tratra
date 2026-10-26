@@ -11,7 +11,7 @@ import json
 import logging
 import threading
 import time
-from typing import Dict, Optional
+from typing import Dict, Iterable, Optional
 
 import jwt
 import requests
@@ -95,7 +95,7 @@ def send_to_user(user_id: int, title: str, body: str, data: Optional[Dict] = Non
                  collapse_key: Optional[str] = None, badge: Optional[int] = None, ttl_seconds: int = 86400,
                  validate_only: bool = False, private: bool = False, sound: str = DEFAULT_SOUND,
                  apns_category: Optional[str] = None, data_only_capability: Optional[str] = None,
-                 image: Optional[str] = None) -> Dict:
+                 image: Optional[str] = None, require_capabilities: Iterable[str] = ()) -> Dict:
     """Envoie la notification à TOUS les appareils mobiles du compte. Ne lève jamais d'exception.
 
     Retour : {"sent": n, "removed": n, "failed": n, "devices": n, "skipped": None|"not_configured"|"no_device"|"no_access_token"}.
@@ -108,7 +108,9 @@ def send_to_user(user_id: int, title: str, body: str, data: Optional[Dict] = Non
     `sound` : son de la marque ; `apns_category` : actions iOS (ex. « NEW_MISSION » : Accepter / Refuser / Voir).
     `data_only_capability` : les appareils Android qui annoncent cette capacité reçoivent un message de DONNÉES (priorité haute) et
     affichent eux-mêmes l'alerte (actions, arrêt à l'échéance) ; les autres reçoivent une notification classique.
-    `image` : adresse publique HTTPS d'une image (notification déroulée) ; les messages de données la portent dans `data`."""
+    `image` : adresse publique HTTPS d'une image (notification déroulée) ; les messages de données la portent dans `data`.
+    `require_capabilities` : seuls les appareils qui annoncent toutes ces capacités reçoivent le message (ex. une fonction dont les
+    anciennes versions de l'application n'ont pas l'écran, handy.features) ; aucun appareil à jour = `skipped` « outdated_app »."""
     result = {"sent": 0, "removed": 0, "failed": 0, "devices": 0, "skipped": None}
     try:
         if not is_configured():
@@ -121,6 +123,11 @@ def send_to_user(user_id: int, title: str, body: str, data: Optional[Dict] = Non
         if not devices:
             result["skipped"] = "no_device"
             return result
+        if require_capabilities:
+            devices = [d for d in devices if set(require_capabilities) <= set(d.capabilities or [])]
+            if not devices:
+                result["skipped"] = "outdated_app"
+                return result
         token = _access_token()
         if token is None:
             result["skipped"] = "no_access_token"

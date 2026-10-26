@@ -772,11 +772,10 @@ CONTRACT_SIGNING_KEK = config('CONTRACT_SIGNING_KEK', default='')
 CONTRACT_PDF_LEGAL_MENTIONS = config('CONTRACT_PDF_LEGAL_MENTIONS', default='')
 
 # Engagement automatisé (campagnes) : 2 push d'engagement par semaine et par compte au plus (campagnes + annonces promotionnelles),
-# envoi seulement entre ces heures (fuseau TIME_ZONE), fonctions DÉCLARÉES déployées (une campagne qui annonce une fonction absente de
-# cette liste, ou qui ouvre son écran, ne peut pas être activée). Exemple : DEPLOYED_FEATURES=flash,favorites,tratra_id,engagements
+# envoi seulement entre ces heures (fuseau TIME_ZONE). Les fonctions récentes qu'une campagne annonce ne visent que les comptes dont
+# l'application les a (registre handy/features.py, capacités annoncées par les téléphones) : aucune liste à tenir à jour ici.
 CAMPAIGN_PUSH_WEEKLY_LIMIT = int(config('CAMPAIGN_PUSH_WEEKLY_LIMIT', default='2'))
 CAMPAIGN_SEND_HOURS = config('CAMPAIGN_SEND_HOURS', default='9-20')
-DEPLOYED_FEATURES = config('DEPLOYED_FEATURES', default='')
 MFA_MAX_FAILURES = int(config('MFA_MAX_FAILURES', default='5'))
 MFA_LOCK_SECONDS = int(config('MFA_LOCK_SECONDS', default='900'))
 

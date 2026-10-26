@@ -1,6 +1,6 @@
 """Engagement automatisé : déclencheurs sur des événements réels, ciblage (audience, communes, progression), idempotence, consentement
-et désinscription, limite hebdomadaire de push, heures autorisées, priorité opérationnelle, arrêt dès l'objectif atteint, fonctions
-non déployées, bibliothèque des 30 modèles, compatibilité FCM et Back-Office. Le serveur FCM est simulé."""
+et désinscription, limite hebdomadaire de push, heures autorisées, priorité opérationnelle, arrêt dès l'objectif atteint, nouveautés
+réservées aux applications qui les ont, bibliothèque des 30 modèles, compatibilité FCM et Back-Office. Le serveur FCM est simulé."""
 from datetime import datetime, timedelta
 from decimal import Decimal
 from zoneinfo import ZoneInfo
@@ -36,7 +36,6 @@ ABIDJAN = ZoneInfo("Africa/Abidjan")
 def _rules(settings):
     settings.CAMPAIGN_SEND_HOURS = "0-24"        # heures autorisées testées à part
     settings.CAMPAIGN_PUSH_WEEKLY_LIMIT = 2
-    settings.DEPLOYED_FEATURES = ""
 
 
 def later(hours=3):
@@ -88,29 +87,42 @@ def test_library_installs_30_disabled_templates_valid_for_their_audience():
     assert {r.trigger for r in rows} == set(dict(Campaign.TRIGGERS))      # chaque déclencheur a au moins un modèle
     assert {r.audience for r in rows} == {"clients", "artisans", "companies"}
     for c in rows:
-        engine.validate(c, check_feature=False)                           # écran ouvert à l'audience, déclencheur compatible
+        engine.validate(c)                                                # écran ouvert à l'audience, déclencheur compatible
         assert len(c.title) <= 140 and len(c.body) <= 600 and len(c.action_label) <= 40
     assert all(c.feature for c in rows.filter(trigger="news"))            # une nouveauté désigne toujours sa fonction
-    gated = [c for c in rows if engine.required_features(c)]
-    assert {c.key for c in gated} >= {"bienvenue-client", "premiere-commande-j1", "inactif-client-30"}   # écran Tratra Flash
-    for c in gated:
-        with pytest.raises(ValidationError, match="déployée"):
-            engine.set_active(c, True)                                    # ni annoncer ni ouvrir une fonction non déployée
+    gated = {c.key for c in rows if engine.required_features(c)}
+    assert gated >= {"bienvenue-client", "premiere-commande-j1", "inactif-client-30", "nouveau-j-ai-une-panne"}   # Flash, panne
     for c in rows:
-        if not engine.required_features(c):
-            assert engine.set_active(c, True).is_active                   # le reste est activable tel quel
+        assert engine.set_active(c, True).is_active                       # tout est activable : les nouveautés attendent les applis à jour
 
 
-def test_a_campaign_announcing_or_opening_an_undeployed_feature_cannot_be_activated(settings):
-    c = campaign("t-feature", "news", feature="favorites", active=False, action_value="flash_order")
+def test_an_unknown_feature_cannot_be_announced():
+    c = campaign("t-feature-unknown", "news", feature="teleportation", active=False)
+    with pytest.raises(ValidationError, match="Fonction inconnue : teleportation"):
+        engine.set_active(c, True)
+
+
+def test_a_feature_news_waits_for_accounts_whose_app_cannot_open_it_yet():
+    c = campaign("t-feature", "news", feature="favorites", action_value="flash_order", max_age_days=7)
     assert engine.required_features(c) == {"favorites", "flash"}
-    with pytest.raises(ValidationError, match="favorites, flash"):
-        engine.set_active(c, True)
-    settings.DEPLOYED_FEATURES = "flash"
-    with pytest.raises(ValidationError, match="favorites"):
-        engine.set_active(c, True)
-    settings.DEPLOYED_FEATURES = "flash, favorites"
-    assert engine.set_active(c, True).is_active
+    web = account("ft_web")                                                # aucun téléphone : le site a la fonction
+    ready = account("ft_ready")
+    Device.objects.create(user=ready, device_token="ft-ready", device_type="android", capabilities=["rich1", "flash", "favorites"])
+    old = account("ft_old")                                                # ancienne version de l'application
+    Device.objects.create(user=old, device_token="ft-old", device_type="android", capabilities=["flash1", "rich1"])
+    half = account("ft_half")                                              # une seule des deux fonctions
+    Device.objects.create(user=half, device_token="ft-half", device_type="ios", capabilities=["flash"])
+    both = account("ft_both")                                              # un vieux téléphone et un à jour
+    Device.objects.create(user=both, device_token="ft-both-old", device_type="android", capabilities=[])
+    Device.objects.create(user=both, device_token="ft-both-new", device_type="ios", capabilities=["favorites", "flash"])
+    now = later(1)
+    mine = {web.pk, ready.pk, old.pk, half.pk, both.pk}
+    assert engine.schedule(c, now) >= 3
+    assert set(sends(c).values_list("user_id", flat=True)) & mine == {web.pk, ready.pk, both.pk}
+    assert engine.audience(c, now)["waiting_update"] >= 2 and engine.audience(c, now)["new"] == 0
+    Device.objects.filter(device_token="ft-old").update(capabilities=["flash1", "rich1", "flash", "favorites"])   # mise à jour
+    assert engine.schedule(c, later(2)) >= 1
+    assert set(sends(c).values_list("user_id", flat=True)) & mine == {web.pk, ready.pk, both.pk, old.pk}
 
 
 def test_the_destination_and_the_trigger_must_suit_the_audience():
@@ -420,21 +432,21 @@ def test_deactivation_cancels_what_is_scheduled_and_withdraws_the_message():
 def test_campaign_push_reaches_the_app_as_an_announcement_with_its_link_and_button(service_account, monkeypatch, settings,
                                                                                   django_capture_on_commit_callbacks):
     path, _ = service_account
-    settings.DEPLOYED_FEATURES = "panne"
     now = later()
     c = campaign("t-fcm", action_value="panne", action_label="Décrire ma panne", marketing=True, title="Une panne ?")
     u = account("fcm_user")
     notifications.set_marketing_consent(u, True)
     joined(u, now - timedelta(hours=1))
-    Device.objects.create(user=u, device_token="tok-c-rich", device_type="android", capabilities=["flash1", "rich1"])
-    Device.objects.create(user=u, device_token="tok-c-old", device_type="android", capabilities=["flash1"])
+    Device.objects.create(user=u, device_token="tok-c-rich", device_type="android", capabilities=["flash1", "rich1", "panne"])
+    Device.objects.create(user=u, device_token="tok-c-old", device_type="android", capabilities=["flash1", "panne"])
+    Device.objects.create(user=u, device_token="tok-c-outdated", device_type="android", capabilities=["flash1", "rich1"])
 
     def run():
         with django_capture_on_commit_callbacks(execute=True):
             engine.tick(now)
 
     by_token = {m["token"]: m for m in _fcm(monkeypatch, path, run)}
-    assert set(by_token) == {"tok-c-rich", "tok-c-old"}
+    assert set(by_token) == {"tok-c-rich", "tok-c-old"}                    # l'ancienne version n'a pas l'écran « J'ai une panne »
     rich = by_token["tok-c-rich"]
     assert "notification" not in rich                                      # construit par l'application (récepteur « announcement »)
     assert rich["data"]["t"] == "announcement" and rich["data"]["id"] == str(c.announcement_id) and rich["data"]["cat"] == "tips"
@@ -501,8 +513,22 @@ def test_back_office_edits_previews_activates_and_lists_the_sends(settings):
     locked = mkt.patch(f"{URL}{c.pk}/", {"version": on.json()["version"], "trigger": "welcome"}, format="json")
     assert locked.status_code == 400 and "trigger" in locked.json()["fields"]
     news = Campaign.objects.get(key="nouveau-trouvez-moi-un-pro")
-    refused = mkt.post(f"{URL}{news.pk}/activate/")
-    assert refused.status_code == 400 and "déployée" in refused.json()["detail"]
+    Device.objects.create(user=account("cbo_phone_old"), device_token="cbo-old", device_type="android", capabilities=["rich1"])
+    Device.objects.create(user=account("cbo_phone_new"), device_token="cbo-new", device_type="android", capabilities=["flash"])
+    page = mkt.get(URL).json()
+    row = next(r for r in page["results"] if r["id"] == news.pk)
+    assert row["features"] == [{"code": "flash", "label": "« Trouvez-moi un professionnel » (Tratra Flash)"}]
+    assert row["app"] == {"phones": 2, "ready": 1}                         # téléphones dont l'application ouvre la fonction
+    assert {"code": "panne", "label": "« J'ai une panne »", "phones": 2, "ready": 0} in page["meta"]["features"]
+    assert "deployed_features" not in page["meta"]
+    estimate = mkt.get(f"{URL}{news.pk}/?estimate=1").json()
+    assert estimate["preview"]["rules"]["app"] == {"phones": 2, "ready": 1}
+    assert estimate["audience_estimate"] >= 1 and estimate["audience_waiting_update"] >= 1   # comme si elle démarrait maintenant
+    activated = mkt.post(f"{URL}{news.pk}/activate/")
+    assert activated.status_code == 200 and activated.json()["is_active"]
+    reach = mkt.get(f"{URL}{news.pk}/").json()
+    assert reach["audience_waiting_update"] >= 1 and reach["audience_estimate"] >= 1
+    mkt.post(f"{URL}{news.pk}/deactivate/")
     run = mkt.post(f"{URL}run/")
     assert run.status_code == 200 and "scheduled" in run.json()
     assert mkt.get(f"{URL}{c.pk}/sends/").json()["count"] == 0

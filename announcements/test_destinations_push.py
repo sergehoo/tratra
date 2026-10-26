@@ -146,13 +146,15 @@ def test_rich_devices_get_a_data_message_with_image_link_and_button_others_a_not
         service_account, monkeypatch, publish_capture):
     path, _ = service_account
     u = account("img_user")
-    Device.objects.create(user=u, device_token="tok-rich", device_type="android", capabilities=["flash1", "rich1"])
-    Device.objects.create(user=u, device_token="tok-old", device_type="android", capabilities=["flash1"])
-    Device.objects.create(user=u, device_token="tok-ios", device_type="ios")
+    Device.objects.create(user=u, device_token="tok-rich", device_type="android", capabilities=["flash1", "rich1", "flash"])
+    Device.objects.create(user=u, device_token="tok-old", device_type="android", capabilities=["flash1", "flash"])
+    Device.objects.create(user=u, device_token="tok-ios", device_type="ios", capabilities=["flash"])
+    Device.objects.create(user=u, device_token="tok-outdated", device_type="android", capabilities=["flash1", "rich1"])
     sent = _fcm(monkeypatch, path, lambda: _published_with_image(
         publish_capture, action_kind="deeplink", action_value="flash_order", action_label="Publier ma demande"))
     by_token = {m["token"]: m for m in sent}
     assert set(by_token) == {"tok-rich", "tok-old", "tok-ios"}            # un seul message par appareil : jamais de doublon
+    # « tok-outdated » : version sans l'écran « Trouvez-moi un professionnel » (handy.features) — aucun bouton qui n'ouvre rien
     a = Announcement.objects.get()
     assert a.push_image and a.push_image_source == a.image.name
     rich = by_token["tok-rich"]
