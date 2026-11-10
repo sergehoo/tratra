@@ -34,7 +34,7 @@ interface Supervision {
   recommendations: { rule: string; evidence: string; suggestion: string }[];
   open_requests: ReqRow[]; recent_unfulfilled: ReqRow[];
 }
-interface ConfigField { name: string; label: string; value: number; type: "int" | "float"; group: "waves" | "weights" | "rules" }
+interface ConfigField { name: string; label: string; value: number | string | boolean; type: "int" | "float" | "bool" | "text"; group: "search" | "waves" | "proposals" | "weights" | "rules" }
 interface Penalty {
   id: number; kind: string; kind_label: string; status: string; status_label: string; explanation: string; booking: number | null; created_at: string;
   by_team: boolean; contest_reason: string; contested_at: string | null; decided_at: string | null; decision_note: string; user: string; user_id: number;
@@ -219,11 +219,19 @@ function ConfigTab() {
       <p className="mb-3 text-xs text-ash">{hint}</p>
       <div className="grid gap-3 sm:grid-cols-2">
         {fields.filter((f) => f.group === g).map((f) => (
-          <label key={f.name} className="text-sm">
-            <span className="mb-1 block text-inkSoft">{f.label}</span>
-            <input className="h-10 w-full rounded-control border border-line px-3" inputMode="decimal" value={values[f.name] ?? ""} disabled={!editable}
-              onChange={(e) => setValues((v) => ({ ...v, [f.name]: e.target.value }))} aria-label={f.label} />
-          </label>
+          f.type === "bool" ? (
+            <label key={f.name} className="flex items-center gap-2 text-sm sm:col-span-2">
+              <input type="checkbox" className="h-4 w-4" checked={values[f.name] === "true"} disabled={!editable}
+                onChange={(e) => setValues((v) => ({ ...v, [f.name]: e.target.checked ? "true" : "false" }))} />
+              <span className="text-inkSoft">{f.label}</span>
+            </label>
+          ) : (
+            <label key={f.name} className={`text-sm${f.type === "text" ? " sm:col-span-2" : ""}`}>
+              <span className="mb-1 block text-inkSoft">{f.label}</span>
+              <input className="h-10 w-full rounded-control border border-line px-3" inputMode={f.type === "text" ? "text" : "decimal"} value={values[f.name] ?? ""} disabled={!editable}
+                onChange={(e) => setValues((v) => ({ ...v, [f.name]: e.target.value }))} aria-label={f.label} />
+            </label>
+          )
         ))}
       </div>
     </Section>
@@ -232,7 +240,9 @@ function ConfigTab() {
     <div className="space-y-5">
       {notice ? <p role="status" className="rounded-xl bg-successSoft px-4 py-3 text-sm font-semibold text-successInk">{notice}</p> : null}
       {error ? <Alert tone="danger">{error}</Alert> : null}
+      {group("search", "Recherche progressive", "Le rayon s’élargit par paliers (100 m → 200 km) tant que personne n’a accepté ; au-delà du seuil, il faut l’accord du client et un métier compatible.")}
       {group("waves", "Vagues et délais", "Nombre de professionnels sollicités à la fois, délais de réponse, choix des devis.")}
+      {group("proposals", "Propositions et contre-offres", "Validité d’une proposition de prix, nombre de contre-offres du client, délai de réponse du professionnel.")}
       {group("weights", "Classement pondéré", "Chaque critère vaut entre 0 et 1 ; sans historique, il prend la valeur neutre (aucun désavantage pour les nouveaux).")}
       {group("rules", "Règles", "Zone, pause automatique après silences (jamais une sanction), limites anti-abus, délai de grâce d’un désistement.")}
       <div className="flex flex-wrap items-center gap-3">

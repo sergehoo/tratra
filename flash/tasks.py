@@ -10,6 +10,14 @@ def wave_timeout(request_id, wave):
 
 
 @shared_task(ignore_result=True)
+def step_due(request_id):
+    """Recherche progressive : échéance du palier courant (rayon suivant si personne n'a accepté)."""
+    from flash.services import launch_wave
+
+    launch_wave(request_id)
+
+
+@shared_task(ignore_result=True)
 def tick():
     from flash.hybrid import close_stale_awaiting
     from flash.services import expire_due

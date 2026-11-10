@@ -110,7 +110,9 @@ def test_weights_are_configurable(make_pro, make_request):
     near, far = make_pro("proche", km=1), make_pro("loin", km=10)
     HandymanProfile.objects.filter(user=far).update(trust_score=100)
     HandymanProfile.objects.filter(user=near).update(trust_score=20)
-    cfg(wave_size=1, weight_distance=100, weight_trust=0, weight_rating=0, weight_reactivity=0, weight_fairness=0)
+    # Rayon fixe : les poids départagent des pros situés dans le même rayon (la recherche progressive, elle, sollicite d'abord le
+    # palier le plus proche ; les poids y classent les pros d'un même palier — voir test_progressive_search.py).
+    cfg(progressive_search=False, wave_size=1, weight_distance=100, weight_trust=0, weight_rating=0, weight_reactivity=0, weight_fairness=0)
     assert offers_of(make_request())[0].handyman_id == near.pk
     MissionRequest.objects.update(status=MissionRequest.CANCELLED)
     MissionOffer.objects.update(status=MissionOffer.WITHDRAWN)

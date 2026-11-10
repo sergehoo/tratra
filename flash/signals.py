@@ -1,4 +1,5 @@
 """Désistement après une acceptation ferme : le seul fait que Tratra Flash transmet à Tratra Trust (refus et absences de réponse : jamais).
+La demande reprend ensuite sa recherche (`services.reopen_after_withdrawal`).
 
 Le fait est vérifiable : la réservation créée par l'attribution est annulée PAR le professionnel (auteur de la transition consigné),
 après le délai de grâce qui couvre une erreur de manipulation."""
@@ -32,9 +33,13 @@ def booking_withdrawal(sender, instance, created, **kwargs):
         if now - req.assigned_at <= timedelta(minutes=DispatchConfig.get_solo().withdrawal_grace_minutes):
             DispatchEvent.objects.create(request=req, kind="withdrawal", actor_id=actor_id,
                                          data={"booking": instance.pk, "penalty": False, "reason": "délai de grâce"})
-            return
-        penalty = record_withdrawal(instance, accepted_at=req.assigned_at, cancelled_at=now, actor_id=actor_id)
-        DispatchEvent.objects.create(request=req, kind="withdrawal", actor_id=actor_id,
-                                     data={"booking": instance.pk, "penalty": penalty.pk if penalty else None})
+        else:
+            penalty = record_withdrawal(instance, accepted_at=req.assigned_at, cancelled_at=now, actor_id=actor_id)
+            DispatchEvent.objects.create(request=req, kind="withdrawal", actor_id=actor_id,
+                                         data={"booking": instance.pk, "penalty": penalty.pk if penalty else None})
+        # La même demande reprend sa recherche (le client est prévenu) : ni doublon, ni nouvelle sollicitation de ce professionnel.
+        from flash.services import reopen_after_withdrawal
+
+        reopen_after_withdrawal(instance, actor_id, now=now)
     except Exception:  # une pénalité ne doit jamais bloquer l'annulation elle-même
         logger.exception("Désistement Tratra Flash non consigné (réservation %s)", instance.pk)

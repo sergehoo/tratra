@@ -57,7 +57,29 @@ def _pro_card(user, request) -> dict:
             "rating": rep["average"], "reviews": rep["count"], "verified": bool(profile and is_publishable(profile))}
 
 
+def _km(value):
+    """Distance d'un professionnel arrondie à 100 m : jamais de quoi retrouver sa position exacte."""
+    return None if value is None else round(float(value), 1)
+
+
+def _reopened(req: MissionRequest):
+    """Recherche reprise après le désistement du professionnel retenu (dernier évènement marquant) : le client le voit sur l'écran,
+    y compris si la reprise n'a trouvé personne (demande close ensuite) — il sait pourquoi la mission confirmée n'a plus de pro."""
+    if req.status == MissionRequest.ASSIGNED:
+        return None
+    last = req.events.filter(kind__in=("created", "assigned", "reopened")).order_by("-id").first()
+    if last is None or last.kind != "reopened":
+        return None
+    from handy.models import User
+
+    pro = User.objects.filter(pk=(last.data or {}).get("handyman")).only("first_name", "last_name").first()
+    first, last_name = (getattr(pro, "first_name", "") or "").strip(), (getattr(pro, "last_name", "") or "").strip()
+    return {"pro": f"{first} {last_name[0]}." if first and last_name else first or "Le professionnel", "at": last.at}
+
+
 def request_payload(req: MissionRequest, request) -> dict:
+    from flash import realtime
+
     offers = list(req.offers.select_related("handyman", "handyman__handyman_profile"))
     count = lambda st: sum(1 for o in offers if o.status == st)   # noqa: E731
     data = {
@@ -78,12 +100,29 @@ def request_payload(req: MissionRequest, request) -> dict:
         "can_switch": req.is_open,
         "awaiting_reason": (req.events.filter(kind="awaiting").order_by("-at").values_list("data", flat=True).first() or {}).get("reason")
         if req.status == MissionRequest.AWAITING else None,
+        "search": realtime.search_payload(req, offers),
+        "reopened": _reopened(req),
+        # Prix convenu (réservation créée) : celui de la contre-offre acceptée le cas échéant, jamais confondu avec la proposition.
+        "agreed_amount": int(req.booking.total_price) if req.booking_id and req.booking.total_price is not None else None,
+        "agreed_label": money(req.booking.total_price) if req.booking_id and req.booking.total_price is not None else None,
+        # Lieu de l'intervention (donnée du client lui-même) : centre de la carte. Aucune position de professionnel n'est transmise.
+        "center": {"lat": req.location.y, "lng": req.location.x} if req.location is not None else None,
+        "can_extend": req.status == MissionRequest.SEARCHING and req.consent_asked_at is not None and not req.allow_far,
         "can_cancel": req.is_open, "can_relaunch": req.status in (MissionRequest.UNFULFILLED, MissionRequest.CANCELLED)
         or (req.status == MissionRequest.ASSIGNED and req.booking is not None and req.booking.status == "cancelled"),
     }
     if req.mode == MissionRequest.QUOTE:
+        config = DispatchConfig.current()
+        open_ = req.status in (MissionRequest.SEARCHING, MissionRequest.QUOTING)
         data["quotes"] = [{"offer": o.pk, "amount": int(o.quote_amount), "amount_label": money(o.quote_amount), "message": o.quote_message,
-                           "status": o.status, "at": o.responded_at, "distance_km": o.distance_km, "pro": _pro_card(o.handyman, request)}
+                           "status": o.status, "status_label": o.get_status_display(), "at": o.responded_at, "distance_km": _km(o.distance_km),
+                           "expires_at": o.proposal_expires_at,
+                           "counter_amount": int(o.counter_amount) if o.counter_amount is not None else None,
+                           "counter_label": money(o.counter_amount) if o.counter_amount is not None else None,
+                           "counter_expires_at": o.counter_expires_at if o.status == MissionOffer.COUNTERED else None,
+                           "can_choose": open_ and o.status in MissionOffer.PROPOSALS,
+                           "can_counter": open_ and o.status == MissionOffer.QUOTED and o.counters < config.max_counter_offers,
+                           "pro": _pro_card(o.handyman, request)}
                           for o in offers if o.quote_amount is not None]
     return data
 
@@ -145,7 +184,8 @@ def requests_view(request):
                                   mode=mode, amount=amount, commune=str(d.get("commune") or ""),
                                   city=str(d.get("city") or "Abidjan"), postal_code=str(d.get("postal_code") or ""),
                                   description=str(d.get("description") or ""), lat=lat, lng=lng,
-                                  matching=matching, target_id=d.get("target"), service_id=service_id)
+                                  matching=matching, target_id=d.get("target"), service_id=service_id,
+                                  allow_far=d.get("allow_far") in (True, "true", "1", 1))
     return Response(request_payload(req, request), status=201)
 
 
@@ -228,6 +268,19 @@ def request_cancel(request, pk):
     return Response(request_payload(services.cancel_request(pk, request.user), request))
 
 
+@endpoint(["POST"], "Élargir la recherche au-delà du rayon sans accord (accord du client)", idempotent="request.extend")
+def request_extend(request, pk):
+    _client_request(request, pk)
+    return Response(request_payload(services.allow_far(pk, request.user), request))
+
+
+@endpoint(["POST"], "Contre-offre du client sur une proposition de prix", idempotent="quote.counter")
+def request_counter(request, pk, offer_id):
+    _client_request(request, pk)
+    services.counter_offer(pk, request.user, offer_id, request.data.get("amount"))
+    return Response(request_payload(_client_request(request, pk), request))
+
+
 @endpoint(["POST"], "Retenir un devis (la mission est attribuée)", idempotent="quote.choose")
 def request_choose_quote(request, pk, offer_id):
     _client_request(request, pk)
@@ -251,7 +304,8 @@ def request_relaunch(request, pk):
         postal_code=old.postal_code, description=old.description,
         lat=old.location.y if old.location else None, lng=old.location.x if old.location else None,
         # Le choix du client est conservé (même mode, même professionnel) sauf s'il en indique un autre.
-        matching=str(d.get("matching") or old.matching), target_id=d.get("target", old.target_id), service_id=old.service_id)
+        matching=str(d.get("matching") or old.matching), target_id=d.get("target", old.target_id), service_id=old.service_id,
+        allow_far=old.allow_far or d.get("allow_far") in (True, "true", "1", 1))
     services.log(req, "created", actor=request.user, relaunch_of=old.pk)
     return Response(request_payload(req, request), status=201)
 
@@ -270,10 +324,14 @@ def offer_view_payload(offer: MissionOffer, request) -> dict:
             "quote_message": offer.quote_message, "why": offer.score_detail.get("criteria", []),
             "client_reputation": {k: v for k, v in requester_score(req.client).items() if k in ("count", "average", "public")},
             "decline_reasons": [{"code": c, "label": label} for c, label in MissionOffer.DECLINE_REASONS],
-            "request_status": req.status}
+            "request_status": req.status,
+            "counter": {"amount": int(offer.counter_amount), "amount_label": money(offer.counter_amount), "expires_at": offer.counter_expires_at,
+                        "seconds_left": max(0, int((offer.counter_expires_at - now).total_seconds()))}
+            if offer.status == MissionOffer.COUNTERED else None}
     if offer.status == MissionOffer.ACCEPTED and req.assigned_to_id == request.user.pk:
         # Après l'attribution seulement : adresse exacte et prénom du client (la réservation donne le reste).
-        data.update(address=req.address, client_name=(req.client.first_name or "").strip() or "Client", booking=req.booking_id)
+        data.update(address=req.address, client_name=(req.client.first_name or "").strip() or "Client", booking=req.booking_id,
+                    agreed_label=money(req.booking.total_price) if req.booking_id and req.booking.total_price is not None else None)
     return data
 
 
@@ -312,6 +370,18 @@ def offer_decline(request, pk):
 @endpoint(["POST"], "Envoyer un devis (demande sur devis)", idempotent="offer.quote")
 def offer_quote(request, pk):
     services.send_quote(pk, request.user, request.data.get("amount"), str(request.data.get("message") or ""))
+    return Response(offer_view_payload(_pro_offer(request, pk), request))
+
+
+@endpoint(["POST"], "Accepter la contre-offre du client (la mission vous est attribuée à ce montant)", idempotent="offer.counter_accept")
+def offer_counter_accept(request, pk):
+    services.answer_counter(pk, request.user, True)
+    return Response(offer_view_payload(_pro_offer(request, pk), request))
+
+
+@endpoint(["POST"], "Garder ma proposition (contre-offre non retenue)", idempotent="offer.counter_decline")
+def offer_counter_decline(request, pk):
+    services.answer_counter(pk, request.user, False)
     return Response(offer_view_payload(_pro_offer(request, pk), request))
 
 

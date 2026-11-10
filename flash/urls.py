@@ -8,6 +8,8 @@ urlpatterns = [
     path("flash/requests/<int:pk>/cancel/", api.request_cancel, name="flash-request-cancel"),
     path("flash/requests/<int:pk>/relaunch/", api.request_relaunch, name="flash-request-relaunch"),
     path("flash/requests/<int:pk>/quotes/<int:offer_id>/accept/", api.request_choose_quote, name="flash-request-choose-quote"),
+    path("flash/requests/<int:pk>/quotes/<int:offer_id>/counter/", api.request_counter, name="flash-request-counter"),
+    path("flash/requests/<int:pk>/extend/", api.request_extend, name="flash-request-extend"),
     path("flash/requests/<int:pk>/switch/", api.request_switch, name="flash-request-switch"),
     path("flash/suggest/", api.suggest_view, name="flash-suggest"),
     path("flash/pros/", api.pros_view, name="flash-pros"),
@@ -18,5 +20,7 @@ urlpatterns = [
     path("flash/offers/<int:pk>/accept/", api.offer_accept, name="flash-offer-accept"),
     path("flash/offers/<int:pk>/decline/", api.offer_decline, name="flash-offer-decline"),
     path("flash/offers/<int:pk>/quote/", api.offer_quote, name="flash-offer-quote"),
+    path("flash/offers/<int:pk>/counter/accept/", api.offer_counter_accept, name="flash-offer-counter-accept"),
+    path("flash/offers/<int:pk>/counter/decline/", api.offer_counter_decline, name="flash-offer-counter-decline"),
     path("flash/availability/", api.availability_view, name="flash-availability"),
 ]

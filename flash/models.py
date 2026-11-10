@@ -20,7 +20,7 @@ class DispatchConfig(models.Model):
     # --- Vagues et délais -------------------------------------------------------------------------------------------
     wave_size = models.PositiveSmallIntegerField("Professionnels sollicités par vague", default=3,
                                                  validators=[MinValueValidator(1), MaxValueValidator(20)])
-    max_waves = models.PositiveSmallIntegerField("Nombre maximal de vagues", default=4, validators=[MinValueValidator(1), MaxValueValidator(20)])
+    max_waves = models.PositiveSmallIntegerField("Nombre maximal de vagues (rayon fixe)", default=4, validators=[MinValueValidator(1), MaxValueValidator(20)])
     offer_timeout_seconds = models.PositiveIntegerField("Délai de réponse — mission immédiate (secondes)", default=90,
                                                         validators=[MinValueValidator(20), MaxValueValidator(3600)])
     scheduled_offer_timeout_seconds = models.PositiveIntegerField("Délai de réponse — mission planifiée (secondes)", default=900,
@@ -43,6 +43,33 @@ class DispatchConfig(models.Model):
 
     # --- Zone ---------------------------------------------------------------------------------------------------------
     radius_km = models.FloatField("Rayon de recherche (km)", default=15, validators=[MinValueValidator(1), MaxValueValidator(100)])
+
+    # --- Recherche progressive (façon VTC) : le rayon s'élargit par paliers tant que personne n'a accepté ------------------
+    progressive_search = models.BooleanField("Recherche progressive par rayons (sinon : vagues dans le rayon fixe ci-dessus)", default=True)
+    radius_steps = models.CharField("Paliers de rayon (km, du plus petit au plus grand)", max_length=120,
+                                    default="0.1,0.5,1,5,10,30,50,100,200")
+    step_seconds = models.PositiveIntegerField("Attente avant le palier suivant — mission immédiate (secondes)", default=20,
+                                               validators=[MinValueValidator(5), MaxValueValidator(3600)])
+    scheduled_step_seconds = models.PositiveIntegerField("Attente avant le palier suivant — mission planifiée (secondes)", default=120,
+                                                         validators=[MinValueValidator(10), MaxValueValidator(86400)])
+    max_pending_offers = models.PositiveSmallIntegerField("Propositions en attente en même temps (max.)", default=9,
+                                                          validators=[MinValueValidator(1), MaxValueValidator(50)])
+    max_contacts = models.PositiveSmallIntegerField("Professionnels sollicités au total par demande (max.)", default=30,
+                                                    validators=[MinValueValidator(1), MaxValueValidator(200)])
+    far_radius_km = models.FloatField("Au-delà de ce rayon : accord du client requis (km)", default=30,
+                                      validators=[MinValueValidator(1), MaxValueValidator(500)])
+    far_trades = models.CharField("Métiers compatibles au-delà (identifiants séparés par des virgules ; * = tous ; vide = aucun)",
+                                  max_length=500, blank=True, default="*")
+    far_consent_wait_seconds = models.PositiveIntegerField("Attente de l'accord du client pour élargir (secondes)", default=600,
+                                                           validators=[MinValueValidator(30), MaxValueValidator(86400)])
+
+    # --- Propositions (sur devis) et contre-offres ----------------------------------------------------------------------
+    proposal_ttl_minutes = models.PositiveIntegerField("Validité d'une proposition de prix — mission immédiate (minutes)", default=30,
+                                                       validators=[MinValueValidator(2), MaxValueValidator(1440)])
+    max_counter_offers = models.PositiveSmallIntegerField("Contre-offres du client par proposition (0 = aucune)", default=2,
+                                                          validators=[MaxValueValidator(5)])
+    counter_timeout_seconds = models.PositiveIntegerField("Délai de réponse du professionnel à une contre-offre (secondes)", default=300,
+                                                          validators=[MinValueValidator(30), MaxValueValidator(86400)])
 
     # --- Classement pondéré (chaque critère vaut entre 0 et 1 ; donnée manquante = valeur neutre, jamais zéro) ------------
     weight_distance = models.PositiveSmallIntegerField("Poids : proximité", default=35)
@@ -93,6 +120,35 @@ class DispatchConfig(models.Model):
     def weights(self) -> dict:
         return {k: getattr(self, f"weight_{k}") for k in self.WEIGHTS}
 
+    def steps_km(self) -> list:
+        """Paliers valides, croissants, sans doublon (une saisie erronée au Back-Office est refusée par `clean`)."""
+        out = []
+        for part in (self.radius_steps or "").replace(";", ",").split(","):
+            try:
+                km = round(float(part.strip().replace(" ", "")), 3)
+            except ValueError:
+                continue
+            if 0 < km <= 1000 and (not out or km > out[-1]):
+                out.append(km)
+        return out or [self.radius_km]
+
+    def trade_goes_far(self, category) -> bool:
+        """Métier compatible avec une recherche au-delà de `far_radius_km` (le métier ou son métier parent)."""
+        allowed = {t.strip().lower() for t in (self.far_trades or "").split(",") if t.strip()}
+        if "*" in allowed:
+            return True
+        slugs = {category.slug}
+        if category.parent_id:
+            slugs.add(category.parent.slug)
+        return bool(allowed & slugs)
+
+    def clean(self):
+        from django.core.exceptions import ValidationError
+
+        raw = [p for p in (self.radius_steps or "").replace(";", ",").split(",") if p.strip()]
+        if not raw or len(self.steps_km()) != len(raw):
+            raise ValidationError({"radius_steps": "Paliers invalides : nombres croissants en km séparés par des virgules (ex. 0.5,1,5,10,30)."})
+
 
 class MissionRequest(models.Model):
     FIRM, QUOTE = "firm", "quote"
@@ -131,6 +187,13 @@ class MissionRequest(models.Model):
     assigned_to = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="flash_missions")
     booking = models.OneToOneField("handy.Booking", null=True, blank=True, on_delete=models.PROTECT, related_name="flash_request")
     quote_deadline = models.DateTimeField(null=True, blank=True)
+    # Recherche progressive : palier courant, prochaine extension, accord du client au-delà de `far_radius_km`, compteurs exacts.
+    radius_index = models.PositiveSmallIntegerField(default=0)
+    radius_m = models.PositiveIntegerField(default=0)                                   # rayon courant (0 : commune / rayon fixe)
+    next_step_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    allow_far = models.BooleanField(default=False)
+    consent_asked_at = models.DateTimeField(null=True, blank=True)
+    eligible_count = models.PositiveIntegerField(default=0)                            # éligibles trouvés dans le rayon courant
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
     updated_at = models.DateTimeField(auto_now=True)
     assigned_at = models.DateTimeField(null=True, blank=True)
@@ -159,8 +222,13 @@ class MissionRequest(models.Model):
 
 class MissionOffer(models.Model):
     PENDING, ACCEPTED, QUOTED, DECLINED, EXPIRED, WITHDRAWN = "pending", "accepted", "quoted", "declined", "expired", "withdrawn"
+    COUNTERED, LAPSED, RESIGNED = "countered", "lapsed", "resigned"
     STATUSES = [(PENDING, "En attente de réponse"), (ACCEPTED, "Acceptée"), (QUOTED, "Devis envoyé"), (DECLINED, "Refusée"),
-                (EXPIRED, "Sans réponse"), (WITHDRAWN, "Retirée (mission attribuée, annulée ou devis non retenu)")]
+                (EXPIRED, "Sans réponse"), (WITHDRAWN, "Retirée (mission attribuée, annulée ou devis non retenu)"),
+                (COUNTERED, "Contre-offre du client en attente"), (LAPSED, "Proposition échue"),
+                (RESIGNED, "Désistement après attribution")]
+    ANSWERED = (ACCEPTED, QUOTED, DECLINED, COUNTERED, LAPSED, RESIGNED)        # le professionnel a répondu
+    PROPOSALS = (QUOTED, COUNTERED)                                            # propositions de prix encore valables
     DECLINE_REASONS = [("busy", "Déjà occupé"), ("too_far", "Trop loin"), ("price", "Montant insuffisant"),
                        ("skills", "Hors de mes compétences"), ("other", "Autre raison")]
 
@@ -181,6 +249,11 @@ class MissionOffer(models.Model):
     decline_reason = models.CharField(max_length=10, choices=DECLINE_REASONS, blank=True, default="")
     quote_amount = models.DecimalField(max_digits=10, decimal_places=0, null=True, blank=True, validators=[MinValueValidator(0)])
     quote_message = models.CharField(max_length=500, blank=True, default="")
+    proposal_expires_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    counter_amount = models.DecimalField(max_digits=10, decimal_places=0, null=True, blank=True, validators=[MinValueValidator(0)])
+    counter_at = models.DateTimeField(null=True, blank=True)
+    counter_expires_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    counters = models.PositiveSmallIntegerField(default=0)
     push_status = models.CharField(max_length=20, blank=True, default="")
 
     class Meta:
@@ -193,6 +266,8 @@ class MissionOffer(models.Model):
             # Une demande n'est attribuée qu'une fois, même si deux acceptations arrivent à la même milliseconde.
             models.UniqueConstraint(fields=["request"], condition=Q(status="accepted"), name="flash_one_accepted_offer"),
             models.CheckConstraint(check=~Q(status="quoted") | Q(quote_amount__isnull=False), name="flash_quote_has_amount"),
+            models.CheckConstraint(check=~Q(status="countered") | Q(quote_amount__isnull=False, counter_amount__isnull=False),
+                                   name="flash_counter_has_amounts"),
         ]
 
     def __str__(self):
@@ -207,6 +282,9 @@ class DispatchEvent(models.Model):
         ("unfulfilled", "Demande sans professionnel"), ("cancelled", "Demande annulée"), ("auto_paused", "Professionnel passé « Indisponible »"),
         ("conflict", "Acceptation refusée (conflit)"), ("withdrawal", "Désistement après acceptation"),
         ("targeted", "Proposition au professionnel choisi"), ("awaiting", "Choix du client attendu"), ("switched", "Changement de mode"),
+        ("radius", "Rayon élargi"), ("far_consent", "Accord du client pour élargir"), ("consent_asked", "Accord du client demandé"),
+        ("counter", "Contre-offre du client"), ("counter_ok", "Contre-offre acceptée"), ("counter_no", "Contre-offre non retenue"),
+        ("lapsed", "Proposition échue"), ("reopened", "Recherche reprise après désistement"), ("quoting", "Propositions à choisir"),
     ]
     request = models.ForeignKey(MissionRequest, on_delete=models.CASCADE, related_name="events")
     offer = models.ForeignKey(MissionOffer, null=True, blank=True, on_delete=models.SET_NULL, related_name="events")

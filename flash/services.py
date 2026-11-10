@@ -33,6 +33,7 @@ from handy.models import AvailabilitySlot, Booking, HandymanProfile, Service, Se
 logger = logging.getLogger(__name__)
 
 ACCEPT_GRACE_SECONDS = 3          # latence réseau : une acceptation partie juste avant l'échéance reste valable
+COMMUNE_KM = 5.0                  # recherche progressive : un pro sans position (même commune) n'est retenu qu'à partir de ce rayon
 BUSY_BOOKING_STATUSES = ("confirmed", "in_progress")
 
 
@@ -43,7 +44,14 @@ class FlashError(Exception):
 
 
 def log(req: MissionRequest, kind: str, *, offer: Optional[MissionOffer] = None, actor=None, **data) -> DispatchEvent:
-    return DispatchEvent.objects.create(request=req, offer=offer, kind=kind, actor=actor, data=data)
+    """Journal (rien n'est effacé) ; chaque évènement visible part aussi en temps réel au client, APRÈS validation de la transaction."""
+    event = DispatchEvent.objects.create(request=req, offer=offer, kind=kind, actor=actor, data=data)
+    from flash import realtime
+
+    if kind not in realtime.QUIET:
+        rid = req.pk
+        transaction.on_commit(lambda: realtime.request_changed(rid))
+    return event
 
 
 # ═══ Métier, zone, disponibilité ═══════════════════════════════════════════════════════════════════════════════════════
@@ -74,16 +82,19 @@ def _same_commune(profile: HandymanProfile, commune: str) -> bool:
     return bool(c) and c in {(profile.commune or "").strip().lower(), (profile.quartier or "").strip().lower()}
 
 
-def zone_of(profile: HandymanProfile, req: MissionRequest, config: DispatchConfig):
-    """(dans la zone ?, distance en km ou None). Position du pro, sinon centre de sa zone d'intervention ; à défaut, même commune."""
+def zone_of(profile: HandymanProfile, req: MissionRequest, config: DispatchConfig, radius_km: Optional[float] = None):
+    """(dans la zone ?, distance en km ou None). Position du pro, sinon centre de sa zone d'intervention ; à défaut, même commune.
+    `radius_km` : palier courant de la recherche progressive (sinon le rayon fixe). La zone d'intervention du pro reste un plafond."""
     area = getattr(profile, "service_area", None)
     origin = profile.location or (area.center if area is not None else None)
-    radius = config.radius_km
+    radius = radius_km or config.radius_km
     if area is not None and area.radius_km:
         radius = min(radius, float(area.radius_km))
     if req.location is not None and origin is not None:
         d = haversine_km(origin, req.location)
         return d <= radius, round(d, 2)
+    if radius_km is not None and req.location is not None and radius_km < COMMUNE_KM:
+        return False, None   # distance inconnue : la commune n'équivaut pas à un rayon de quelques centaines de mètres
     return _same_commune(profile, req.commune), None
 
 
@@ -204,7 +215,7 @@ def _reactivity(user_id: int, config: DispatchConfig, now, rows: Optional[list] 
     if rows is None:
         rows = list(MissionOffer.objects.filter(handyman_id=user_id, sent_at__gte=now - timedelta(days=30))
                     .exclude(status__in=(MissionOffer.PENDING, MissionOffer.WITHDRAWN)).values_list("status", "response_seconds"))
-    answered = [s for st, s in rows if st in (MissionOffer.ACCEPTED, MissionOffer.QUOTED, MissionOffer.DECLINED)]
+    answered = [s for st, s in rows if st in MissionOffer.ANSWERED]
     if len(rows) < config.min_sample:
         return {"value": None, "detail": f"Historique insuffisant ({len(rows)}/{config.min_sample})"}
     rate = len(answered) / len(rows)
@@ -272,7 +283,7 @@ class Candidate:
         return self.detail["score"]
 
 
-def _zone_filter(req: MissionRequest, config: DispatchConfig) -> Optional[Q]:
+def _zone_filter(req: MissionRequest, config: DispatchConfig, radius_km: Optional[float] = None) -> Optional[Q]:
     """Préfiltre SQL de la zone, servi par l'index spatial : SUR-ENSEMBLE de `zone_of` (position du pro, sinon centre de sa zone
     d'intervention, sinon même commune) ; la règle exacte reste appliquée à chaque profil. None : personne (ni position ni commune)."""
     commune = (req.commune or "").strip().lower()
@@ -280,8 +291,9 @@ def _zone_filter(req: MissionRequest, config: DispatchConfig) -> Optional[Q]:
                     .filter(Q(_c=commune) | Q(_q=commune))) if commune else None
     if req.location is None:
         return Q(pk__in=same_commune.values("pk")) if same_commune is not None else None
-    zone = (Q(pk__in=HandymanProfile.objects.filter(proximity.near("location", req.location, config.radius_km)).values("pk"))
-            | Q(pk__in=ServiceArea.objects.filter(proximity.near("center", req.location, config.radius_km), handyman__location__isnull=True)
+    km = radius_km or config.radius_km
+    zone = (Q(pk__in=HandymanProfile.objects.filter(proximity.near("location", req.location, km)).values("pk"))
+            | Q(pk__in=ServiceArea.objects.filter(proximity.near("center", req.location, km), handyman__location__isnull=True)
                 .values("handyman_id")))
     if same_commune is not None:
         zone |= Q(pk__in=same_commune.filter(Q(service_area__isnull=True) | Q(service_area__center__isnull=True), location__isnull=True)
@@ -299,13 +311,16 @@ def _early_reason(user_id: int, years, offered: set, busy_elsewhere: set, min_ye
     return None
 
 
-def candidates(req: MissionRequest, config: DispatchConfig, now=None, *, explain: bool = False, listing: bool = False):
+def candidates(req: MissionRequest, config: DispatchConfig, now=None, *, explain: bool = False, listing: bool = False,
+               radius_km: Optional[float] = None, outside: bool = True):
     """Professionnels éligibles et disponibles, classés. Avec `explain=True`, renvoie aussi les écartés et pourquoi (Back-Office).
     `listing=True` : liste montrée au CLIENT pour choisir son professionnel (demande pas encore créée) — une proposition en attente
     ailleurs n'écarte personne (le client choisit ; le pro répondra).
 
     Coût constant : seuls les profils de la zone (index spatial) sont chargés, et leurs disponibilités et historiques sont lus en
-    quelques requêtes groupées, quel que soit leur nombre. Les écartés hors zone (`explain`) viennent d'une seule requête légère."""
+    quelques requêtes groupées, quel que soit leur nombre. Les écartés hors zone (`explain`) viennent d'une seule requête légère ;
+    `outside=False` la supprime (vagues de la recherche progressive : jamais de lecture de tous les professionnels du métier).
+    `radius_km` : palier courant de la recherche progressive."""
     now = now or timezone.now()
     family = category_family(req.category)
     offered = set(req.offers.values_list("handyman_id", flat=True)) if req.pk else set()
@@ -314,14 +329,14 @@ def candidates(req: MissionRequest, config: DispatchConfig, now=None, *, explain
     base = (publishable(HandymanProfile.objects.all())
             .filter(Q(user__services__is_active=True, user__services__category_id__in=family) | Q(skills__id__in=family))
             .exclude(user_id=req.client_id))
-    zone = _zone_filter(req, config)
+    zone = _zone_filter(req, config, radius_km)
     profiles = list(base.filter(zone).select_related("user", "service_area").distinct()) if zone is not None else []
     min_years = required_experience(req.category)
     reasons: Dict[int, str] = {}
     in_zone_ok = []
     for profile in profiles:
         reason = _early_reason(profile.user_id, profile.experience_years, offered, busy_elsewhere, min_years)
-        in_zone, distance = zone_of(profile, req, config)
+        in_zone, distance = zone_of(profile, req, config, radius_km)
         if reason is None and not in_zone:
             reason = "Hors zone"
         if reason is None:
@@ -342,8 +357,10 @@ def candidates(req: MissionRequest, config: DispatchConfig, now=None, *, explain
     if not explain:
         return kept
     rejected = [{"user_id": p.user_id, "reason": reasons[p.user_id]} for p in profiles if p.user_id in reasons]
-    outside = base.exclude(zone) if zone is not None else base
-    for user_id, years in outside.values_list("user_id", "experience_years").distinct():
+    if not outside:
+        return kept, rejected
+    elsewhere = base.exclude(zone) if zone is not None else base
+    for user_id, years in elsewhere.values_list("user_id", "experience_years").distinct():
         rejected.append({"user_id": user_id, "reason": _early_reason(user_id, years, offered, busy_elsewhere, min_years) or "Hors zone"})
     return kept, rejected
 
@@ -356,7 +373,8 @@ def is_immediate(when, config: DispatchConfig, now=None) -> bool:
 
 def create_request(client, *, category: ServiceCategory, address: str, scheduled_for=None, mode: str = MissionRequest.FIRM,
                    amount=None, commune: str = "", city: str = "Abidjan", postal_code: str = "", description: str = "",
-                   lat=None, lng=None, matching: str = MissionRequest.AUTO, target_id=None, service_id=None) -> MissionRequest:
+                   lat=None, lng=None, matching: str = MissionRequest.AUTO, target_id=None, service_id=None,
+                   allow_far: bool = False) -> MissionRequest:
     config = DispatchConfig.get_solo()
     now = timezone.now()
     when = scheduled_for or now
@@ -400,7 +418,7 @@ def create_request(client, *, category: ServiceCategory, address: str, scheduled
             commune=(commune or "").strip()[:100], city=(city or "Abidjan").strip()[:100], postal_code=(postal_code or "").strip()[:20],
             location=Point(float(lng), float(lat), srid=4326) if lat is not None and lng is not None else None,
             scheduled_for=when, is_immediate=is_immediate(when, config, now), mode=mode, amount=amount,
-            matching=matching, target=target, service=service)
+            matching=matching, target=target, service=service, allow_far=bool(allow_far))
         log(req, "created", actor=client, mode=mode, amount=str(amount) if amount is not None else None, immediate=req.is_immediate,
             matching=matching, target=target.pk if target else None)
     if matching == MissionRequest.DIRECT:
@@ -417,47 +435,185 @@ def _timeout(req: MissionRequest, config: DispatchConfig) -> int:
     return config.offer_timeout_seconds if req.is_immediate else config.scheduled_offer_timeout_seconds
 
 
+def progressive(req: MissionRequest, config: DispatchConfig) -> bool:
+    """Recherche par rayons croissants : demandes « Trouvez-moi un professionnel » dont le lieu est connu (sinon : la commune)."""
+    return bool(config.progressive_search and req.location is not None and req.matching == MissionRequest.AUTO)
+
+
+def step_seconds(req: MissionRequest, config: DispatchConfig) -> int:
+    return config.step_seconds if req.is_immediate else config.scheduled_step_seconds
+
+
+def limit_km(req: MissionRequest, config: DispatchConfig) -> float:
+    """Plus grand rayon permis : `far_radius_km` ; au-delà, il faut l'accord du client ET un métier compatible."""
+    if req.allow_far and config.trade_goes_far(req.category):
+        return float("inf")
+    return config.far_radius_km
+
+
+def needs_consent(req: MissionRequest, config: DispatchConfig) -> bool:
+    """Le palier suivant dépasse `far_radius_km`, le métier le permet et le client n'a pas encore donné son accord."""
+    steps = config.steps_km()
+    nxt = req.radius_index + 1
+    return (progressive(req, config) and not req.allow_far and nxt < len(steps) and steps[nxt] > config.far_radius_km
+            and steps[req.radius_index] <= config.far_radius_km and config.trade_goes_far(req.category))
+
+
 def launch_wave(request_id: int, *, now=None) -> List[MissionOffer]:
-    """Lance la vague suivante si la demande est ouverte et qu'aucune proposition n'attend de réponse. Rejouable sans effet double."""
+    """Lance la vague suivante si la demande est ouverte. Rayon fixe : seulement quand plus personne n'attend de réponse. Recherche
+    progressive : aussi quand le palier courant est échu (les propositions en cours restent valables jusqu'à leur échéance) ; le rayon
+    s'élargit tant que personne n'est disponible dans le palier. Rejouable sans effet double (verrou de la demande, une proposition par
+    professionnel et par demande)."""
     config = DispatchConfig.get_solo()
     now = now or timezone.now()
     with transaction.atomic():
         req = MissionRequest.objects.select_for_update(of=("self",)).select_related("category", "category__parent").get(pk=request_id)
         if req.status != MissionRequest.SEARCHING:
             return []
-        if req.offers.filter(status=MissionOffer.PENDING).exists():
-            return []
+        pending = req.offers.filter(status=MissionOffer.PENDING).count()
         if req.matching == MissionRequest.DIRECT:
+            if pending:
+                return []
             # Professionnel choisi par le client : jamais de vague. Sans réponse positive, le CLIENT décide (autre pro, Smart Dispatch, annuler).
             from flash import hybrid
 
             hybrid.after_targeted_response(req, config, now)
             return []
-        quotes = req.offers.filter(status=MissionOffer.QUOTED).count()
-        if req.wave >= config.max_waves or (req.mode == MissionRequest.QUOTE and quotes >= config.max_quotes):
+        prog = progressive(req, config)
+        if pending and (not prog or req.next_step_at is None or req.next_step_at > now):
+            return []
+        quotes = req.offers.filter(status__in=MissionOffer.PROPOSALS).count()
+        # Plafond : vagues en rayon fixe ; professionnels sollicités au total en recherche progressive (les paliers vides ne comptent pas).
+        capped = req.offers.count() >= config.max_contacts if prog else req.wave >= config.max_waves
+        if capped or (req.mode == MissionRequest.QUOTE and quotes >= config.max_quotes):
+            if pending:
+                _set_step(req, None)     # plus de vague : on attend les réponses en cours
+                return []
             _finish_search(req, config, now)
             return []
-        ranked, rejected = candidates(req, config, now, explain=True)
+        if prog:
+            return _progressive_wave(req, config, now, pending)
+        ranked, rejected = candidates(req, config, now, explain=True, outside=False)
         chosen = ranked[: config.wave_size]
         if not chosen:
             if req.wave == 0:
                 log(req, "no_candidate", excluded=len(rejected), reasons=_reason_counts(rejected))
             _finish_search(req, config, now)
             return []
-        req.wave += 1
-        req.save(update_fields=["wave", "updated_at"])
-        expires = now + timedelta(seconds=_timeout(req, config))
-        offers = []
-        for rank, cand in enumerate(chosen, start=1):
-            offer = MissionOffer.objects.create(request=req, handyman_id=cand.profile.user_id, wave=req.wave, rank=rank,
-                                                score=cand.score, score_detail=cand.detail, distance_km=cand.distance_km, expires_at=expires)
-            offers.append(offer)
-            log(req, "offer_sent", offer=offer, handyman=cand.profile.user_id, rank=rank, score=cand.score, distance_km=cand.distance_km)
-        log(req, "wave", wave=req.wave, sent=len(offers), eligible=len(ranked), excluded=len(rejected),
-            reasons=_reason_counts(rejected), expires_at=expires.isoformat())
-        ids = [o.pk for o in offers]
-        transaction.on_commit(lambda: _after_wave(req.pk, req.wave, ids, _timeout(req, config)))
+        req.eligible_count = len(ranked) + req.offers.count()
+        return _send_wave(req, config, now, chosen, ranked, rejected)
+
+
+def _send_wave(req: MissionRequest, config: DispatchConfig, now, chosen, ranked, rejected) -> List[MissionOffer]:
+    req.wave += 1
+    step = step_seconds(req, config) if progressive(req, config) else None
+    req.next_step_at = now + timedelta(seconds=step) if step else None
+    req.consent_asked_at = None
+    req.save(update_fields=["wave", "next_step_at", "consent_asked_at", "eligible_count", "radius_index", "radius_m", "updated_at"])
+    expires = now + timedelta(seconds=_timeout(req, config))
+    offers = []
+    for rank, cand in enumerate(chosen, start=1):
+        offer = MissionOffer.objects.create(request=req, handyman_id=cand.profile.user_id, wave=req.wave, rank=rank,
+                                            score=cand.score, score_detail=cand.detail, distance_km=cand.distance_km, expires_at=expires)
+        offers.append(offer)
+        log(req, "offer_sent", offer=offer, handyman=cand.profile.user_id, rank=rank, score=cand.score, distance_km=cand.distance_km)
+    log(req, "wave", wave=req.wave, sent=len(offers), eligible=len(ranked), excluded=len(rejected), radius_m=req.radius_m or None,
+        reasons=_reason_counts(rejected), expires_at=expires.isoformat())
+    ids, rid, wave, timeout = [o.pk for o in offers], req.pk, req.wave, _timeout(req, config)
+    transaction.on_commit(lambda: _after_wave(rid, wave, ids, timeout, step))
     return offers
+
+
+def _set_step(req: MissionRequest, when) -> None:
+    if req.next_step_at != when:
+        req.next_step_at = when
+        req.save(update_fields=["next_step_at", "updated_at"])
+
+
+def _progressive_wave(req: MissionRequest, config: DispatchConfig, now, pending: int) -> List[MissionOffer]:
+    """Palier courant d'abord (les meilleurs non encore sollicités), puis paliers suivants tant que personne n'y est disponible ; jamais
+    au-delà de `far_radius_km` sans l'accord du client (et un métier compatible). Requêtes spatiales indexées, palier par palier."""
+    steps = config.steps_km()
+    limit = limit_km(req, config)
+    idx = min(req.radius_index, len(steps) - 1)
+    if req.radius_m and int(round(steps[idx] * 1000)) < req.radius_m:      # paliers modifiés au Back-Office : jamais de recul
+        idx = next((i for i, km in enumerate(steps) if int(round(km * 1000)) >= req.radius_m), len(steps) - 1)
+    widened = []
+    while True:
+        ranked, rejected = candidates(req, config, now, explain=True, radius_km=steps[idx], outside=False)
+        if ranked or idx + 1 >= len(steps) or steps[idx + 1] > limit:
+            break
+        idx += 1
+        widened.append(steps[idx])
+    before = req.radius_m
+    req.radius_index, req.radius_m = idx, int(round(steps[idx] * 1000))
+    req.eligible_count = len(ranked) + req.offers.count()
+    if widened and before:   # premier palier : consigné par la vague elle-même (`radius_m`), sans évènement à part
+        log(req, "radius", from_m=before, radius_m=req.radius_m, skipped=len(widened) - 1)
+    room = max(0, min(config.max_pending_offers - pending, config.max_contacts - req.offers.count()))
+    chosen = ranked[: min(config.wave_size, room)]
+    if chosen:
+        return _send_wave(req, config, now, chosen, ranked, rejected)
+    if ranked:   # des pros disponibles mais le plafond de propositions en attente est atteint : dès qu'une place se libère
+        req.next_step_at = now   # (refus, expiration) ou au prochain passage périodique
+        req.save(update_fields=["next_step_at", "eligible_count", "radius_index", "radius_m", "updated_at"])
+        return []
+    consent = needs_consent(req, config)
+    if consent and req.consent_asked_at is None:
+        # On ne demande l'accord du client que si élargir sert à quelque chose : des pros sont disponibles au-delà (requête indexée).
+        beyond = len(candidates(req, config, now, radius_km=steps[-1], outside=False))
+        if beyond:
+            req.consent_asked_at = now
+            log(req, "consent_asked", radius_m=req.radius_m, next_m=int(round(steps[idx + 1] * 1000)), available=beyond)
+            rid = req.pk
+            transaction.on_commit(lambda: _notify_consent(rid))
+        else:
+            consent = False
+    req.next_step_at = None
+    req.save(update_fields=["next_step_at", "consent_asked_at", "eligible_count", "radius_index", "radius_m", "updated_at"])
+    if pending:
+        return []      # personne de plus à solliciter : on attend les réponses en cours
+    if consent and now < req.consent_asked_at + timedelta(seconds=config.far_consent_wait_seconds):
+        return []      # on attend l'accord du client pour élargir au-delà de `far_radius_km`
+    if req.wave == 0:
+        log(req, "no_candidate", excluded=len(rejected), reasons=_reason_counts(rejected), radius_m=req.radius_m)
+    _finish_search(req, config, now)
+    return []
+
+
+def _notify_consent(request_id: int) -> None:
+    from flash import notify
+
+    notify.consent_needed(request_id)
+
+
+def allow_far(request_id: int, client, *, now=None) -> MissionRequest:
+    """Accord du client pour élargir au-delà de `far_radius_km` : la recherche reprend aussitôt au palier suivant."""
+    now = now or timezone.now()
+    config = DispatchConfig.get_solo()
+    with transaction.atomic():
+        req = MissionRequest.objects.select_for_update(of=("self",)).select_related("category", "category__parent") \
+            .filter(pk=request_id, client=client).first()
+        if req is None:
+            raise FlashError("not_found", "Demande introuvable.", 404)
+        if req.allow_far:
+            return req
+        if req.status != MissionRequest.SEARCHING:
+            raise FlashError("request_closed", "Cette demande n'est plus en recherche.", 409)
+        if not config.trade_goes_far(req.category):
+            raise FlashError("far_not_allowed", f"Ce métier n'est pas proposé au-delà de {_km(config.far_radius_km)}.", 409)
+        req.allow_far, req.consent_asked_at = True, None
+        req.next_step_at = now          # extension immédiate
+        req.save(update_fields=["allow_far", "consent_asked_at", "next_step_at", "updated_at"])
+        log(req, "far_consent", actor=client, beyond_km=config.far_radius_km)
+        rid = req.pk
+        transaction.on_commit(lambda: launch_wave(rid))
+    req.refresh_from_db()
+    return req
+
+
+def _km(km: float) -> str:
+    return f"{int(km)} km" if km >= 1 else f"{int(km * 1000)} m"
 
 
 def _reason_counts(rejected: List[Dict]) -> Dict[str, int]:
@@ -467,24 +623,29 @@ def _reason_counts(rejected: List[Dict]) -> Dict[str, int]:
     return out
 
 
-def _after_wave(request_id: int, wave: int, offer_ids: List[int], timeout: int) -> None:
+def _after_wave(request_id: int, wave: int, offer_ids: List[int], timeout: int, step: Optional[int] = None) -> None:
     from flash import notify
 
     for oid in offer_ids:
         notify.new_offer(oid)
     try:
-        from flash.tasks import wave_timeout
+        from flash.tasks import step_due, wave_timeout
 
         wave_timeout.apply_async(args=(request_id, wave), countdown=timeout + 2, retry=False)
+        if step:   # recherche progressive : palier suivant à l'échéance (le passage périodique reste le filet de sécurité)
+            step_due.apply_async(args=(request_id,), countdown=step + 1, retry=False)
     except Exception:   # sans broker : la tâche périodique `flash.tasks.tick` (30 s) prend le relais
         logger.info("Échéance de vague confiée à la tâche périodique (demande #%s).", request_id)
 
 
 def _finish_search(req: MissionRequest, config: DispatchConfig, now) -> None:
     """Plus de vague possible : sur devis avec au moins un devis → le client choisit ; sinon → aucun professionnel."""
-    if req.mode == MissionRequest.QUOTE and req.offers.filter(status=MissionOffer.QUOTED).exists():
+    if req.mode == MissionRequest.QUOTE and req.offers.filter(status__in=MissionOffer.PROPOSALS).exists():
         req.status, req.quote_deadline = MissionRequest.QUOTING, now + timedelta(hours=config.quote_window_hours)
-        req.save(update_fields=["status", "quote_deadline", "updated_at"])
+        req.next_step_at = None
+        req.version += 1
+        req.save(update_fields=["status", "quote_deadline", "next_step_at", "version", "updated_at"])
+        log(req, "quoting", proposals=req.offers.filter(status__in=MissionOffer.PROPOSALS).count())
         return
     _close(req, MissionRequest.UNFULFILLED, "Aucun professionnel disponible n'a accepté.", now)
     log(req, "unfulfilled", waves=req.wave)
@@ -499,14 +660,15 @@ def _notify_unfulfilled(request_id: int) -> None:
 
 def _close(req: MissionRequest, status: str, reason: str, now) -> None:
     req.status, req.closed_at, req.close_reason = status, now, reason[:200]
+    req.next_step_at = req.consent_asked_at = None
     req.version += 1
-    req.save(update_fields=["status", "closed_at", "close_reason", "version", "updated_at"])
+    req.save(update_fields=["status", "closed_at", "close_reason", "next_step_at", "consent_asked_at", "version", "updated_at"])
     _withdraw_others(req, keep=None)
 
 
 def _withdraw_others(req: MissionRequest, keep: Optional[int]) -> List[int]:
     """Retire les propositions encore ouvertes : leur alerte est arrêtée sur les téléphones (après validation)."""
-    qs = req.offers.filter(status__in=(MissionOffer.PENDING, MissionOffer.QUOTED))
+    qs = req.offers.filter(status__in=(MissionOffer.PENDING, *MissionOffer.PROPOSALS))
     if keep is not None:
         qs = qs.exclude(pk=keep)
     ids = list(qs.values_list("pk", flat=True))
@@ -595,8 +757,10 @@ def _assign(req: MissionRequest, offer: MissionOffer, pro, amount, now) -> Booki
     booking.transition_to("confirmed", actor=pro)   # le client est prévenu (« … a accepté votre réservation »)
     req.status, req.assigned_to, req.booking, req.assigned_at = MissionRequest.ASSIGNED, pro, booking, now
     req.closed_at, req.close_reason = now, ""
+    req.next_step_at = req.consent_asked_at = None
     req.version += 1
-    req.save(update_fields=["status", "assigned_to", "booking", "assigned_at", "closed_at", "close_reason", "version", "updated_at"])
+    req.save(update_fields=["status", "assigned_to", "booking", "assigned_at", "closed_at", "close_reason", "next_step_at",
+                            "consent_asked_at", "version", "updated_at"])
     _withdraw_others(req, keep=offer.pk)
     transaction.on_commit(lambda: _closed([offer.pk]))   # l'alerte du gagnant s'arrête aussi (autres appareils)
     return booking
@@ -645,7 +809,9 @@ def send_quote(offer_id: int, user, amount, message: str = "", *, now=None) -> M
             raise FlashError("offer_expired", "Cette proposition a expiré.", 409)
         _respond(offer, MissionOffer.QUOTED, now)
         offer.quote_amount, offer.quote_message = amount, (message or "").strip()[:500]
-        offer.save(update_fields=["status", "responded_at", "response_seconds", "quote_amount", "quote_message"])
+        offer.proposal_expires_at = now + (timedelta(minutes=config.proposal_ttl_minutes) if req.is_immediate
+                                           else timedelta(hours=config.quote_window_hours))
+        offer.save(update_fields=["status", "responded_at", "response_seconds", "quote_amount", "quote_message", "proposal_expires_at"])
         log(req, "quoted", offer=offer, actor=user, amount=str(amount), response_seconds=offer.response_seconds)
         transaction.on_commit(lambda: (_closed([offer.pk]), _notify_quote(offer.pk), launch_wave(req.pk)))
     return offer
@@ -670,8 +836,10 @@ def choose_quote(request_id: int, client, offer_id: int, *, now=None) -> Mission
             return req
         if not req.is_open:
             raise FlashError("request_closed", "Cette demande n'est plus ouverte.", 409)
-        if offer.status != MissionOffer.QUOTED:
+        if offer.status not in MissionOffer.PROPOSALS:
             raise FlashError("quote_unavailable", "Ce devis n'est plus disponible.", 409)
+        if offer.proposal_expires_at and now > offer.proposal_expires_at + timedelta(seconds=ACCEPT_GRACE_SECONDS):
+            raise FlashError("proposal_lapsed", "Cette proposition a expiré.", 409)
         profile = HandymanProfile.objects.select_for_update(of=("self",)).select_related("user").get(user_id=offer.handyman_id)
         if not is_publishable(profile):
             raise FlashError("not_eligible", "Ce professionnel n'est plus disponible.", 409)
@@ -742,6 +910,12 @@ def expire_due(*, now=None) -> Dict[str, int]:
     for rid in (MissionRequest.objects.filter(status=MissionRequest.SEARCHING).exclude(offers__status=MissionOffer.PENDING)
                 .exclude(pk__in=touched).values_list("pk", flat=True)[:200]):
         launch_wave(rid, now=now)
+    # Recherche progressive : paliers échus (le compte à rebours de chaque palier est le chemin rapide, ceci le filet de sécurité).
+    for rid in (MissionRequest.objects.filter(status=MissionRequest.SEARCHING, next_step_at__lte=now).exclude(pk__in=touched)
+                .values_list("pk", flat=True)[:200]):
+        launch_wave(rid, now=now)
+    countered = _expire_counters(now)
+    lapsed = _lapse_proposals(now)
     closed = 0
     for req in MissionRequest.objects.filter(status=MissionRequest.QUOTING, quote_deadline__lt=now):
         with transaction.atomic():
@@ -752,7 +926,186 @@ def expire_due(*, now=None) -> Dict[str, int]:
             log(locked, "unfulfilled", reason="quote_window_elapsed")
             transaction.on_commit(lambda rid=locked.pk: _notify_unfulfilled(rid))
             closed += 1
-    return {"expired": expired, "requests": len(touched), "quote_windows_closed": closed}
+    return {"expired": expired, "requests": len(touched), "quote_windows_closed": closed, "counters_expired": countered, "lapsed": lapsed}
+
+
+def _expire_counters(now) -> int:
+    """Contre-offre restée sans réponse du professionnel : sa proposition initiale reste valable (le client peut encore la choisir)."""
+    n = 0
+    for offer in MissionOffer.objects.filter(status=MissionOffer.COUNTERED,
+                                             counter_expires_at__lt=now - timedelta(seconds=ACCEPT_GRACE_SECONDS)).select_related("request"):
+        with transaction.atomic():
+            if MissionOffer.objects.filter(pk=offer.pk, status=MissionOffer.COUNTERED).update(status=MissionOffer.QUOTED):
+                n += 1
+                log(offer.request, "counter_no", offer=offer, reason="expired", amount=str(offer.counter_amount))
+                transaction.on_commit(lambda oid=offer.pk: _notify_counter_answer(oid, False))
+    return n
+
+
+def _lapse_proposals(now) -> int:
+    """Propositions de prix échues : retirées du choix du client ; une demande « à choisir » sans proposition restante est close."""
+    n, requests = 0, set()
+    for offer in MissionOffer.objects.filter(status=MissionOffer.QUOTED,
+                                             proposal_expires_at__lt=now - timedelta(seconds=ACCEPT_GRACE_SECONDS)).select_related("request"):
+        with transaction.atomic():
+            if MissionOffer.objects.filter(pk=offer.pk, status=MissionOffer.QUOTED).update(status=MissionOffer.LAPSED):
+                n += 1
+                requests.add(offer.request_id)
+                log(offer.request, "lapsed", offer=offer, amount=str(offer.quote_amount))
+    for rid in requests:
+        with transaction.atomic():
+            req = MissionRequest.objects.select_for_update().get(pk=rid)
+            if req.status == MissionRequest.QUOTING and not req.offers.filter(status__in=MissionOffer.PROPOSALS).exists():
+                _close(req, MissionRequest.UNFULFILLED, "Les propositions ont expiré sans être choisies.", now)
+                log(req, "unfulfilled", reason="proposals_lapsed")
+                transaction.on_commit(lambda r=rid: _notify_unfulfilled(r))
+    return n
+
+
+# ═══ Contre-offres (mode Propositions) ══════════════════════════════════════════════════════════════════════════════════
+
+def _amount(raw, config: DispatchConfig, what: str) -> Decimal:
+    try:
+        amount = Decimal(str(raw).replace(" ", "").replace("\u202f", "")).quantize(Decimal("1"))
+    except Exception:
+        raise FlashError("invalid_amount", f"Montant {what} invalide.")
+    if amount < config.min_amount:
+        raise FlashError("amount_too_low", f"Le montant minimal est de {config.min_amount} FCFA.", min_amount=config.min_amount)
+    return amount
+
+
+def counter_offer(request_id: int, client, offer_id: int, amount, *, now=None) -> MissionOffer:
+    """Le client répond à une proposition de prix par un montant plus bas. Ce n'est NI une sélection NI une confirmation : le
+    professionnel accepte (la mission lui est alors attribuée à ce montant) ou non (sa proposition initiale reste valable)."""
+    now = now or timezone.now()
+    config = DispatchConfig.get_solo()
+    amount = _amount(amount, config, "de la contre-offre")
+    with transaction.atomic():
+        req = MissionRequest.objects.select_for_update().filter(pk=request_id, client=client).first()
+        if req is None:
+            raise FlashError("not_found", "Demande introuvable.", 404)
+        offer = MissionOffer.objects.select_for_update().filter(pk=offer_id, request=req).first()
+        if offer is None:
+            raise FlashError("not_found", "Proposition introuvable.", 404)
+        if offer.status == MissionOffer.COUNTERED and offer.counter_amount == amount:
+            return offer   # rejeu
+        if req.status not in (MissionRequest.SEARCHING, MissionRequest.QUOTING):
+            raise FlashError("request_closed", "Cette demande n'est plus ouverte.", 409)
+        if offer.status != MissionOffer.QUOTED:
+            raise FlashError("quote_unavailable", "Cette proposition n'attend pas de contre-offre.", 409)
+        if offer.proposal_expires_at and now > offer.proposal_expires_at:
+            raise FlashError("proposal_lapsed", "Cette proposition a expiré.", 409)
+        if offer.counters >= config.max_counter_offers:
+            raise FlashError("counter_limit", "Plus de contre-offre possible : choisissez cette proposition ou une autre.", 409)
+        if amount >= offer.quote_amount:
+            raise FlashError("counter_not_lower", "Votre contre-offre doit être inférieure à la proposition — sinon, choisissez-la.", 400)
+        offer.status, offer.counter_amount, offer.counter_at = MissionOffer.COUNTERED, amount, now
+        offer.counter_expires_at = now + timedelta(seconds=config.counter_timeout_seconds)
+        offer.counters += 1
+        offer.save(update_fields=["status", "counter_amount", "counter_at", "counter_expires_at", "counters"])
+        log(req, "counter", offer=offer, actor=client, amount=str(amount), proposal=str(offer.quote_amount), round=offer.counters)
+        transaction.on_commit(lambda: _notify_counter(offer.pk))
+    return offer
+
+
+def answer_counter(offer_id: int, user, accept: bool, *, now=None) -> MissionRequest:
+    """Réponse du professionnel à une contre-offre. Accepter vaut confirmation : le client a déjà donné son accord sur ce montant."""
+    now = now or timezone.now()
+    with transaction.atomic():
+        request_id = MissionOffer.objects.filter(pk=offer_id, handyman=user).values_list("request_id", flat=True).first()
+        if request_id is None:
+            raise FlashError("not_found", "Proposition introuvable.", 404)
+        req = MissionRequest.objects.select_for_update().get(pk=request_id)   # verrou : demande d'abord, toujours
+        offer = _offer_for(offer_id, user)
+        if accept and offer.status == MissionOffer.ACCEPTED and req.assigned_to_id == user.pk:
+            return req   # rejeu
+        if not accept and offer.status == MissionOffer.QUOTED and offer.counter_amount is not None:
+            return req   # rejeu du refus
+        if offer.status != MissionOffer.COUNTERED:
+            raise FlashError("counter_closed", "Cette contre-offre n'attend plus de réponse.", 409)
+        if now > offer.counter_expires_at + timedelta(seconds=ACCEPT_GRACE_SECONDS):
+            raise FlashError("counter_expired", "Cette contre-offre a expiré.", 409)
+        if req.status not in (MissionRequest.SEARCHING, MissionRequest.QUOTING):
+            raise FlashError("already_assigned" if req.status == MissionRequest.ASSIGNED else "request_closed",
+                             "Cette demande n'est plus disponible.", 409)
+        if not accept:
+            offer.status = MissionOffer.QUOTED
+            offer.save(update_fields=["status"])
+            log(req, "counter_no", offer=offer, actor=user, reason="declined", amount=str(offer.counter_amount))
+            transaction.on_commit(lambda: _notify_counter_answer(offer.pk, False))
+            return req
+        profile = HandymanProfile.objects.select_for_update(of=("self",)).select_related("user").get(user=user)
+        if not is_publishable(profile):
+            raise FlashError("not_eligible", "Votre profil n'est plus éligible aux missions.", 403)
+        config = DispatchConfig.get_solo()
+        busy = availability_issue(profile, req, config, now, check_online=False)
+        if busy:
+            log(req, "conflict", offer=offer, actor=user, reason=busy)
+            raise FlashError("schedule_conflict", f"Acceptation impossible : {busy.lower()}.", 409)
+        offer.status = MissionOffer.ACCEPTED
+        try:
+            with transaction.atomic():
+                offer.save(update_fields=["status"])
+        except IntegrityError:
+            raise FlashError("already_assigned", "Cette mission a déjà été attribuée.", 409)
+        booking = _assign(req, offer, user, offer.counter_amount, now)
+        log(req, "counter_ok", offer=offer, actor=user, amount=str(offer.counter_amount))
+        log(req, "assigned", offer=offer, actor=user, booking=booking.pk, amount=str(offer.counter_amount))
+    return req
+
+
+def _notify_counter(offer_id: int) -> None:
+    from flash import notify
+
+    notify.counter_received(offer_id)
+
+
+def _notify_counter_answer(offer_id: int, accepted: bool) -> None:
+    from flash import notify
+
+    notify.counter_answered(offer_id, accepted)
+
+
+# ═══ Désistement du professionnel retenu ════════════════════════════════════════════════════════════════════════════════
+
+REOPEN_IMMEDIATE_HOURS = 6
+
+
+def reopen_after_withdrawal(booking, actor_id: int, *, now=None) -> Optional[MissionRequest]:
+    """Le professionnel retenu se désiste (il annule la réservation) : la MÊME demande reprend aussitôt sa recherche — aucun doublon
+    de demande ni de proposition, il n'est plus jamais resollicité, les autres propositions de prix encore valables redeviennent
+    choisissables. Créneau déjà passé : rien n'est relancé (le client relance s'il le souhaite)."""
+    now = now or timezone.now()
+    config = DispatchConfig.get_solo()
+    with transaction.atomic():
+        req = MissionRequest.objects.select_for_update(of=("self",)).filter(booking_id=booking.pk).first()
+        if req is None or req.status != MissionRequest.ASSIGNED or req.assigned_to_id != actor_id:
+            return None
+        if req.is_immediate:
+            if req.assigned_at and now - req.assigned_at > timedelta(hours=REOPEN_IMMEDIATE_HOURS):
+                return None
+        elif req.scheduled_for + timedelta(minutes=config.mission_duration_minutes) < now:
+            return None
+        req.offers.filter(status=MissionOffer.ACCEPTED, handyman_id=actor_id).update(status=MissionOffer.RESIGNED)
+        restored = list(req.offers.filter(status=MissionOffer.WITHDRAWN, quote_amount__isnull=False, proposal_expires_at__gt=now)
+                        .values_list("pk", flat=True)) if req.mode == MissionRequest.QUOTE else []
+        if restored:
+            MissionOffer.objects.filter(pk__in=restored).update(status=MissionOffer.QUOTED)
+        req.status, req.assigned_to, req.booking, req.assigned_at = MissionRequest.SEARCHING, None, None, None
+        req.closed_at, req.close_reason, req.next_step_at, req.consent_asked_at = None, "", now, None
+        req.version += 1
+        req.save(update_fields=["status", "assigned_to", "booking", "assigned_at", "closed_at", "close_reason", "next_step_at",
+                                "consent_asked_at", "version", "updated_at"])
+        log(req, "reopened", handyman=actor_id, booking=booking.pk, restored=restored)
+        rid = req.pk
+        transaction.on_commit(lambda: (_notify_reopened(rid, actor_id), launch_wave(rid)))
+    return req
+
+
+def _notify_reopened(request_id: int, pro_id: int) -> None:
+    from flash import notify
+
+    notify.reopened(request_id, pro_id)
 
 
 def missed_streak(user_id: int) -> int:

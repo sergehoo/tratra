@@ -130,3 +130,66 @@ def choice_needed(request_id: int, reason: str) -> None:
            f"{who} {reason}. Choisissez un autre professionnel ou laissez Tratra en trouver un, sans rien ressaisir.",
            title=f"« {req.category.name} » : votre choix est attendu", data={"kind": "flash_request", "id": req.pk},
            dedupe_key=f"flash:request:{req.pk}:choice:{req.switches}", content_object=req)
+
+
+def consent_needed(request_id: int) -> None:
+    """Personne n'est disponible jusqu'à `far_radius_km` : le client décide s'il élargit la recherche (rien n'est fait sans lui)."""
+    from flash.models import DispatchConfig
+
+    req = MissionRequest.objects.select_related("category").filter(pk=request_id).first()
+    if req is None or req.status != MissionRequest.SEARCHING or req.consent_asked_at is None:
+        return
+    km = int(DispatchConfig.current().far_radius_km)
+    notify(req.client_id, "mission_choice",
+           f"Aucun professionnel n'est disponible à moins de {km} km pour « {req.category.name} ». Élargir la recherche ?",
+           title="Élargir la recherche ?", data={"kind": "flash_request", "id": req.pk},
+           dedupe_key=f"flash:request:{req.pk}:consent", content_object=req)
+
+
+def counter_received(offer_id: int) -> None:
+    """Contre-offre du client : le professionnel accepte (mission attribuée) ou garde sa proposition."""
+    from flash import realtime
+
+    offer = MissionOffer.objects.select_related("request", "request__category").filter(pk=offer_id).first()
+    if offer is None or offer.status != MissionOffer.COUNTERED:
+        return
+    req = offer.request
+    left = duration_label(int((offer.counter_expires_at - timezone.now()).total_seconds()))
+    notify(offer.handyman_id, "mission_choice",
+           f"Le client propose {money(offer.counter_amount)} au lieu de {money(offer.quote_amount)} pour « {req.category.name} » "
+           f"({zone_label(req)}). {left} pour répondre.",
+           title="Contre-offre du client", data={"kind": "flash_offer", "id": offer.pk},
+           dedupe_key=f"flash:counter:{offer.pk}:{offer.counters}", content_object=offer)
+    realtime.offer_changed(offer.pk)
+
+
+def counter_answered(offer_id: int, accepted: bool) -> None:
+    from flash import realtime
+
+    offer = MissionOffer.objects.select_related("request", "request__category", "handyman").filter(pk=offer_id).first()
+    if offer is None:
+        return
+    realtime.offer_changed(offer.pk)
+    if accepted:
+        return   # attribution : le client est prévenu par la confirmation de la réservation
+    req = offer.request
+    who = (offer.handyman.first_name or "").strip() or "Le professionnel"
+    notify(req.client_id, "mission_quote",
+           f"{who} garde sa proposition à {money(offer.quote_amount)} pour « {req.category.name} ». Vous pouvez la choisir ou en choisir une autre.",
+           title="Contre-offre non retenue", data={"kind": "flash_request", "id": req.pk},
+           dedupe_key=f"flash:counter:{offer.pk}:{offer.counters}:no", content_object=req)
+
+
+def reopened(request_id: int, pro_id: int) -> None:
+    """Le professionnel retenu s'est désisté : le client est prévenu que la recherche reprend (même demande, aucune ressaisie)."""
+    from handy.models import User
+
+    req = MissionRequest.objects.select_related("category").filter(pk=request_id).first()
+    if req is None:
+        return
+    pro = User.objects.filter(pk=pro_id).only("first_name").first()
+    who = (getattr(pro, "first_name", "") or "").strip() or "Le professionnel"
+    notify(req.client_id, "mission_choice",
+           f"{who} s'est désisté pour « {req.category.name} ». Nous reprenons la recherche ; vous pouvez annuler à tout moment.",
+           title="Recherche reprise", data={"kind": "flash_request", "id": req.pk},
+           dedupe_key=f"flash:request:{req.pk}:reopened:{req.version}", content_object=req)

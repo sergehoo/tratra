@@ -16,12 +16,32 @@ CONFIG_FIELDS = [f.name for f in DispatchConfig._meta.get_fields()
                  if getattr(f, "concrete", False) and f.name not in ("id", "updated_at", "updated_by")]
 
 
+SEARCH_FIELDS = ("progressive_search", "radius_steps", "step_seconds", "scheduled_step_seconds", "max_pending_offers", "max_contacts", "far_radius_km",
+                 "far_trades", "far_consent_wait_seconds")
+PROPOSAL_FIELDS = ("proposal_ttl_minutes", "max_counter_offers", "counter_timeout_seconds")
+TYPES = {"FloatField": "float", "BooleanField": "bool", "CharField": "text"}
+
+
+def _type(name: str) -> str:
+    return TYPES.get(DispatchConfig._meta.get_field(name).get_internal_type(), "int")
+
+
+def _parse(name: str, value):
+    kind = _type(name)
+    if kind == "bool":
+        return value in (True, 1, "1", "true", "True", "on")
+    if kind == "text":
+        return str(value if value is not None else "").strip()
+    return float(value) if kind == "float" else int(value)
+
+
 def _config_payload(c: DispatchConfig) -> dict:
     fields = []
     for name in CONFIG_FIELDS:
         f = DispatchConfig._meta.get_field(name)
-        fields.append({"name": name, "label": str(f.verbose_name), "value": getattr(c, name), "type": "float" if f.get_internal_type() == "FloatField" else "int",
-                       "group": "weights" if name.startswith("weight_") else "waves" if name in (
+        fields.append({"name": name, "label": str(f.verbose_name), "value": getattr(c, name), "type": _type(name),
+                       "group": "weights" if name.startswith("weight_") else "search" if name in SEARCH_FIELDS
+                       else "proposals" if name in PROPOSAL_FIELDS else "waves" if name in (
                            "wave_size", "max_waves", "offer_timeout_seconds", "scheduled_offer_timeout_seconds", "immediate_horizon_minutes",
                            "quote_window_hours", "max_quotes") else "rules"})
     return {"fields": fields, "updated_at": c.updated_at, "updated_by": public_name(c.updated_by) if c.updated_by_id else None}
@@ -40,7 +60,7 @@ class FlashConfigView(BOView):
             if name not in CONFIG_FIELDS:
                 continue
             try:
-                setattr(c, name, float(value) if DispatchConfig._meta.get_field(name).get_internal_type() == "FloatField" else int(value))
+                setattr(c, name, _parse(name, value))
             except (TypeError, ValueError):
                 return bad_request("invalid", f"Valeur invalide pour « {DispatchConfig._meta.get_field(name).verbose_name} ».", 400)
         if sum(c.weights().values()) <= 0:
