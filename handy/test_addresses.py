@@ -179,3 +179,74 @@ def test_backfill_creates_one_primary_address_from_legacy_fields_and_is_idempote
     assert not UserAddress.objects.filter(user__username="adr_none").exists()
     legacy.refresh_from_db()
     assert legacy.address == "Rue 5"                                                                  # champs historiques intacts
+
+
+# ═══ Découpage des adresses : commune d'Abidjan, quartier, lieu nommé ; Google Places ════════════════════════════════════
+
+def test_osm_commune_is_the_abidjan_commune_and_the_quartier_is_kept_apart(settings):
+    """OpenStreetMap ne range pas toujours la commune dans ses champs (« Deux Plateaux » en suburb, « Cocody » seulement dans le texte) :
+    la commune vient de la liste des 13 communes du district, jamais d'une sous-chaîne (« Deux-Plateaux » n'est pas « Plateau »)."""
+    settings.GEO_PROVIDER = "nominatim"
+    gps = {"display_name": "Vlisco, Rue des Jardins, Deux-Plateaux, Deux Plateaux, Cocody, Abidjan, Côte d’Ivoire", "name": "Vlisco",
+           "address": {"shop": "Vlisco", "road": "Rue des Jardins", "residential": "Deux-Plateaux", "suburb": "Deux Plateaux", "city": "Abidjan",
+                       "country": "Côte d’Ivoire"}}
+    with mock.patch("handy.geo.requests.get", return_value=fake_response(gps)):
+        r = client(member()).get(f"{GEO}/reverse/", {"lat": 5.36, "lng": -3.99, "consent": "true"}).json()["result"]
+    assert (r["street"], r["quartier"], r["commune"], r["city"]) == ("Rue des Jardins", "Deux-Plateaux", "Cocody", "Abidjan")
+    assert r["name"] == ""                                       # le commerce voisin n'est pas le lieu de l'utilisateur
+    assert geo.abidjan_commune("Deux-Plateaux, Abidjan") == "" and geo.abidjan_commune("Port Bouet") == "Port-Bouët"
+    bouake = {"display_name": "Air France 1, Bouaké, Gbêkê", "lat": "7.69", "lon": "-5.03",
+              "address": {"suburb": "Air France 1", "city": "Bouaké", "country": "Côte d’Ivoire"}}
+    with mock.patch("handy.geo.requests.get", return_value=fake_response([bouake])):
+        b = geo.search("air france bouake")[0]
+    assert (b["quartier"], b["commune"], b["city"]) == ("Air France 1", "Bouaké", "Bouaké")   # hors d'Abidjan : la ville
+
+
+PLACES = {"places": [
+    {"displayName": {"text": "Pharmacie Saint-Jean"}, "formattedAddress": "Bd André Latrille, Abidjan, Côte d’Ivoire",
+     "location": {"latitude": 5.3488, "longitude": -3.9921},
+     "addressComponents": [{"longText": "Boulevard André Latrille", "shortText": "Bd André Latrille", "types": ["route"]},
+                           {"longText": "Vieux Cocody", "shortText": "Vieux Cocody", "types": ["neighborhood", "political"]},
+                           {"longText": "Cocody", "shortText": "Cocody", "types": ["sublocality_level_1", "sublocality", "political"]},
+                           {"longText": "Abidjan", "shortText": "Abidjan", "types": ["locality", "political"]},
+                           {"longText": "Côte d’Ivoire", "shortText": "CI", "types": ["country", "political"]}]},
+    {"displayName": {"text": "Pharmacie Saint-Jean Accra"}, "formattedAddress": "Accra, Ghana", "location": {"latitude": 5.6, "longitude": -0.2},
+     "addressComponents": [{"longText": "Ghana", "shortText": "GH", "types": ["country"]}]},
+]}
+
+
+def test_google_search_uses_places_text_search_with_coordinates_and_never_leaks_the_key(settings, caplog):
+    settings.GEO_PROVIDER, settings.GEO_GOOGLE_API_KEY = "google", "cle-de-test-places"
+    with mock.patch("handy.geo.requests.post", return_value=fake_response(PLACES)) as post, mock.patch("handy.geo.requests.get") as get:
+        r = client(member()).get(f"{GEO}/search/", {"q": "pharmacie saint jean"})
+    assert r.status_code == 200 and not get.called
+    rows = r.json()["results"]
+    assert len(rows) == 1                                         # le résultat au Ghana est écarté
+    assert (rows[0]["name"], rows[0]["street"], rows[0]["quartier"], rows[0]["commune"], rows[0]["city"]) == \
+        ("Pharmacie Saint-Jean", "Boulevard André Latrille", "Vieux Cocody", "Cocody", "Abidjan")
+    assert rows[0]["latitude"] == 5.3488 and rows[0]["label"].startswith("Pharmacie Saint-Jean, Bd André Latrille")
+    kwargs = post.call_args.kwargs
+    assert post.call_args.args[0] == "https://places.googleapis.com/v1/places:searchText"
+    assert kwargs["headers"]["X-Goog-Api-Key"] == "cle-de-test-places" and "places.location" in kwargs["headers"]["X-Goog-FieldMask"]
+    assert kwargs["json"]["regionCode"] == "CI" and kwargs["json"]["languageCode"] == "fr"
+    assert "cle-de-test-places" not in r.content.decode() and "cle-de-test-places" not in caplog.text
+    with mock.patch("handy.geo.requests.post", side_effect=TimeoutError("cle-de-test-places")):
+        cache.clear()
+        down = client(member("adr_b")).get(f"{GEO}/search/", {"q": "angre"})
+    assert down.status_code == 503 and "cle-de-test-places" not in down.content.decode() + caplog.text
+
+
+def test_google_position_and_geocoding_only_mode(settings):
+    settings.GEO_PROVIDER, settings.GEO_GOOGLE_API_KEY, settings.GEO_GOOGLE_PLACES = "google", "k", False
+    result = {"formatted_address": "Riviera 3, Abidjan, Côte d’Ivoire", "geometry": {"location": {"lat": 5.37, "lng": -3.96}},
+              "address_components": [{"long_name": "Riviera 3", "types": ["neighborhood", "political"]},
+                                     {"long_name": "Cocody", "types": ["sublocality_level_1", "sublocality", "political"]},
+                                     {"long_name": "Abidjan", "types": ["locality", "political"]},
+                                     {"long_name": "Côte d’Ivoire", "types": ["country", "political"]}]}
+    with mock.patch("handy.geo.requests.get", return_value=fake_response({"status": "OK", "results": [result]})) as get, \
+            mock.patch("handy.geo.requests.post") as post:
+        found = geo.search("riviera 3")[0]
+        pos = geo.reverse(5.37, -3.96)
+    assert not post.called and "geocode" in get.call_args.args[0]
+    assert (found["quartier"], found["commune"], found["city"]) == ("Riviera 3", "Cocody", "Abidjan")
+    assert (pos["quartier"], pos["commune"], pos["name"]) == ("Riviera 3", "Cocody", "")

@@ -30,7 +30,11 @@ export interface AddressForm {
 
 export interface Suggestion {
   label: string;
+  /** Lieu nommé (pharmacie, école, immeuble…), vide pour une simple adresse. */
+  name?: string;
   street: string;
+  /** Quartier (Riviera, Deux-Plateaux…) ; `commune` est la commune (Cocody, Yopougon…). */
+  quartier?: string;
   commune: string;
   city: string;
   country: string;
@@ -77,4 +81,14 @@ export function currentPosition(): Promise<{ lat: number; lng: number }> {
       { enableHighAccuracy: false, timeout: 10000, maximumAge: 60000 },
     );
   });
+}
+
+/** Lieu nommé, rue, quartier, commune, ville — sans doublon ni élément vide. */
+export function describeSuggestion(s: Partial<Pick<Suggestion, "name" | "street" | "quartier" | "commune" | "city">>): string {
+  const parts: string[] = [];
+  for (const v of [s.name, s.street, s.quartier, s.commune, s.city]) {
+    const t = (v || "").trim();
+    if (t && !parts.some((p) => p.toLowerCase() === t.toLowerCase())) parts.push(t);
+  }
+  return parts.join(", ");
 }

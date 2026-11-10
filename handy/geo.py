@@ -1,7 +1,10 @@
 """Recherche d'adresse (autocomplétion), géocodage et géocodage inverse via un fournisseur configurable.
 
- - Fournisseur : `GEO_PROVIDER` = `nominatim` (OpenStreetMap, sans clé) | `google` (Geocoding API, clé `GEO_GOOGLE_API_KEY`)
-   | `none` (aucun appel externe : saisie manuelle uniquement) ;
+ - Fournisseur : `GEO_PROVIDER` = `nominatim` (OpenStreetMap, sans clé) | `google` (clé `GEO_GOOGLE_API_KEY` : recherche par
+   Places API (New) « Text Search » — lieux, quartiers, commerces, avec leurs coordonnées en un seul appel —, position par Geocoding API ;
+   `GEO_GOOGLE_PLACES=False` revient à Geocoding pour la recherche) | `none` (aucun appel externe : saisie manuelle uniquement) ;
+ - chaque résultat : `name` (lieu nommé), `street`, `quartier`, `commune` (une des 13 communes du district d'Abidjan quand le lieu y est,
+   sinon la ville), `city`, `country`, `label`, `latitude`, `longitude` ;
  - cache des recherches (`GEO_CACHE_TTL`) et limite globale d'appels sortants par minute (`GEO_MAX_CALLS_PER_MINUTE`) ;
  - panne du fournisseur => `GeoUnavailable` (le client propose la saisie manuelle) ; une panne n'est jamais mise en cache comme réponse ;
  - aucune coordonnée ni requête n'est journalisée ; la clé du fournisseur ne sort jamais dans une réponse.
@@ -56,12 +59,15 @@ def _acquire_slot() -> None:
         raise GeoUnavailable("Recherche d’adresse momentanément saturée. Saisissez l’adresse manuellement ou réessayez dans une minute.")
 
 
-def _get(url: str, params: Dict, headers: Optional[Dict] = None):
+def _get(url: str, params: Dict, headers: Optional[Dict] = None, *, body: Optional[Dict] = None):
+    """GET (ou POST JSON avec `body`). La clé du fournisseur n'apparaît jamais dans les journaux (seul le type d'erreur y figure)."""
     if cache.get("geo:down"):
         raise GeoUnavailable("Recherche d’adresse indisponible pour le moment. Saisissez l’adresse manuellement.")
     _acquire_slot()
     try:
-        r = requests.get(url, params=params, headers=headers or {}, timeout=int(_cfg("GEO_TIMEOUT", 4)))
+        timeout = int(_cfg("GEO_TIMEOUT", 4))
+        r = (requests.post(url, json=body, headers=headers or {}, timeout=timeout) if body is not None
+             else requests.get(url, params=params, headers=headers or {}, timeout=timeout))
         r.raise_for_status()
         return r.json()
     except Exception as exc:  # panne réseau, quota fournisseur, réponse invalide…
@@ -77,34 +83,111 @@ def _coord(v) -> Optional[float]:
         return None
 
 
+# Les 13 communes du district autonome d'Abidjan : la « commune » d'une adresse y est l'une d'elles (Cocody, Yopougon…), jamais le
+# quartier (Deux-Plateaux, Riviera, Niangon…) — c'est elle qui sert à la zone d'intervention des professionnels.
+ABIDJAN_COMMUNES = ("Abobo", "Adjamé", "Attécoubé", "Cocody", "Koumassi", "Marcory", "Plateau", "Port-Bouët", "Treichville", "Yopougon",
+                    "Bingerville", "Anyama", "Songon")
+
+
+def _fold(text: str) -> str:
+    import unicodedata
+
+    t = unicodedata.normalize("NFKD", str(text or "")).encode("ascii", "ignore").decode().lower()
+    return re.sub(r"[^a-z0-9]+", " ", t).strip()
+
+
+_COMMUNES = {_fold(c): c for c in ABIDJAN_COMMUNES}
+
+
+def abidjan_commune(*texts) -> str:
+    """Commune du district d'Abidjan nommée telle quelle dans l'un des éléments (« Cocody », « Port Bouet »…) ; « Deux-Plateaux »
+    n'est pas « Plateau » (comparaison d'éléments entiers, jamais de sous-chaîne)."""
+    for text in texts:
+        for part in re.split(r"[,;/]", str(text or "")):
+            hit = _COMMUNES.get(_fold(part).removeprefix("commune de ").removeprefix("commune d "))
+            if hit:
+                return hit
+    return ""
+
+
+def _place(*, name="", street="", quartiers=(), commune_hints=(), towns=(), country="", label="", lat=None, lng=None) -> Dict:
+    commune = abidjan_commune(*commune_hints) or next((t for t in towns if t), "")
+    quartier = next((q for q in quartiers if q and _fold(q) != _fold(commune) and _fold(q) != _fold(name)), "")
+    city = "Abidjan" if commune in ABIDJAN_COMMUNES else next((t for t in towns if t), "")
+    return {"label": (label or "")[:255], "name": (name or "")[:120], "street": (street or "")[:255], "quartier": quartier[:100],
+            "commune": commune[:100], "city": city[:100], "country": (country or "")[:80], "latitude": _coord(lat), "longitude": _coord(lng)}
+
+
 def _from_nominatim(item: Dict) -> Dict:
     a = item.get("address") or {}
+    display = item.get("display_name") or ""
     street = " ".join(x for x in (a.get("house_number"), a.get("road") or a.get("pedestrian")) if x)
-    return {
-        "label": (item.get("display_name") or "")[:255], "street": street[:255],
-        "commune": (a.get("suburb") or a.get("neighbourhood") or a.get("quarter") or a.get("city_district") or "")[:100],
-        "city": (a.get("city") or a.get("town") or a.get("village") or a.get("municipality") or a.get("county") or "")[:100],
-        "country": (a.get("country") or "")[:80], "latitude": _coord(item.get("lat")), "longitude": _coord(item.get("lon")),
-    }
+    named = item.get("name") or ""
+    return _place(
+        name=named if named and named != street else "", street=street,
+        quartiers=(a.get("neighbourhood"), a.get("quarter"), a.get("residential"), a.get("suburb"), a.get("city_district")),
+        commune_hints=(a.get("city_district"), a.get("suburb"), a.get("municipality"), a.get("town"), a.get("city"), display),
+        towns=(a.get("town"), a.get("city"), a.get("village"), a.get("municipality"), a.get("county")),
+        country=a.get("country"), label=display, lat=item.get("lat"), lng=item.get("lon"))
+
+
+def _components(items, long_key: str) -> Dict[str, str]:
+    comps: Dict[str, str] = {}
+    for c in items or []:
+        for t in c.get("types", []):
+            comps.setdefault(t, c.get(long_key, "") or "")
+    return comps
 
 
 def _from_google(item: Dict) -> Dict:
-    comps = {}
-    for c in item.get("address_components", []):
-        for t in c.get("types", []):
-            comps.setdefault(t, c.get("long_name", ""))
+    """Résultat de Geocoding API (position GPS ; recherche si `GEO_GOOGLE_PLACES=False`)."""
+    comps = _components(item.get("address_components"), "long_name")
     loc = (item.get("geometry") or {}).get("location") or {}
     street = " ".join(x for x in (comps.get("street_number"), comps.get("route")) if x)
-    return {
-        "label": (item.get("formatted_address") or "")[:255], "street": street[:255],
-        "commune": (comps.get("sublocality") or comps.get("sublocality_level_1") or comps.get("neighborhood") or "")[:100],
-        "city": (comps.get("locality") or comps.get("administrative_area_level_2") or "")[:100],
-        "country": comps.get("country", "")[:80], "latitude": _coord(loc.get("lat")), "longitude": _coord(loc.get("lng")),
-    }
+    return _place(
+        street=street, quartiers=(comps.get("neighborhood"), comps.get("sublocality_level_2"), comps.get("sublocality_level_1")),
+        commune_hints=(comps.get("sublocality_level_1"), comps.get("sublocality"), comps.get("locality"), item.get("formatted_address")),
+        towns=(comps.get("locality"), comps.get("administrative_area_level_2")), country=comps.get("country"),
+        label=item.get("formatted_address"), lat=loc.get("lat"), lng=loc.get("lng"))
+
+
+def _from_places(item: Dict) -> Dict:
+    """Résultat de Places API (New) « Text Search » : lieu nommé (pharmacie, école, immeuble…) ou adresse, coordonnées incluses."""
+    comps = _components(item.get("addressComponents"), "longText")
+    loc = item.get("location") or {}
+    name = ((item.get("displayName") or {}).get("text") or "").strip()
+    street = " ".join(x for x in (comps.get("street_number"), comps.get("route")) if x)
+    formatted = item.get("formattedAddress") or ""
+    return _place(
+        name=name if name and name not in (street, formatted) and _fold(name) != _fold(comps.get("sublocality_level_1", "")) else "",
+        street=street, quartiers=(comps.get("neighborhood"), comps.get("sublocality_level_2"), comps.get("sublocality_level_1")),
+        commune_hints=(comps.get("sublocality_level_1"), comps.get("sublocality"), comps.get("locality"), formatted, name),
+        towns=(comps.get("locality"), comps.get("administrative_area_level_2")), country=comps.get("country"),
+        label=", ".join(x for x in (name if name and name not in formatted else "", formatted) if x),
+        lat=loc.get("latitude"), lng=loc.get("longitude"))
+
+
+PLACES_FIELDS = "places.displayName,places.formattedAddress,places.location,places.addressComponents"
+
+
+def _google_places(q: str, country: str) -> List[Dict]:
+    lat, lng = (float(x) for x in str(_cfg("GEO_BIAS_CENTER", "5.345,-4.024")).split(","))
+    body = {"textQuery": q, "languageCode": "fr", "regionCode": country.upper(), "pageSize": MAX_RESULTS,
+            "locationBias": {"circle": {"center": {"latitude": lat, "longitude": lng}, "radius": float(_cfg("GEO_BIAS_RADIUS_M", 50000))}}}
+    data = _get("https://places.googleapis.com/v1/places:searchText", {}, {
+        "X-Goog-Api-Key": _cfg("GEO_GOOGLE_API_KEY", ""), "X-Goog-FieldMask": PLACES_FIELDS, "Content-Type": "application/json"}, body=body)
+    out = []
+    for item in (data or {}).get("places", [])[:MAX_RESULTS]:
+        comps = _components(item.get("addressComponents"), "shortText")
+        if comps.get("country", country.upper()).upper() == country.upper():   # jamais un lieu hors du pays
+            out.append(_from_places(item))
+    return out
 
 
 def _search_remote(q: str) -> List[Dict]:
     country = str(_cfg("GEO_COUNTRY", "ci")).lower()
+    if provider() == "google" and _cfg("GEO_GOOGLE_PLACES", True):
+        return _google_places(q, country)
     if provider() == "google":
         data = _get("https://maps.googleapis.com/maps/api/geocode/json",
                     {"address": q, "components": f"country:{country.upper()}", "language": "fr", "key": _cfg("GEO_GOOGLE_API_KEY", "")})
@@ -154,6 +237,8 @@ def reverse(lat: float, lng: float) -> Optional[Dict]:
         data = _get(f"{base}/reverse", {"lat": rlat, "lon": rlng, "format": "jsonv2", "addressdetails": 1, "zoom": 18, "accept-language": "fr"},
                     {"User-Agent": _cfg("GEO_USER_AGENT", "Tratra/1.0 (contact: support@tratra.net)")})
         found = _from_nominatim(data) if isinstance(data, dict) and data.get("address") else None
+    if found:
+        found["name"] = ""   # un commerce voisin (le plus proche du point) n'est pas le lieu de l'utilisateur
     # Le cache (partagé entre comptes) ne garde JAMAIS de coordonnées exactes : elles sont ajoutées à chaque réponse.
     cache.set(key, {k: v for k, v in (found or {}).items() if k not in ("latitude", "longitude")} or {}, int(_cfg("GEO_CACHE_TTL", 86400)))
     return _at(found, lat, lng)

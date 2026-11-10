@@ -2,7 +2,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { Bookmark, Crosshair, Loader2, MapPin } from "lucide-react";
 import { Input } from "@/components/ds";
-import { currentPosition, listAddresses, reverseAddress, searchAddress, type Address, type Suggestion } from "@/lib/addresses";
+import { currentPosition, describeSuggestion, listAddresses, reverseAddress, searchAddress, type Address, type Suggestion } from "@/lib/addresses";
 
 /** Adresse retenue : libellé, commune ou quartier, ville, position (si connue) et origine. */
 export interface AddressPick {
@@ -14,8 +14,9 @@ export interface AddressPick {
   source: "manual" | "saved" | "geocoder" | "device";
 }
 
-function fromSuggestion(s: Pick<Suggestion, "street" | "commune" | "city" | "latitude" | "longitude"> & { label?: string }, source: AddressPick["source"]): AddressPick {
-  const label = [s.street, s.commune, s.city].filter(Boolean).join(", ") || s.label || "";
+function fromSuggestion(s: Pick<Suggestion, "street" | "commune" | "city" | "latitude" | "longitude"> & Partial<Pick<Suggestion, "name" | "quartier">> & { label?: string },
+  source: AddressPick["source"]): AddressPick {
+  const label = describeSuggestion(s) || s.label || "";
   return { label, commune: s.commune || "", city: s.city || "", lat: s.latitude ?? null, lng: s.longitude ?? null, source };
 }
 
@@ -69,7 +70,7 @@ export function AddressAutocomplete({ onChange, label = "Adresse de l’interven
   const options: { key: string; pick: AddressPick; title: string; sub: string; saved: boolean }[] = [
     ...savedShown.map((a) => ({ key: `s${a.id}`, saved: true, title: a.label || a.street || a.commune, sub: [a.street, a.commune].filter(Boolean).join(", "),
       pick: fromSuggestion({ street: a.street, commune: a.commune, city: a.city, latitude: a.latitude ?? (null as unknown as number), longitude: a.longitude ?? (null as unknown as number) }, "saved") })),
-    ...results.map((r, i) => ({ key: `g${i}`, saved: false, title: [r.street, r.commune].filter(Boolean).join(", ") || r.label, sub: r.city, pick: fromSuggestion(r, "geocoder") })),
+    ...results.map((r, i) => ({ key: `g${i}`, saved: false, title: describeSuggestion({ ...r, city: "" }) || r.label, sub: r.city, pick: fromSuggestion(r, "geocoder") })),
   ];
 
   function choose(pick: AddressPick) {

@@ -474,6 +474,10 @@ ROUTING_TIMEOUT = config('ROUTING_TIMEOUT', default=3, cast=int)
 GEO_PROVIDER = config('GEO_PROVIDER', default='nominatim')
 GEO_NOMINATIM_URL = config('GEO_NOMINATIM_URL', default='https://nominatim.openstreetmap.org')
 GEO_GOOGLE_API_KEY = config('GEO_GOOGLE_API_KEY', default='')  # secret : jamais renvoyé par l'API ni journalisé
+# Google : recherche par Places API (New) « Text Search » (lieux et quartiers avec coordonnées) ; False = Geocoding API seule.
+GEO_GOOGLE_PLACES = config('GEO_GOOGLE_PLACES', default=True, cast=bool)
+GEO_BIAS_CENTER = config('GEO_BIAS_CENTER', default='5.345,-4.024')     # recherche orientée vers Abidjan, sans s'y limiter
+GEO_BIAS_RADIUS_M = config('GEO_BIAS_RADIUS_M', default=50000, cast=int)
 GEO_COUNTRY = config('GEO_COUNTRY', default='ci')
 GEO_TIMEOUT = config('GEO_TIMEOUT', default=4, cast=int)
 GEO_CACHE_TTL = config('GEO_CACHE_TTL', default=86400, cast=int)
