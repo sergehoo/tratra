@@ -79,7 +79,8 @@ def deliverable_ttl(notification) -> Optional[int]:
 
 
 def offer_closed(offer_id: int) -> None:
-    """La proposition n'attend plus de réponse : la notification est marquée lue et l'alerte est retirée des téléphones."""
+    """La proposition n'attend plus de réponse : la notification est marquée lue, l'écran ouvert est prévenu en direct et
+    l'alerte est retirée des téléphones."""
     from handy import push
     from handy.models import Notification
 
@@ -88,6 +89,10 @@ def offer_closed(offer_id: int) -> None:
         return
     Notification.objects.filter(user_id=offer.handyman_id, dedupe_key=offer_key(offer_id), is_read=False).update(
         is_read=True, read_at=timezone.now())
+    # Aussi par le WebSocket : une alerte push tardive ou perdue ne laisse pas l'écran « Accepter » ouvert sur une mission
+    # déjà attribuée (constaté en recette). Jamais bloquant.
+    from flash import realtime
+    realtime.offer_changed(offer_id)
     push.send_data_to_user(offer.handyman_id, {"t": "flash_closed", "offer": offer_id, "status": offer.status},
                            capability=FLASH_CAPABILITY, ttl_seconds=600, collapse_key=f"flash-{offer_id}")
 

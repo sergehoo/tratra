@@ -299,7 +299,7 @@ class UserSerializer(serializers.ModelSerializer):
         model = User
         # clair et safe (pas de password hash)
         fields = [
-            "id", "username", "email", "first_name", "last_name", "user_type",
+            "id", "username", "email", "first_name", "last_name", "gender", "user_type",
             "phone", "profile_picture", "address", "city", "postal_code", "country",
             "latitude", "longitude", "is_verified", "date_joined", "last_login", 'password',
             "accept_terms", "phone_country",

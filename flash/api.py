@@ -90,7 +90,7 @@ def request_payload(req: MissionRequest, request) -> dict:
         "amount_label": money(req.amount) if req.amount is not None else "Sur devis", "wave": req.wave,
         "progress": {"contacted": len(offers), "waiting": count(MissionOffer.PENDING), "declined": count(MissionOffer.DECLINED),
                      "no_answer": count(MissionOffer.EXPIRED), "quotes": sum(1 for o in offers if o.quote_amount is not None)},
-        "quote_deadline": req.quote_deadline, "created_at": req.created_at, "assigned_at": req.assigned_at, "closed_at": req.closed_at,
+        "quote_deadline": req.quote_deadline, "server_now": timezone.now(), "created_at": req.created_at, "assigned_at": req.assigned_at, "closed_at": req.closed_at,
         "close_reason": req.close_reason, "booking": req.booking_id, "version": req.version,
         "assigned_to": _pro_card(req.assigned_to, request) if req.assigned_to_id else None,
         # Hybrid Matching : mode courant, professionnel choisi, bascule possible (avec confirmation) tant que la demande est ouverte.
@@ -105,7 +105,8 @@ def request_payload(req: MissionRequest, request) -> dict:
         # Prix convenu (réservation créée) : celui de la contre-offre acceptée le cas échéant, jamais confondu avec la proposition.
         "agreed_amount": int(req.booking.total_price) if req.booking_id and req.booking.total_price is not None else None,
         "agreed_label": money(req.booking.total_price) if req.booking_id and req.booking.total_price is not None else None,
-        # Lieu de l'intervention (donnée du client lui-même) : centre de la carte. Aucune position de professionnel n'est transmise.
+        # Lieu de l'intervention (donnée du client lui-même) : centre de la carte. Les professionnels sollicités y figurent par une
+        # position APPROCHÉE et sans identité (`search.pros`, voir flash/realtime.py).
         "center": {"lat": req.location.y, "lng": req.location.x} if req.location is not None else None,
         "can_extend": req.status == MissionRequest.SEARCHING and req.consent_asked_at is not None and not req.allow_far,
         "can_cancel": req.is_open, "can_relaunch": req.status in (MissionRequest.UNFULFILLED, MissionRequest.CANCELLED)
@@ -120,6 +121,7 @@ def request_payload(req: MissionRequest, request) -> dict:
                            "counter_amount": int(o.counter_amount) if o.counter_amount is not None else None,
                            "counter_label": money(o.counter_amount) if o.counter_amount is not None else None,
                            "counter_expires_at": o.counter_expires_at if o.status == MissionOffer.COUNTERED else None,
+                           "counter_at": o.counter_at if o.status == MissionOffer.COUNTERED else None,
                            "can_choose": open_ and o.status in MissionOffer.PROPOSALS,
                            "can_counter": open_ and o.status == MissionOffer.QUOTED and o.counters < config.max_counter_offers,
                            "pro": _pro_card(o.handyman, request)}
@@ -319,6 +321,8 @@ def offer_view_payload(offer: MissionOffer, request) -> dict:
     now = timezone.now()
     data = {**offer_payload(offer), "status": offer.status, "status_label": offer.get_status_display(),
             "seconds_left": max(0, int((offer.expires_at - now).total_seconds())) if offer.status == MissionOffer.PENDING else 0,
+            # Heure du serveur à la lecture : l'application cale ses barres de délai dessus, pas sur l'horloge du téléphone.
+            "server_now": now,
             "description": req.description, "sent_at": offer.sent_at, "responded_at": offer.responded_at,
             "decline_reason": offer.decline_reason, "quote_amount": int(offer.quote_amount) if offer.quote_amount is not None else None,
             "quote_message": offer.quote_message, "why": offer.score_detail.get("criteria", []),
@@ -326,7 +330,7 @@ def offer_view_payload(offer: MissionOffer, request) -> dict:
             "decline_reasons": [{"code": c, "label": label} for c, label in MissionOffer.DECLINE_REASONS],
             "request_status": req.status,
             "counter": {"amount": int(offer.counter_amount), "amount_label": money(offer.counter_amount), "expires_at": offer.counter_expires_at,
-                        "seconds_left": max(0, int((offer.counter_expires_at - now).total_seconds()))}
+                        "at": offer.counter_at, "seconds_left": max(0, int((offer.counter_expires_at - now).total_seconds()))}
             if offer.status == MissionOffer.COUNTERED else None}
     if offer.status == MissionOffer.ACCEPTED and req.assigned_to_id == request.user.pk:
         # Après l'attribution seulement : adresse exacte et prénom du client (la réservation donne le reste).

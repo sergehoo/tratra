@@ -18,6 +18,14 @@ def _no_real_push(settings):
     settings.FCM_CREDENTIALS_JSON = ""
 
 
+@pytest.fixture(autouse=True)
+def _fresh_live_state():
+    """Mémoire « dernier état diffusé » du processus : vidée entre deux tests (les identifiants de demandes peuvent se répéter)."""
+    from flash import realtime
+
+    realtime._pushed.clear()
+
+
 @pytest.fixture
 def plomberie(make_category):
     return make_category("plomberie-flash", name="Plomberie")

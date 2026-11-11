@@ -33,6 +33,7 @@ class CustomUserAdmin(SafeDeleteAdminMixin, UserAdmin):
             'fields': (
                 'first_name',
                 'last_name',
+                'gender',
                 'email',
                 'phone',
                 'profile_picture',

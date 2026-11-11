@@ -5,6 +5,7 @@
 #   scripts/loadtest/run_local.sh measure                 mesures dans le processus (requêtes SQL par écran, Flash, annonces, stockage)
 #   scripts/loadtest/run_local.sh http                    débit HTTP : Daphne 1 processus (comme la production) puis gunicorn N processus
 #   scripts/loadtest/run_local.sh ws 2000                 connexions WebSocket tenues par un processus Daphne (+ mémoire)
+#   scripts/loadtest/run_local.sh flash 100,500,1000      Tratra Flash : demandes simultanées, acceptations concurrentes, expirations, files Celery
 #
 # Variables : OUT (dossier des résultats, défaut ./loadtest-results), WORKERS (gunicorn, défaut 4), CONCURRENCY (« 8 32 64 »),
 # SCENARIOS (« mix » par défaut ; ou un écran seul : catalog, nearby, notifications, unread, bookings, dashboard, flash_pros…),
@@ -107,6 +108,12 @@ case "${1:-}" in
       echo "$server mémoire : $(tree_rss_mb "$PID") Mo"
       kill "$PID"; wait "$PID" 2>/dev/null || true
     done
+    ;;
+  flash)
+    # Tratra Flash sous charge : N demandes au même instant, acceptations simultanées, expirations (tâche ciblée, worker Celery, passage global).
+    redis_up
+    $PY manage.py migrate --noinput >/dev/null
+    $PY manage.py loadtest_flash --sizes "${2:-100,500,1000}" --out "$OUT/flash-$(date +%Y%m%d-%H%M%S).json"
     ;;
   ws)
     redis_up

@@ -4,9 +4,11 @@ from celery import shared_task
 
 @shared_task(ignore_result=True)
 def wave_timeout(request_id, wave):
+    """Échéances de CETTE demande (réponses de la vague, contre-offre) : le coût ne dépend pas du nombre de demandes ouvertes.
+    Rejouable ; `tick` (toutes les 30 s) reste le passage général."""
     from flash.services import expire_due
 
-    return expire_due()
+    return expire_due(request_id=request_id)
 
 
 @shared_task(ignore_result=True)

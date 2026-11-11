@@ -150,7 +150,7 @@ def delete_account(user, *, actor=None) -> Dict:
     user.profile_picture = None
     user.save(update_fields=["profile_picture"])                          # supprime le fichier de la photo de profil
     User.objects.filter(pk=user.pk).update(
-        username=f"supprime-{user.pk}-{uuid.uuid4().hex[:8]}", first_name="", last_name="", email=None, phone=None, address=None, city=None,
+        username=f"supprime-{user.pk}-{uuid.uuid4().hex[:8]}", first_name="", last_name="", gender="", email=None, phone=None, address=None, city=None,
         postal_code=None, country=None, latitude=None, longitude=None, last_location=None, last_location_ts=None, is_active=False, is_verified=False,
         deleted_at=timezone.now(), password="!" + uuid.uuid4().hex)       # mot de passe inutilisable : aucune connexion possible
     from handy.eligibility import refresh_published

@@ -227,9 +227,10 @@ def test_an_expired_offer_cannot_be_accepted(make_pro, make_request):
 @pytest.mark.django_db(transaction=True)
 def test_concurrent_acceptances_assign_the_mission_exactly_once(make_pro, make_request):
     cfg(wave_size=6)
-    pros = [make_pro(f"rapide{i}", km=1 + i) for i in range(6)]
+    pros = [make_pro(f"rapide{i}", km=0.04 + i / 200) for i in range(6)]      # tous dans le premier rayon : tous alertés
     req = make_request()
     offers = {o.handyman_id: o.pk for o in offers_of(req)}
+    assert len(offers) == len(pros)
     barrier, results = threading.Barrier(len(pros)), []
 
     def run(pro):

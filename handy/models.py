@@ -54,6 +54,10 @@ class User(AbstractUser):
     last_location_ts = models.DateTimeField(null=True, blank=True)
 
     is_verified = models.BooleanField(default=False, db_index=True)  # téléphone prouvé par OTP (jamais avant)
+    # Facultatif, déclaré par la personne elle-même (jamais déduit du prénom) : choisit le pictogramme « travailleur » ou
+    # « travailleuse » sur la carte d'une recherche. Vide = pictogramme neutre.
+    GENDERS = (('F', 'Femme'), ('M', 'Homme'))
+    gender = models.CharField(max_length=1, choices=GENDERS, blank=True, default='')
     # Horodatage de l'acceptation des conditions d'utilisation et de la politique de confidentialité.
     terms_accepted_at = models.DateTimeField(null=True, blank=True)
     # Suppression de compte demandée par la personne : le compte est ANONYMISÉ (voir handy/account_deletion.py), jamais restauré.

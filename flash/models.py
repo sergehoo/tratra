@@ -200,6 +200,9 @@ class MissionRequest(models.Model):
     closed_at = models.DateTimeField(null=True, blank=True)
     close_reason = models.CharField(max_length=200, blank=True, default="")
     version = models.PositiveIntegerField(default=1)
+    # Numéro de synchronisation : croît d'une unité à chaque évènement visible du journal, sous le verrou de la ligne (`services.log`).
+    # L'application ignore tout état (API ou WebSocket) plus ancien que celui qu'elle affiche. Jamais écrit par `save()`.
+    seq = models.PositiveIntegerField(default=0, editable=False)
 
     class Meta:
         ordering = ["-created_at", "-id"]

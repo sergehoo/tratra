@@ -323,7 +323,7 @@ def test_client_cancel_stops_dispatch_offers_and_timers(make_pro, make_request, 
 
 # ═══ Temps réel, reprise, confidentialité ════════════════════════════════════════════════════════════════════════════
 
-def test_live_updates_carry_state_and_counters_but_never_a_pro_position(make_pro, make_request, client_user, monkeypatch,
+def test_live_updates_carry_state_and_counters_but_never_an_exact_pro_position(make_pro, make_request, client_user, monkeypatch,
                                                                        django_capture_on_commit_callbacks):
     sent = []
     monkeypatch.setattr("handy.inbox.push", lambda users, event: sent.append((sorted(set(users)), event)))
@@ -353,6 +353,50 @@ def test_live_updates_carry_state_and_counters_but_never_a_pro_position(make_pro
     for pro in (a, b):
         loc = pro.handyman_profile.location
         assert f"{loc.y:.5f}" not in blob and f"{loc.y:.4f}" not in blob
+
+
+def test_the_map_shows_contacted_pros_wave_by_wave_approximately_and_without_identity(make_pro, make_request, client_user, plomberie,
+                                                                                      django_capture_on_commit_callbacks):
+    from flash import realtime
+
+    cfg(wave_size=1)
+    a, b = make_pro("awa", km=0.05), make_pro("bintou", km=3)
+    type(a).objects.filter(pk=a.pk).update(gender="F")                 # déclaré par la professionnelle ; `b` n'a rien indiqué
+    req = make_request()
+    first = offers_of(req)[0]
+    pros = realtime.search_payload(req)["pros"]
+    assert [(p["id"], p["state"], p["gender"]) for p in pros] == [(first.pk, "contacted", "F")]     # seule la 1re vague est visible
+    assert set(pros[0]) == {"id", "lat", "lng", "gender", "state"}                                  # ni nom, ni photo, ni compte
+    loc = a.handyman_profile.location
+    assert abs(pros[0]["lat"] - loc.y) < 0.0012 and abs(pros[0]["lng"] - loc.x) < 0.0012             # à ≈ 100 m près…
+    assert (pros[0]["lat"], pros[0]["lng"]) != (loc.y, loc.x)                                       # … jamais la position exacte
+    assert realtime.search_payload(req)["pros"] == pros                                             # stable d'un message à l'autre
+
+    with django_capture_on_commit_callbacks(execute=True):
+        services.decline(first.pk, a)                                  # refus : palier suivant, le 2e professionnel apparaît
+    second = offers_of(req)[1]
+    rest = as_user(client_user).get(f"/handy/flash/requests/{req.pk}/").json()["search"]["pros"]
+    assert [(p["id"], p["state"], p["gender"]) for p in rest] == [(first.pk, "declined", "F"), (second.pk, "contacted", None)]
+
+    services.accept(second.pk, b)                                      # mission attribuée : seul le professionnel retenu reste
+    req.refresh_from_db()
+    assert [(p["id"], p["state"]) for p in realtime.live_payload(req)["search"]["pros"]] == [(second.pk, "selected")]
+
+    other = make_request(client=None)                                   # demande annulée : plus aucun repère
+    services.cancel_request(other.pk, client_user)
+    other.refresh_from_db()
+    assert realtime.search_payload(other)["pros"] == []
+    commune = services.create_request(client_user, category=plomberie, address="Rue 12", commune="Cocody", mode="firm", amount=15000)
+    assert realtime.search_payload(commune)["pros"] == []              # demande par commune (sans lieu précis) : pas de carte
+
+
+def test_gender_is_optional_and_declared_by_the_member(make_user):
+    user = make_user("genre", first_name="Awa", phone="+2250700000177")
+    api = as_user(user)
+    assert api.get(f"/handy/users/{user.pk}/").json()["gender"] == ""
+    assert api.patch(f"/handy/users/{user.pk}/", {"gender": "F"}, format="json").json()["gender"] == "F"
+    assert api.patch(f"/handy/users/{user.pk}/", {"gender": "X"}, format="json").status_code == 400
+    assert api.patch(f"/handy/users/{user.pk}/", {"gender": ""}, format="json").json()["gender"] == ""
 
 
 def test_existing_requests_without_position_keep_the_commune_search(make_pro, client_user, plomberie):
