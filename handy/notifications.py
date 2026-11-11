@@ -61,6 +61,9 @@ FLASH_CHANNEL, FLASH_SOUND, FLASH_IOS_CATEGORY = "tratra_new_missions", "tratra_
 # refus KYC, sécurité du compte — reste dans l'application, après déverrouillage) et il est marqué « privé » sur Android.
 # `PUSH_MESSAGE_PREVIEW=True` permet d'afficher l'aperçu des messages (choix de l'exploitant).
 SENSITIVE_PUSH_CATEGORIES = {"message", "payment", "account"}
+# Types au texte utile (le client doit lire la proposition pour réagir) mais chiffré ou nominatif : le push garde son texte et il est
+# marqué « privé » — Android le masque sur l'écran verrouillé sécurisé quand l'utilisateur a choisi de cacher le contenu sensible.
+PRIVATE_PUSH_TYPES = {"mission_quote", "mission_choice"}
 LOCK_SCREEN_TEXT = {
     "payment": ("Paiement", "Mise à jour d’un paiement : ouvrez Tratra pour le détail."),
     "account": ("Votre compte Tratra", "Mise à jour de votre compte : ouvrez Tratra pour le détail."),

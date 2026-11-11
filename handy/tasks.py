@@ -121,7 +121,8 @@ def send_notification_push(self, notification_id, collapse_key=None):
         n.user_id, title, body, payload,
         channel=notifications.CHANNEL_BY_CATEGORY.get(n.category), collapse_key=collapse_key,
         badge=notifications.unread_count(n.user_id), ttl_seconds=ttl,
-        private=n.category in notifications.SENSITIVE_PUSH_CATEGORIES or n.category == "flash", **extra)
+        private=(n.category in notifications.SENSITIVE_PUSH_CATEGORIES or n.category == "flash"
+                 or n.notification_type in notifications.PRIVATE_PUSH_TYPES), **extra)
     if result["skipped"] == "not_configured":
         status = "unconfigured"
     elif result["sent"]:

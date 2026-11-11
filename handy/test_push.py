@@ -273,6 +273,22 @@ def test_message_preview_can_be_enabled_by_the_operator_and_ordinary_pushes_stay
     assert "visibility" not in live["android"]["notification"]
 
 
+@pytest.mark.parametrize("ntype,message", [
+    ("mission_quote", "Awa K. propose 12 000 F CFA pour « Plomberie »."),
+    ("mission_choice", "Koffi B. s’est désisté. Voulez-vous relancer la recherche ?"),
+])
+def test_flash_proposals_keep_their_text_but_are_private_on_the_lock_screen(service_account, monkeypatch, django_capture_on_commit_callbacks,
+                                                                            ntype, message):
+    """Contre-offre, désistement, choix à faire : le texte reste lisible (il faut pouvoir réagir vite), mais Android le masque sur
+    l'écran verrouillé sécurisé quand l'utilisateur cache le contenu sensible."""
+    path, _ = service_account
+    u = user_with_devices()
+    msg = _push_for(u, ntype, message, "Tratra Flash", FakeHTTP(), path, monkeypatch, django_capture_on_commit_callbacks)
+    assert msg["notification"]["body"] == message
+    assert msg["android"]["notification"]["visibility"] == "PRIVATE"
+    assert msg["data"]["nid"] == str(Notification.objects.get(user=u, notification_type=ntype).pk)   # identifiant d'évènement (dédoublonnage)
+
+
 def test_android_shows_the_unread_count_as_a_badge(service_account, monkeypatch, django_capture_on_commit_callbacks):
     path, _ = service_account
     u = user_with_devices()

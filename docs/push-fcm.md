@@ -63,6 +63,10 @@ iOS sans notification → clé APNs absente de Firebase ou identifiant de bundle
 - **Contenu sensible** : messages, paiements, compte (KYC, sécurité) → push à texte NEUTRE (« Nouveau message — Awa K. vous a écrit »,
   « Mise à jour d'un paiement : ouvrez Tratra… ») et visibilité Android `PRIVATE` ; le détail reste dans l'application. Aperçu du texte des
   messages activable par l'exploitant : `PUSH_MESSAGE_PREVIEW=True`.
+- **Propositions Tratra Flash** (`mission_quote`, `mission_choice`, catégorie `flash`) : le push garde son texte — le professionnel doit
+  pouvoir décider vite — mais part en visibilité `PRIVATE` (`PRIVATE_PUSH_TYPES` dans `handy/notifications.py`) : sur un écran verrouillé
+  sécurisé réglé pour masquer le contenu sensible, seul le nom de l'application apparaît. Comportement de l'application (ruban, file,
+  dédoublonnage, démarrage à froid) et limites Android/iOS, dont l'arrêt de force : `docs/notifications.md` du dépôt Flutter.
 - **Pastilles** : nombre de notifications non lues envoyé à iOS (`aps.badge`) et à Android (`notification_count`, affiché par les lanceurs
   qui le gèrent, Samsung notamment ; ailleurs un point).
 - **Widget d'accueil Android** et **raccourcis d'application** (Android, iOS) : voir `lib/services/home_widget_sync.dart` ; mêmes liens
