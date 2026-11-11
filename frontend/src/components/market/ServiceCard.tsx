@@ -91,7 +91,7 @@ export default function ServiceCard({ service }: { service: Service }) {
                 <VerifiedBadge className="!px-1.5" label="Vérifié" />
               ) : artisan && !artisan.is_verified ? (
                 <Badge tone="gray" className="shrink-0 !px-1.5 !py-0.5 !text-[11px] !font-medium">
-                  Vérification en cours
+                  {artisan.verification?.label ?? "Non vérifié"}
                 </Badge>
               ) : null}
             </p>
@@ -114,10 +114,10 @@ export default function ServiceCard({ service }: { service: Service }) {
             href={href}
             block
             className="!shadow-hair"
-            aria-label={`${isQuote ? "Demander un devis" : "Réserver"} : ${service.title}`}
+            aria-label={`${artisan?.can_order === false ? "Voir le service" : isQuote ? "Demander un devis" : "Réserver"} : ${service.title}`}
             rightIcon={<ArrowRight aria-hidden className="h-4 w-4" />}
           >
-            {isQuote ? "Demander un devis" : "Réserver"}
+            {artisan?.can_order === false ? "Voir le service" : isQuote ? "Demander un devis" : "Réserver"}
           </ButtonLink>
         ) : (
           <p className="rounded-control bg-canvas px-4 py-2.5 text-center text-xs text-ash">

@@ -41,7 +41,7 @@ import {
 } from "@/components/ds";
 import { TARGET_HREF, useDashboard, type DashAction, type DashItem, type DashboardData } from "@/lib/dashboard";
 import { formatFCFA } from "@/lib/format";
-import { actionHref, isVerified, proHomeState } from "@/lib/proStatus";
+import { actionHref, isVerified, mention, proHomeState } from "@/lib/proStatus";
 import { iconForCategory } from "@/lib/trades";
 import type { Category, Paginated, Service } from "@/lib/types";
 import { useData } from "@/lib/useData";
@@ -176,9 +176,8 @@ function ProfileCard({ data }: { data: DashboardData }) {
     );
   }
   const st = proHomeState(p.eligibility, { publishable: p.publishable, servicesTotal: p.services.total });
-  // Vérifié : plus de carte de progression (badge « Vérifié » près du nom ; le détail reste dans Mon profil professionnel →
-  // Vérification et réputation).
-  if (st.kind === "verified") return null;
+  // Rien à faire : pas de carte (le niveau — « Vérifié » ou la mention — est près du nom ; le détail reste dans Mon profil professionnel).
+  if (st.kind === "none") return null;
   if (st.kind === "firstOffer") {
     return (
       <Card variant="soft" data-testid="pro-first-offer">
@@ -190,7 +189,19 @@ function ProfileCard({ data }: { data: DashboardData }) {
       </Card>
     );
   }
-  if (st.kind === "kycPending" || st.kind === "approvalPending" || st.kind === "blocked") {
+  if (st.kind === "activate" || st.kind === "badge" || (st.kind === "kycRejected" && st.published)) {
+    // Service déjà public : activer les commandes (pièce d'identité), puis le badge (vérification faciale, dans l'application : sans bouton ici).
+    return (
+      <Card variant="soft" data-testid={st.kind === "kycRejected" ? "pro-kyc-rejected" : `pro-${st.kind}`}>
+        <h2 className="font-display text-lg font-extrabold text-ink">{st.title}</h2>
+        <p className="mt-2 text-sm leading-relaxed text-inkSoft">{st.message}</p>
+        {st.action ? (
+          <ButtonLink href={actionHref(st.action.code)} className="mt-5" rightIcon={<ArrowRight aria-hidden className="h-4 w-4" />}>{st.action.label}</ButtonLink>
+        ) : null}
+      </Card>
+    );
+  }
+  if (st.kind === "kycPending" || st.kind === "facePending" || st.kind === "approvalPending" || st.kind === "blocked") {
     // Statut compact ; un bouton seulement s'il y a vraiment quelque chose à faire.
     return (
       <Card padding="md" className="flex items-start gap-3" data-testid={`pro-status-${st.kind}`}>
@@ -360,6 +371,7 @@ export default function DashboardHome() {
   }
 
   const { client, provider, upcoming, reviews, user } = data;
+  const proLevel = provider ? proHomeState(provider.eligibility, { publishable: provider.publishable, servicesTotal: provider.services.total }) : null;
   const inProgress = client.bookings.pending + client.bookings.confirmed + client.bookings.in_progress;
   const showClientKpis = client.bookings.total > 0 || !provider;
 
@@ -417,10 +429,15 @@ export default function DashboardHome() {
         <h1 id="titre-dashboard" className="mt-3 font-display text-[1.85rem] font-extrabold leading-[1.1] tracking-tight [text-wrap:balance] sm:text-4xl">
           Bonjour, <span className="text-accent">{greeting}</span>
         </h1>
-        {provider && isVerified(proHomeState(provider.eligibility, { publishable: provider.publishable, servicesTotal: provider.services.total })) ? (
+        {proLevel && isVerified(proLevel) ? (
           <span data-testid="hero-verified" title="Profil professionnel vérifié par Tratra"
             className="mt-2 inline-flex items-center gap-1 rounded-full bg-success/25 px-2.5 py-1 text-xs font-bold text-white">
             <BadgeCheck aria-hidden className="h-3.5 w-3.5" /> Vérifié
+          </span>
+        ) : proLevel && mention(proLevel) ? (
+          <span data-testid="hero-level" title="Niveau de vérification de votre profil professionnel"
+            className="mt-2 inline-flex items-center rounded-full bg-white/15 px-2.5 py-1 text-xs font-bold text-white">
+            {mention(proLevel)}
           </span>
         ) : null}
         <p className="mt-2 max-w-xl text-sm leading-relaxed text-white/80 sm:text-base">{summary}</p>

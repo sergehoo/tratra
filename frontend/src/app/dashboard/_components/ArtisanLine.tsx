@@ -40,6 +40,7 @@ export function ArtisanLine({
               Vérifié
             </Badge>
           ) : null}
+          {artisan && !artisan.is_verified && artisan.verification ? <Badge tone="gray" className="shrink-0">{artisan.verification.label}</Badge> : null}
         </p>
         {artisan?.badges?.length ? <TrustBadges badges={artisan.badges} className="my-1" /> : null}
         <p className="flex flex-wrap items-center gap-x-2.5 text-xs text-ash">

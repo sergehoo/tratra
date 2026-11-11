@@ -66,42 +66,51 @@ export interface OnbState {
   total: number;
   next_action: { code: string; label: string; step: string | null };
   published: boolean;
+  /** Commandes activées (pièce d'identité approuvée) et niveau exact — absents d'un serveur plus ancien. */
+  orders_enabled?: boolean;
+  verification?: { level: string; label: string; badge: boolean };
+  blocked?: { code: string; label: string; hint?: string | null } | null;
   /** Expérience déclarée (exacte) face au minimum des métiers exercés ; `ok: false` = publication bloquée par la règle. */
   experience?: { declared: string; years: number | null; minimum: number; trade: string; ok: boolean };
 }
 
-/** Les 9 étapes communes à l'application, au site et à Django (handy/onboarding.py JOURNEY) : même progression partout. */
+/** Les étapes communes à l'application, au site et à Django (handy/onboarding.py JOURNEY). La publication n'en demande que trois
+ * (métier, zone, service) ; la pièce d'identité active ensuite les commandes, la vérification faciale attribue le badge « Vérifié ». */
 export const JOURNEY: { key: string; label: string }[] = [
-  { key: "trade", label: "Votre métier" },
-  { key: "zone", label: "Votre quartier" },
-  { key: "questions", label: "Vos réponses" },
   { key: "account", label: "Votre compte" },
   { key: "phone", label: "Votre téléphone" },
-  { key: "offer", label: "Votre annonce" },
-  { key: "photo", label: "Votre photo" },
+  { key: "trade", label: "Votre métier" },
+  { key: "zone", label: "Votre zone" },
+  { key: "offer", label: "Votre service publié" },
   { key: "identity", label: "Votre identité" },
-  { key: "approval", label: "Validation par l’équipe Tratra" },
+  { key: "face", label: "Votre visage" },
 ];
 
-/** Étape commune d'un écran du parcours (même table que l'application : lib/onboarding/onboarding_api.dart `journeyOf`). */
+/** Ce que la publication demande (handy/onboarding.py PUBLISH_STEPS). */
+export const PUBLISH_STEPS = ["trade", "zone", "offer"];
+
+/** Étape commune d'un écran du parcours. */
 export function journeyOf(screen: string): string {
-  if (screen.startsWith("q:")) return "questions";
+  if (screen.startsWith("q:")) return "offer";
   const table: Record<string, string> = {
-    intro: "trade", trade: "trade", prestations: "trade", commune: "zone", quartier: "zone", preview: "questions",
-    names: "account", phone: "account", password: "account", verify: "phone", photo: "photo", identity: "identity",
+    intro: "trade", trade: "trade", prestations: "trade", commune: "zone", quartier: "zone", preview: "offer",
+    names: "account", phone: "account", password: "account", verify: "phone", identity: "identity", face: "face",
   };
-  return table[screen] ?? "approval";
+  return table[screen] ?? "offer";                 // photo, fin : le service publié
 }
 
-/** Libellé et avancement affichés : « Étape 3 sur 9 · Vos réponses (2/5) » et une barre continue. */
+/** Libellé et avancement affichés : « Étape 3 sur 3 · Votre service (2/5) » jusqu'à la publication ; ensuite le nom de l'écran, barre pleine. */
 export function progressOf(screens: string[], screen: string): { title: string; ratio: number } {
   const key = journeyOf(screen);
-  const i = Math.max(0, JOURNEY.findIndex((j) => j.key === key));
-  const group = screens.filter((s) => journeyOf(s) === key);
-  const within = group.length ? Math.max(1, group.indexOf(screen) + 1) / group.length : 1;
+  const label = JOURNEY.find((j) => j.key === key)?.label ?? "";
+  const i = PUBLISH_STEPS.indexOf(key);
+  const before = screens.slice(0, screens.indexOf("preview") + 1);
+  if (i < 0 || !before.includes(screen)) return { title: screen === "photo" ? "Votre photo" : label, ratio: 1 };
+  const group = before.filter((s) => journeyOf(s) === key);
+  const within = Math.max(1, group.indexOf(screen) + 1) / group.length;
   const questions = screens.filter((s) => s.startsWith("q:"));
   const count = screen.startsWith("q:") ? ` (${questions.indexOf(screen) + 1}/${questions.length})` : "";
-  return { title: `Étape ${i + 1} sur ${JOURNEY.length} · ${JOURNEY[i].label}${count}`, ratio: Math.min(1, (i + within) / JOURNEY.length) };
+  return { title: `Étape ${i + 1} sur ${PUBLISH_STEPS.length} · ${key === "offer" ? "Votre service" : label}${count}`, ratio: Math.min(1, (i + within) / PUBLISH_STEPS.length) };
 }
 
 /** Minimum d'expérience du métier et des prestations choisies (même règle que handy/eligibility.py) : années et nom concerné. */
@@ -179,6 +188,7 @@ const ALIASES: Record<string, (config: OnbConfig | null) => string> = {
   zone: () => "commune",
   questions: (c) => (c && c.questions.length ? `q:${c.questions[0].key}` : "preview"),
   phone: () => "verify",
+  face: () => "identity",          // vérification faciale : dans l'application ; le site montre l'état de la pièce
   offer: () => "preview",
   account: () => "preview",
 };
@@ -236,8 +246,8 @@ export function nextActionHref(action: OnbState["next_action"]): string {
   }
 }
 
-/** Fin du parcours : ce qui reste vraiment à faire d'après le serveur (jamais « c'est fini » si la pièce n'a pas été envoyée). */
-export function remainingAtEnd(state: OnbState | null): string[] {
-  const todo: Record<string, string> = { phone: "confirmer votre numéro", photo: "ajouter votre photo", identity: "faire vérifier votre pièce d’identité" };
-  return (state?.steps ?? []).filter((s) => s.state === "todo" && todo[s.key]).map((s) => todo[s.key]);
+/** Fin du parcours, d'après le serveur : ce qui manque pour publier (téléphone), puis pour recevoir des commandes (pièce d'identité). */
+export function remainingAtEnd(state: OnbState | null): { publish: string[]; orders: string[] } {
+  const todo = (key: string) => (state?.steps ?? []).some((s) => s.key === key && s.state === "todo");
+  return { publish: todo("phone") ? ["confirmer votre numéro"] : [], orders: todo("identity") ? ["faire vérifier votre pièce d’identité"] : [] };
 }

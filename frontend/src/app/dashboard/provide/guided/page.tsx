@@ -302,11 +302,15 @@ function GuidedFlow() {
       prestations: "Que proposez-vous exactement ? Choisissez une ou plusieurs réponses.",
       commune: "Dans quelle commune travaillez-vous ?",
       quartier: "Dans quel quartier ? Vous pouvez aussi passer cette question.",
-      preview: offer ? `Voici votre annonce. ${offer.title}. ${offer.description} Si elle vous convient, cliquez sur « Mon annonce me convient ».` : "Voici votre annonce.",
+      preview: offer ? `Voici votre annonce. ${offer.title}. ${offer.description} Si elle vous convient, cliquez sur « Publier mon service » : elle sera visible tout de suite.` : "Voici votre annonce.",
       verify: "Confirmez votre numéro de téléphone : nous vous envoyons un code par SMS.",
       photo: "Ajoutez une photo de votre visage, bien éclairée. Les clients aiment voir à qui ils confient leur maison.",
-      identity: "Dernière étape : photographiez votre carte d’identité ou votre passeport. L’équipe Tratra la vérifie.",
-      done: left.length ? `Votre annonce est enregistrée. Il vous reste à ${left.join(" et ")}.` : "Bravo ! Votre annonce sera visible dès que l’équipe Tratra aura vérifié votre dossier.",
+      identity: "Pour recevoir des commandes, photographiez votre carte d’identité ou votre passeport. L’équipe Tratra la vérifie. Vous pouvez aussi le faire plus tard : votre service reste visible.",
+      done: !server?.published
+        ? `Votre annonce est enregistrée.${left.publish.length ? ` Il vous reste à ${left.publish.join(" et ")} pour la publier.` : ""}`
+        : server.orders_enabled
+          ? "Bravo ! Votre service est en ligne et vos commandes sont activées."
+          : `Bravo ! Votre service est en ligne, avec la mention « Non vérifié ».${left.orders.length ? " Pour recevoir des commandes, faites vérifier votre pièce d’identité." : " L’équipe Tratra examine votre pièce d’identité."}`,
     }[s] ?? "";
   };
 
@@ -428,6 +432,7 @@ function GuidedFlow() {
   const minimum = minimumFor(config, draft.prestations);
   const declared = declaredExperience(config, draft.answers);
   const blocked = server?.experience?.ok === false;
+  const published = Boolean(server?.published);
   const progress = progressOf(steps, step);
 
   if (sessionChanged) {
@@ -594,7 +599,10 @@ function GuidedFlow() {
             l’expérience requise.
           </Alert>
         ) : null}
-        <Reassurance>Elle sera visible des clients après la vérification de votre identité par l’équipe Tratra.</Reassurance>
+        <Reassurance>
+          Elle est visible des clients dès sa publication, avec la mention « Non vérifié ». Vos commandes sont activées après la vérification de votre pièce
+          d’identité.
+        </Reassurance>
         <Button variant="ghost" className="mt-2" onClick={() => go(resumeStep(config, "questions", { verify }))}>
           Changer mes réponses
         </Button>
@@ -630,8 +638,8 @@ function GuidedFlow() {
   } else if (step === "identity") {
     content = (
       <>
-        <Title help="Photographiez votre carte d’identité (recto et verso) ou votre passeport. L’équipe Tratra la vérifie : votre annonce devient visible après sa validation.">
-          Vérifier votre identité
+        <Title help="Photographiez votre carte d’identité (recto et verso) ou votre passeport. L’équipe Tratra la vérifie : vos commandes sont activées après sa validation. Votre service reste visible entre-temps.">
+          Activer vos commandes
         </Title>
         <GuidedIdentity onFinished={() => go("done")} onLater={() => go("done")} />
         <Reassurance>Vos papiers restent privés : seuls vous et l’équipe Tratra les voyez.</Reassurance>
@@ -642,16 +650,22 @@ function GuidedFlow() {
       <>
         <Title
           help={
-            left.length
-              ? `Il vous reste à ${left.join(" et ")}. Votre annonce ne sera visible qu’après la vérification de votre identité. Vous pourrez continuer depuis votre espace avec le bouton « Continuer ».`
-              : blocked
-                ? "Elle ne pourra pas être publiée tant que votre expérience n’atteint pas le minimum demandé pour ce métier. Votre réponse est gardée telle quelle ; le détail est dans votre espace."
-                : "Votre annonce est prête. Elle sera visible dès que l’équipe Tratra aura vérifié votre dossier. Vous recevrez une notification."
+            blocked
+              ? "Elle ne pourra pas être publiée tant que votre expérience n’atteint pas le minimum demandé pour ce métier. Votre réponse est gardée telle quelle ; le détail est dans votre espace."
+              : !published
+                ? left.publish.length
+                  ? `Il vous reste à ${left.publish.join(" et ")} pour la publier. Vous pourrez continuer depuis votre espace avec le bouton « Continuer ».`
+                  : "Elle sera visible dès que les derniers contrôles seront passés ; le détail est dans votre espace."
+                : server?.orders_enabled
+                  ? "Il est visible des clients et vos commandes sont activées."
+                  : left.orders.length
+                    ? "Il est visible des clients avec la mention « Non vérifié ». Pour recevoir des réservations et des missions, faites vérifier votre pièce d’identité depuis votre espace : « Activer mes commandes »."
+                    : "Il est visible des clients avec la mention « Non vérifié ». L’équipe Tratra examine votre pièce d’identité : vos commandes seront activées après sa validation."
           }
         >
-          {left.length || blocked ? "Votre annonce est enregistrée" : "Bravo, c’est presque fini !"}
+          {published && !blocked ? "Bravo, votre service est en ligne !" : "Votre annonce est enregistrée"}
         </Title>
-        <Illustration icon={left.length || blocked ? BadgeCheck : PartyPopper} />
+        <Illustration icon={published && !blocked ? PartyPopper : BadgeCheck} />
       </>
     );
   }
@@ -661,7 +675,7 @@ function GuidedFlow() {
       case "intro":
         return { label: "Commencer", onClick: () => go(nextStep(config, step, { verify })) };
       case "preview":
-        return { label: "Mon annonce me convient", onClick: () => void next() };
+        return { label: "Publier mon service", onClick: () => void next() };
       case "verify":
         return { label: "Recevoir le code", href: `/verify-phone?auto=1&next=${encodeURIComponent(`${GUIDED_PATH}?step=photo`)}` };
       case "photo":

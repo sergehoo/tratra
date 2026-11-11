@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import {
-  GUIDED_PATH, JOURNEY, PENDING_MAX_AGE_MS, answered, declaredExperience, draftFromState, journeyOf, keepPending, minimumFor, nextActionHref,
+  GUIDED_PATH, JOURNEY, PENDING_MAX_AGE_MS, PUBLISH_STEPS, answered, declaredExperience, draftFromState, journeyOf, keepPending, minimumFor, nextActionHref,
   nextStep, previousStep, progressOf, remainingAtEnd, resumeStep, stepsFor, takePending, toggleAnswer,
   type OnbConfig, type OnbQuestion, type OnbState, type Vault,
 } from "./onboarding.ts";
@@ -53,49 +53,59 @@ test("réponses : obligatoires, choix unique ou multiple", () => {
 
 const state = (over: Partial<OnbState> = {}): OnbState => ({
   path: "guided", trade: { id: 12, name: "Nounou" }, prestations: [121], commune: "Cocody", quartier: "", answers: { experience: "1" }, step: "preview",
-  offer: null, service_id: null, done: 5, total: 9, published: false, next_action: { code: "apply", label: "Créer mon annonce", step: "offer" },
+  offer: null, service_id: null, done: 5, total: 9, published: false, next_action: { code: "apply", label: "Publier mon service", step: "offer" },
   steps: [
     { key: "phone", label: "Votre téléphone", state: "done" },
-    { key: "photo", label: "Votre photo", state: "todo" },
     { key: "identity", label: "Votre identité", state: "todo" },
   ],
   ...over,
 });
 
 test("« Continuer » du tableau de bord ouvre la page de la prochaine action", () => {
-  assert.equal(nextActionHref({ code: "resume", label: "", step: "questions" }), `${GUIDED_PATH}?step=questions`);
+  assert.equal(nextActionHref({ code: "resume", label: "", step: "trade" }), `${GUIDED_PATH}?step=trade`);
+  assert.equal(nextActionHref({ code: "resume", label: "", step: "zone" }), `${GUIDED_PATH}?step=zone`);
   assert.equal(nextActionHref({ code: "apply", label: "", step: "offer" }), `${GUIDED_PATH}?step=offer`);
-  assert.equal(nextActionHref({ code: "photo", label: "", step: "photo" }), `${GUIDED_PATH}?step=photo`);
   assert.equal(nextActionHref({ code: "verify_identity", label: "", step: "identity" }), `${GUIDED_PATH}?step=identity`);
+  assert.equal(nextActionHref({ code: "verify_identity", label: "", step: "face" }), `${GUIDED_PATH}?step=identity`, "vérification faciale : dans l'application");
+  assert.equal(resumeStep(config, "face", { verify: false }), "identity");
   assert.equal(nextActionHref({ code: "wait", label: "", step: "identity" }), "/dashboard/provider");
-  assert.equal(nextActionHref({ code: "blocked", label: "", step: "approval" }), "/dashboard/provider");
+  assert.equal(nextActionHref({ code: "blocked", label: "", step: "offer" }), "/dashboard/provider");
   assert.ok(nextActionHref({ code: "verify_phone", label: "", step: "phone" }).startsWith("/verify-phone?next=%2Fdashboard%2Fprovide%2Fguided"));
 });
 
-test("fin honnête : ce qui reste vient du serveur ; brouillon repris du serveur", () => {
-  assert.deepEqual(remainingAtEnd(state()), ["ajouter votre photo", "faire vérifier votre pièce d’identité"]);
-  assert.deepEqual(remainingAtEnd(state({ steps: [{ key: "identity", label: "", state: "waiting" }] })), []);
+test("fin honnête : ce qui manque pour publier (téléphone) est distinct de ce qui active les commandes (pièce) ; brouillon repris du serveur", () => {
+  assert.deepEqual(remainingAtEnd(state()), { publish: [], orders: ["faire vérifier votre pièce d’identité"] });
+  assert.deepEqual(remainingAtEnd(state({ steps: [{ key: "phone", label: "", state: "todo" }, { key: "identity", label: "", state: "todo" }] })),
+    { publish: ["confirmer votre numéro"], orders: ["faire vérifier votre pièce d’identité"] });
+  assert.deepEqual(remainingAtEnd(state({ steps: [{ key: "identity", label: "", state: "waiting" }] })), { publish: [], orders: [] });
+  assert.deepEqual(remainingAtEnd(null), { publish: [], orders: [] });
   assert.deepEqual(draftFromState(state()), { trade: 12, prestations: [121], commune: "Cocody", quartier: "", answers: { experience: "1" }, step: "preview" });
   assert.equal(draftFromState(state({ trade: null })).trade, null);
 });
 
-test("mêmes 9 étapes que Django (handy/onboarding.py) et même table écran → étape que l'application", () => {
+test("mêmes étapes que Django (handy/onboarding.py) : publication en trois étapes, puis identité et visage", () => {
   const python = readFileSync(new URL("../../../handy/onboarding.py", import.meta.url), "utf8");
   const block = python.slice(python.indexOf("JOURNEY = ["), python.indexOf("]", python.indexOf("JOURNEY = [")));
   const fromDjango = [...block.matchAll(/\("(\w+)", "([^"]+)"\)/g)].map((m) => ({ key: m[1], label: m[2] }));
   assert.deepEqual(JOURNEY, fromDjango);
+  const publish = python.match(/PUBLISH_STEPS = \(([^)]*)\)/)![1].match(/\w+/g);
+  assert.deepEqual(PUBLISH_STEPS, publish);
   const table: Record<string, string> = {
-    intro: "trade", trade: "trade", prestations: "trade", commune: "zone", quartier: "zone", "q:experience": "questions", preview: "questions",
-    names: "account", phone: "account", password: "account", verify: "phone", photo: "photo", identity: "identity", done: "approval",
+    intro: "trade", trade: "trade", prestations: "trade", commune: "zone", quartier: "zone", "q:experience": "offer", preview: "offer",
+    names: "account", phone: "account", password: "account", verify: "phone", photo: "offer", identity: "identity", face: "face", done: "offer",
   };
   for (const [screen, step] of Object.entries(table)) assert.equal(journeyOf(screen), step, screen);
 });
 
-test("progression affichée : « Étape x sur 9 » et l'avancement des questions", () => {
+test("progression affichée : « Étape x sur 3 » jusqu'à la publication, puis le nom de l'écran", () => {
   const screens = stepsFor(config, { verify: false });
-  assert.equal(progressOf(screens, "intro").title, "Étape 1 sur 9 · Votre métier");
-  assert.equal(progressOf(screens, "q:days").title, "Étape 3 sur 9 · Vos réponses (2/2)");
-  assert.equal(progressOf(screens, "identity").title, "Étape 8 sur 9 · Votre identité");
+  assert.equal(progressOf(screens, "intro").title, "Étape 1 sur 3 · Votre métier");
+  assert.equal(progressOf(screens, "commune").title, "Étape 2 sur 3 · Votre zone");
+  assert.equal(progressOf(screens, "q:days").title, "Étape 3 sur 3 · Votre service (2/2)");
+  assert.equal(progressOf(screens, "preview").ratio, 1, "publication : barre pleine");
+  assert.deepEqual(progressOf(screens, "identity"), { title: "Votre identité", ratio: 1 });
+  assert.equal(progressOf(screens, "photo").title, "Votre photo");
+  assert.equal(progressOf(screens, "done").title, "Votre service publié");
   assert.ok(progressOf(screens, "trade").ratio < progressOf(screens, "commune").ratio);
   assert.equal(progressOf(screens, "done").ratio, 1);
 });

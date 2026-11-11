@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { BadgeCheck, Camera, FileCheck2, Hammer, NotebookPen, PlayCircle, ShieldCheck, UserRoundCheck, Volume2 } from "lucide-react";
+import { BadgeCheck, FileCheck2, Hammer, NotebookPen, PlayCircle, ShieldCheck, UserRoundCheck, Volume2 } from "lucide-react";
 import { apiErrorMessage, post } from "@/lib/api";
 import { useDashboard } from "@/lib/dashboard";
 import { GUIDED_PATH, type OnbState } from "@/lib/onboarding";
@@ -10,10 +10,9 @@ import { Alert, Badge, Button, ButtonLink, Card, CardHeader, PageHeader, Skeleto
 
 const STEPS = [
   { icon: UserRoundCheck, title: "Créez votre profil professionnel", text: "Un clic, avec votre compte actuel : aucune nouvelle inscription." },
-  { icon: Camera, title: "Complétez-le", text: "Présentation, spécialités, expérience, zone d’intervention et photo." },
-  { icon: FileCheck2, title: "Faites vérifier votre identité", text: "Déposez votre pièce d’identité : l’équipe Tratra la contrôle." },
-  { icon: ShieldCheck, title: "Validation par l’équipe Tratra", text: "Dernière étape avant la publication." },
-  { icon: Hammer, title: "Publiez vos services et recevez des missions", text: "Disponible uniquement une fois votre dossier validé." },
+  { icon: Hammer, title: "Publiez votre service", text: "Métier, zone, annonce : il est visible tout de suite, avec la mention « Non vérifié »." },
+  { icon: FileCheck2, title: "Activez vos commandes", text: "Faites vérifier votre pièce d’identité : réservations et missions s’ouvrent après sa validation." },
+  { icon: ShieldCheck, title: "Obtenez le badge « Vérifié »", text: "Une vérification faciale, dans l’application Tratra, confirme que la pièce est bien la vôtre." },
 ];
 
 export default function ProvidePage() {

@@ -63,6 +63,8 @@ export interface ProviderBlock {
 export interface EligibilityAction {
   code: "edit_profile" | "verify_identity" | "add_service" | "manage_services" | "contact_support" | string;
   label: string;
+  /** Étape visée de la vérification (« face »). */
+  step?: string | null;
 }
 
 export interface EligibilityBlocker {
@@ -72,12 +74,16 @@ export interface EligibilityBlocker {
   action: EligibilityAction | null;
 }
 
-/** `eligibility_summary` : profil complet, identité, autorisation de publication, offres — quatre notions distinctes. */
+/** `eligibility_summary` : trois niveaux distincts — publication (sans vérification d'identité), commandes (pièce approuvée),
+ * badge « Vérifié » (vérification faciale) — puis profil et offres. `orders`/`verification`/`stages` : absents d'un serveur plus ancien. */
 export interface Eligibility {
   profile: { complete: boolean; done: number; total: number; items: ChecklistItem[] };
   kyc: { status: "draft" | "pending" | "rejected" | "approved"; label: string; reason: string | null; approved: boolean };
   approval: { approved: boolean; label: string };
   publication: { authorized: boolean; label: string; blockers: EligibilityBlocker[] };
+  orders?: { authorized: boolean; label: string; blockers: EligibilityBlocker[]; face_required: boolean };
+  verification?: { level: "NON_VERIFIE" | "IDENTITE_VERIFIEE" | "VERIFIE"; label: string; badge: boolean; face: { enabled: boolean; required: boolean; satisfied: boolean; state: string } | null };
+  stages?: { key: string; label: string; state: string; status: string; benefit: string }[];
   offers: { total: number; active: number; published: number; inactive: number; label: string; action: EligibilityAction | null };
   next_action: EligibilityAction | null;
 }

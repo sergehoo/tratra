@@ -47,6 +47,7 @@ export default function ArtisanCard({
           </h3>
           <div className="mt-1 flex flex-wrap items-center gap-2">
             {artisan.badges?.length ? <TrustBadges badges={artisan.badges} /> : artisan.is_verified ? <VerifiedBadge /> : null}
+            {!artisan.is_verified && artisan.verification ? <Badge tone="gray">{artisan.verification.label}</Badge> : null}
             {artisan.online ? (
               <Badge tone="success" pulse>
                 En ligne

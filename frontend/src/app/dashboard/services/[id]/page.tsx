@@ -328,6 +328,8 @@ export default function ServiceDetailPage() {
   }
 
   const isOwnService = Boolean(user && svc.handyman && svc.handyman === user.id);
+  // Service public « Non vérifié » : visible, mais sans commande tant que la pièce d'identité n'est pas approuvée (le serveur refuse aussi).
+  const noOrders = svc.artisan?.can_order === false;
   const duration = formatDuration(svc.duration);
   const price = priceLabel(svc);
   const artisanName = artisanDisplayName(svc);
@@ -418,6 +420,13 @@ export default function ServiceDetailPage() {
               description="Indiquez quand et où l’artisan doit intervenir."
               className="!mb-6"
             />
+            {noOrders ? (
+              <div data-testid="service-no-order" className="mb-6">
+                <Alert tone="info" title="Réservation pas encore ouverte">
+                  Ce professionnel n’a pas encore activé ses commandes : son identité n’est pas vérifiée. La réservation sera possible après cette vérification.
+                </Alert>
+              </div>
+            ) : null}
 
             <div className="space-y-7">
               <FormSection step={1} title="Quand ?">
@@ -649,7 +658,7 @@ export default function ServiceDetailPage() {
               <Button
                 type="submit"
                 loading={busy}
-                disabled={Boolean(paymentNotice)}
+                disabled={Boolean(paymentNotice) || noOrders}
                 className="shrink-0 lg:w-full lg:min-h-[52px] lg:text-base"
               >
                 {submitLabel}

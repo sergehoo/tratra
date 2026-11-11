@@ -354,7 +354,7 @@ export default function ProfilePage() {
                   <p className="mt-3 text-sm text-ash">
                     {provider.kyc.status === "approved"
                       ? "Votre pièce d’identité est vérifiée."
-                      : "Votre badge « Vérifié » n’apparaît qu’après validation effective par l’équipe Tratra."}
+                      : "Vos commandes sont activées dès que votre pièce d’identité est validée. Le badge « Vérifié » demande en plus la vérification faciale, dans l’application Tratra."}
                   </p>
                   <ButtonLink href="/dashboard/profile/kyc" className="mt-4" variant={provider.kyc.status === "approved" ? "outline" : "primary"} block>
                     {provider.kyc.status === "approved" ? "Voir mes documents" : "Gérer mes documents"}

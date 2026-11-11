@@ -87,7 +87,12 @@ export interface PublicArtisanMini {
   rating: number;
   completed_jobs: number;
   experience_years: number;
+  /** Vrai uniquement après la vérification faciale (badge « Vérifié »). */
   is_verified: boolean;
+  /** Niveau exact : NON_VERIFIE | IDENTITE_VERIFIEE | VERIFIE (absent d'un serveur plus ancien). */
+  verification?: { level: string; label: string; badge: boolean };
+  /** Faux tant que les commandes ne sont pas activées (pièce d'identité non approuvée) : ni réservation ni contact. */
+  can_order?: boolean;
   online: boolean;
   photo?: string | null;
   /** Tratra Trust : score expliqué (null tant que l'activité mesurée est insuffisante) et badges actuels. */
