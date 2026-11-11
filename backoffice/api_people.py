@@ -30,7 +30,7 @@ def _reason(request, *, required: bool = True):
 
 
 def _validation_response(exc: ValidationError):
-    status_code = status.HTTP_409_CONFLICT if exc.code in ("kyc_incomplete", "already", "not_approved", "not_pending") else status.HTTP_400_BAD_REQUEST
+    status_code = status.HTTP_409_CONFLICT if exc.code in ("kyc_incomplete", "already", "not_approved", "not_pending", "not_suspended") else status.HTTP_400_BAD_REQUEST
     return bad_request(exc.code or "invalid", exc.messages[0], status_code)
 
 
@@ -60,6 +60,9 @@ def _user_row(u: User, request) -> dict:
         "id": u.pk, "name": public_name(u), "phone": phone_for(request, u.phone), "email": email_for(request, u.email), "city": u.city or None,
         "is_active": u.is_active, "is_verified": u.is_verified, "date_joined": u.date_joined, "last_login": u.last_login,
         "is_artisan": profile is not None, "artisan_approved": bool(profile and profile.is_approved),
+        # Trois niveaux distincts : publié (visible), commandes activées (identité vérifiée), niveau de vérification affiché.
+        "artisan_published": bool(profile and profile.published), "artisan_orders": bool(profile and profile.orders_enabled),
+        "artisan_verification": profile.verification if profile else None, "artisan_suspended": bool(profile and profile.suspended),
         "profile_id": profile.pk if profile is not None else None, "bookings": getattr(u, "n_bookings", 0),
         # Compte unique : un même compte demande ET propose des services ; ces indicateurs sont des faits, pas une classe de compte.
         "offers_services": getattr(u, "n_services", 0) > 0, "services": getattr(u, "n_services", 0),
@@ -167,6 +170,8 @@ class UserDetail(BOView):
             "kinds": _kinds(u), "terms_accepted_at": u.terms_accepted_at,
             "profile": None if profile is None else {
                 "id": profile.pk, "commune": profile.commune, "approved": profile.is_approved, "online": profile.online,
+                "published": profile.published, "orders_enabled": profile.orders_enabled, "verification": profile.verification,
+                "verification_label": profile.get_verification_display(), "suspended": profile.suspended,
                 "trust_score": profile.trust_score, "trust_badges": profile.trust_badges, "completed_jobs": profile.completed_jobs,
                 "rating": profile.rating},
             "bookings": {"as_client": by_status, "as_artisan": missions, "active": services.active_booking_count(u)},
@@ -239,7 +244,9 @@ def kyc_profiles():
 
 def _kyc_row(p) -> dict:
     return {"profile_id": p.pk, "user_id": p.user_id, "name": public_name(p.user), "commune": p.commune, "state": p.kyc_state,
-            "state_label": KYC_STATES[p.kyc_state], "is_approved": p.is_approved, "documents": {"pending": p.n_pending, "approved": p.n_approved, "rejected": p.n_rejected},
+            "state_label": KYC_STATES[p.kyc_state], "is_approved": p.is_approved, "published": p.published,
+            "orders_enabled": p.orders_enabled, "verification": p.verification, "verification_label": p.get_verification_display(),
+            "suspended": p.suspended, "documents": {"pending": p.n_pending, "approved": p.n_approved, "rejected": p.n_rejected},
             "oldest_pending_at": p.oldest_pending, "account_active": p.user.is_active,
             "biometric_status": getattr(getattr(p, "biometric", None), "status", None) or "not_started"}
 
@@ -279,6 +286,7 @@ class KycDetail(BOView):
         row.update({
             "documents": [_doc_row(d) for d in p.documents.select_related("reviewed_by").order_by("-uploaded_at")],
             "checklist": eligibility.profile_checklist(p), "publishable": eligibility.is_publishable(p),
+            "orderable": eligibility.is_orderable(p), "eligibility": eligibility.eligibility_summary(p),
             "documents_summary": row["documents"], "history": _history("handymanprofile", p.pk),
             "identity": _identity(p),
         })
@@ -353,7 +361,7 @@ class KycProfileApprove(BOView):
         except ValidationError as exc:
             return _validation_response(exc)
         audit_op(request, "kyc.profile_approved", p)
-        return Response({"profile_id": p.pk, "is_approved": True})
+        return Response({"profile_id": p.pk, "is_approved": True, "orders_enabled": eligibility.is_orderable(p)})
 
 
 class KycProfileSuspend(BOView):
@@ -369,7 +377,24 @@ class KycProfileSuspend(BOView):
         except ValidationError as exc:
             return _validation_response(exc)
         audit_op(request, "kyc.profile_suspended", p, reason=reason)
-        return Response({"profile_id": p.pk, "is_approved": False})
+        return Response({"profile_id": p.pk, "is_approved": False, "suspended": True})
+
+
+class KycProfileRestore(BOView):
+    """Lève une suspension (motif obligatoire, journalisé) : publication rendue, commandes selon les pièces approuvées."""
+    bo_permission = "kyc.review"
+
+    def post(self, request, pk):
+        p = HandymanProfile.objects.select_related("user").filter(pk=pk).first()
+        if p is None:
+            return bad_request("not_found", "Dossier introuvable.", 404)
+        try:
+            reason = _reason(request)
+            result = services.restore_profile(p, by=request.user, reason=reason)
+        except ValidationError as exc:
+            return _validation_response(exc)
+        audit_op(request, "kyc.profile_restored", p, reason=reason)
+        return Response({"profile_id": p.pk, "suspended": False, "is_approved": p.is_approved, **result})
 
 
 # ═══ Tratra Trust ═══════════════════════════════════════════════════════════════════════════════════════════════════
@@ -464,7 +489,7 @@ class TratraIdList(BOView):
         if q:
             qs = qs.filter(Q(code__icontains=q) | Q(profile__user__first_name__icontains=q) | Q(profile__user__last_name__icontains=q))
         if p.get("valid") in ("true", "false"):
-            valid_ids = eligibility.publishable().values("pk")
+            valid_ids = eligibility.orderable().values("pk")
             qs = qs.filter(profile_id__in=valid_ids) if p["valid"] == "true" else qs.exclude(profile_id__in=valid_ids)
         return paginate(request, qs.order_by("-created_at", "-id"), _id_row)
 
@@ -477,7 +502,7 @@ class TratraIdStats(BOView):
         passes = BookingPass.objects
         return Response({
             "ids_issued": ProfessionalId.objects.count(),
-            "ids_valid": ProfessionalId.objects.filter(profile_id__in=eligibility.publishable().values("pk")).count(),
+            "ids_valid": ProfessionalId.objects.filter(profile_id__in=eligibility.orderable().values("pk")).count(),
             "mission_qr_issued": passes.count(), "mission_qr_used": passes.filter(used_at__isnull=False).count(),
             "mission_qr_revoked": passes.filter(revoked_at__isnull=False).count(),
             "checks_total": IdentityCheck.objects.count(),

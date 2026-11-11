@@ -101,8 +101,8 @@ class HandymanDocumentInline(admin.TabularInline):
 
 
 class HandymanProfileAdmin(admin.ModelAdmin):
-    list_display = ('user', 'rating', 'is_approved', 'profile_completion', 'is_fully_completed')
-    list_filter = ('is_approved', 'skills', 'experience_years')
+    list_display = ('user', 'rating', 'published', 'orders_enabled', 'verification', 'suspended', 'profile_completion')
+    list_filter = ('published', 'orders_enabled', 'verification', 'suspended', 'is_approved', 'skills', 'experience_years')
     search_fields = ('user__username', 'user__email', 'user__phone', 'license_number', 'cni_number')
     readonly_fields = (
         'profile_completion', 'rating', 'completed_jobs', 'profile_picture_preview', 'is_fully_completed')
@@ -136,8 +136,10 @@ class HandymanProfileAdmin(admin.ModelAdmin):
                 'is_fully_completed'
             )
         }),
-        ('Validation', {
-            'fields': ('is_approved', 'availability')
+        ('Commandes et modération', {
+            'fields': ('is_approved', 'suspended', 'availability'),
+            'description': "« Approuvé » = commandes activées (automatique à l'approbation de la pièce d'identité ; la pièce reste exigée). "
+                           "« Suspendu » retire immédiatement la publication et les commandes.",
         }),
     )
 
@@ -162,13 +164,23 @@ class HandymanProfileAdmin(admin.ModelAdmin):
     is_fully_completed.boolean = True  # Affiche ✅ ou ❌
     is_fully_completed.short_description = "Profil complété"
 
-    @admin.action(description="Approuver les profils sélectionnés")
+    @admin.action(description="Activer les commandes des profils sélectionnés (pièce d'identité approuvée)")
     def approve_profiles(self, request, queryset):
-        updated = queryset.update(is_approved=True)
-        from handy.eligibility import refresh_published
+        """Recours manuel : n'active les commandes que des profils dont la pièce d'identité est approuvée — jamais de validation
+        sans contrôle documentaire — et n'attribue pas le badge « Vérifié ». Chaque activation est journalisée."""
+        from trust.models import audit
 
-        refresh_published(queryset)   # écriture en masse : aucun signal, la copie de l'éligibilité est recalculée ici
-        self.message_user(request, f"{updated} profils ont été approuvés avec succès.")
+        done = skipped = 0
+        for profile in queryset.filter(is_approved=False, suspended=False):
+            if not profile.has_required_kyc():
+                skipped += 1
+                continue
+            profile.is_approved = True
+            profile.save(update_fields=["is_approved"])
+            audit("kyc.orders_activated", actor=request.user, target=profile, source="admin")
+            done += 1
+        self.message_user(request, f"{done} profil(s) : commandes activées." + (
+            f" {skipped} ignoré(s) : pièce d'identité non approuvée." if skipped else ""))
 
 
 class HandymanDocumentAdmin(admin.ModelAdmin):
@@ -356,9 +368,10 @@ class ServiceCategoryAdmin(admin.ModelAdmin):
                                       "Ils servent à la recherche et à « J'ai une panne » sur le site et dans l'application."}),
         ('Affichage', {'fields': ('is_active', 'is_featured', 'position'),
                        'description': "Actif = visible sur le site et dans l'application (même sans offre). Mise en avant = page d'accueil. Ordre : le plus petit d'abord."}),
-        ('Publication', {'fields': ('min_experience_years',),
+        ('Publication et commandes', {'fields': ('min_experience_years', 'face_required'),
                          'description': "Expérience minimale exigée pour publier une offre de ce métier (0 = débutants acceptés). "
-                                        "Un artisan qui déclare moins n'est pas publié ; sa déclaration n'est jamais modifiée."}),
+                                        "Un artisan qui déclare moins n'est pas publié ; sa déclaration n'est jamais modifiée. "
+                                        "Métier sensible : la vérification faciale est exigée avant toute commande."}),
         ('Icône', {'fields': ('icon', 'display_icon'), 'description': "Nom Font Awesome, par exemple « fa-solid fa-utensils ». Le même nom donne la même icône sur le site et dans l'application."}),
     )
 

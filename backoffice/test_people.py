@@ -173,7 +173,9 @@ def test_kyc_detail_never_exposes_the_storage_url_and_files_are_audited_and_not_
     body = detail.json()
     assert body["documents"][0]["file_path"] == f"/handy/backoffice/kyc/documents/{doc.pk}/file/"
     assert "kyc/" not in detail.content.decode().replace("/handy/backoffice/kyc/", "") and "cni.pdf" not in detail.content.decode()
-    assert {c["key"] for c in body["checklist"]} >= {"kyc", "approval"} and body["publishable"] is False
+    assert {c["key"] for c in body["checklist"]} >= {"kyc"}
+    # Pièce en attente : aucune commande possible et jamais présenté comme vérifié, quel que soit l'état de publication.
+    assert body["orderable"] is False and body["orders_enabled"] is False and body["verification"] == "NON_VERIFIE"
     f = ops.get(body["documents"][0]["file_path"])
     assert f.status_code == 200 and b"".join(f.streaming_content).startswith(b"%PDF")
     assert f["Cache-Control"] == "private, no-store, max-age=0" and "cni" not in f["Content-Disposition"]
@@ -227,6 +229,9 @@ def test_profile_approval_never_bypasses_the_kyc_and_suspension_is_immediate():
 def test_trust_detail_is_read_only_and_reevaluation_goes_through_the_rule():
     a = artisan("t_art")
     profile = a.handyman_profile
+    from handy.testing import make_face_verified
+
+    make_face_verified(profile)                                                                  # badge « Vérifié » : pièce approuvée ET visage validé
     ops = api(staff("t_ops", "ops"))
     before = BadgeAward.objects.count()
     detail = ops.get(f"{BO}/trust/{profile.pk}/")

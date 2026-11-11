@@ -54,25 +54,46 @@ def reactivate_user(user: User) -> None:
 
 @transaction.atomic
 def approve_profile(profile: HandymanProfile, *, by) -> None:
-    """Approbation humaine du dossier artisan. Refusée tant que les pièces obligatoires ne sont pas approuvées :
-    le Back-Office ne contourne jamais le workflow KYC."""
+    """Activation MANUELLE des commandes (recours de l'équipe) : l'activation est automatique à l'approbation de la pièce d'identité,
+    sauf quand un dossier de risque la retient. Refusée tant que les pièces obligatoires ne sont pas approuvées : le Back-Office ne
+    contourne jamais le workflow KYC. Lève aussi une suspension. N'attribue jamais le badge « Vérifié » (vérification faciale)."""
+    from handy import eligibility
+
     if not profile.has_required_kyc():
         raise ValidationError("Les pièces obligatoires ne sont pas toutes approuvées.", code="kyc_incomplete")
-    if profile.is_approved:
-        raise ValidationError("Ce dossier est déjà approuvé.", code="already")
-    profile.is_approved = True
-    profile.save(update_fields=["is_approved"])
-    notify(profile.user_id, "kyc_approved", "Votre profil professionnel a été approuvé : vous pouvez recevoir des missions.",
-           title="Profil approuvé", data={"kind": "kyc"}, dedupe_key=f"profile:{profile.pk}:approved:{int(timezone.now().timestamp())}")
+    if profile.is_approved and not profile.suspended:
+        raise ValidationError("Les commandes de ce dossier sont déjà activées.", code="already")
+    profile.is_approved, profile.suspended = True, False
+    profile.save(update_fields=["is_approved", "suspended"])
+    text = ("Vos commandes sont activées : vous pouvez recevoir des réservations et des missions." if eligibility.is_orderable(profile)
+            else "Votre identité est vérifiée. Il reste une étape pour recevoir des commandes : consultez votre espace professionnel.")
+    notify(profile.user_id, "kyc_approved", text, title="Commandes activées" if eligibility.is_orderable(profile) else "Identité vérifiée",
+           data={"kind": "kyc"}, dedupe_key=f"profile:{profile.pk}:approved:{int(timezone.now().timestamp())}")
 
 
 @transaction.atomic
 def suspend_profile(profile: HandymanProfile, *, by, reason: str) -> None:
-    """Retire immédiatement la publication, les missions et la validité du Tratra ID (règle d'éligibilité)."""
-    if not profile.is_approved:
-        raise ValidationError("Ce dossier n'est pas approuvé.", code="not_approved")
-    profile.is_approved = False
-    profile.online = False
-    profile.save(update_fields=["is_approved", "online"])
+    """Retire immédiatement la publication, les commandes, le badge et la validité du Tratra ID (règle d'éligibilité), que le profil
+    soit vérifié ou seulement publié. Les pièces et la vérification faciale sont conservées : la levée rend les niveaux acquis."""
+    if profile.suspended:
+        raise ValidationError("Ce profil est déjà suspendu.", code="already")
+    profile.suspended, profile.is_approved, profile.online = True, False, False
+    profile.save(update_fields=["suspended", "is_approved", "online"])
     notify(profile.user_id, "kyc_rejected", "Votre profil professionnel est suspendu. Contactez le support Tratra pour en savoir plus.",
            title="Profil suspendu", data={"kind": "kyc"}, dedupe_key=f"profile:{profile.pk}:suspended:{int(timezone.now().timestamp())}")
+
+
+@transaction.atomic
+def restore_profile(profile: HandymanProfile, *, by, reason: str) -> dict:
+    """Lève une suspension : le profil retrouve la publication, et les commandes si ses pièces obligatoires sont approuvées (décision
+    explicite de l'équipe, journalisée par l'appelant). Le badge « Vérifié » dépend toujours de la vérification faciale."""
+    from handy import eligibility
+
+    if not profile.suspended:
+        raise ValidationError("Ce profil n'est pas suspendu.", code="not_suspended")
+    profile.suspended = False
+    profile.is_approved = profile.has_required_kyc()
+    profile.save(update_fields=["suspended", "is_approved"])
+    notify(profile.user_id, "kyc_approved", "La suspension de votre profil professionnel est levée.", title="Profil rétabli",
+           data={"kind": "kyc"}, dedupe_key=f"profile:{profile.pk}:restored:{int(timezone.now().timestamp())}")
+    return {"published": eligibility.is_publishable(profile), "orders_enabled": eligibility.is_orderable(profile)}

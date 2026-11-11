@@ -98,17 +98,48 @@ def message_created(message) -> None:
 
 
 @_safe
-def kyc_decided(document) -> None:
-    user_id = document.handyman.user_id
+def _kyc_round(document) -> str:
+    """Clé d'une décision : UNE notification par type de pièce et par transmission du dossier (le recto et le verso d'une même carte
+    sont deux fichiers, pas deux évènements) ; sans dossier guidé, une par pièce."""
+    from handy.models import KycDossier
+
+    dossier = KycDossier.objects.filter(profile_id=document.handyman_id, documents=document).first()
+    if dossier is None:
+        return f"document:{document.pk}"
+    return f"kyc:{document.handyman_id}:{document.document_type}:{dossier.attempts}"
+
+
+def kyc_decided(document, outcome: str = "unchanged") -> None:
+    """Décision de l'équipe sur une pièce. `outcome` (handy.activation) dit ce que l'approbation a déclenché : commandes activées,
+    activation retenue par l'équipe, ou rien de plus."""
+    from handy import eligibility
+
+    profile = document.handyman
+    user_id = profile.user_id
     label = document.get_document_type_display()
-    if document.status == "approved":
+    key = _kyc_round(document)
+    if document.status == "approved" and outcome == "activated":
+        if eligibility.is_orderable(profile):
+            title, text = "Commandes activées", ("Votre pièce d'identité est validée : vous pouvez maintenant recevoir des réservations "
+                                                 "et des missions Tratra Flash.")
+        elif eligibility.is_publishable(profile):
+            title, text = "Identité vérifiée", ("Votre pièce d'identité est validée. Il reste la vérification faciale pour recevoir des "
+                                                "commandes dans votre métier.")
+        else:
+            title, text = "Identité vérifiée", "Votre pièce d'identité est validée. Publiez votre service pour recevoir des commandes."
+        notify(user_id, "kyc_approved", text, title=title, data={"kind": "kyc"}, dedupe_key=f"{key}:activated")
+    elif document.status == "approved" and outcome == "held":
+        notify(user_id, "kyc_approved", "Votre pièce d'identité est validée. L'équipe Tratra termine un contrôle avant d'activer vos commandes.",
+               title="Pièce validée", data={"kind": "kyc"}, dedupe_key=f"{key}:held")
+    elif document.status == "approved":
         notify(user_id, "kyc_approved", f"Votre document « {label} » a été validé par l'équipe Tratra.",
-               title="Document validé", data={"kind": "kyc"}, dedupe_key=f"document:{document.pk}:approved")
+               title="Document validé", data={"kind": "kyc"}, dedupe_key=f"{key}:approved")
     elif document.status == "rejected":
         reason = f" Motif : {document.rejection_reason}" if document.rejection_reason else ""
+        stamp = int(document.reviewed_at.timestamp()) if document.reviewed_at else 0
         notify(user_id, "kyc_rejected", f"Votre document « {label} » a été refusé.{reason}".strip(),
                title="Document refusé", data={"kind": "kyc"},
-               dedupe_key=f"document:{document.pk}:rejected:{int(document.reviewed_at.timestamp()) if document.reviewed_at else 0}")
+               dedupe_key=f"{key}:rejected" if key.startswith("kyc:") else f"{key}:rejected:{stamp}")
 
 
 @_safe

@@ -1,9 +1,10 @@
-"""Tient `HandymanProfile.published` (copie calculée de la règle d'éligibilité) à jour DANS LA MÊME TRANSACTION que chaque changement
-qui peut la modifier : un professionnel suspendu, une pièce d'identité rejetée ou un métier durci disparaissent de la recherche au
-moment même où le changement est validé.
+"""Tient les copies calculées des règles d'éligibilité (`HandymanProfile.published`, `orders_enabled`, `verification`) à jour DANS LA
+MÊME TRANSACTION que chaque changement qui peut les modifier : un professionnel suspendu disparaît de la recherche, une pièce
+d'identité rejetée ou un métier durci retirent les commandes au moment même où le changement est validé.
 
-Déclencheurs : profil (validation, présentation, commune, photo, expérience), compte (activation), pièce KYC (statut, suppression),
-spécialités (ajout, retrait), offres (activation, métier), métier (expérience minimale, rattachement).
+Déclencheurs : profil (commandes activées, suspension, commune, expérience), compte (activation, téléphone confirmé), pièce KYC
+(statut, suppression), vérification faciale (statut), spécialités (ajout, retrait), offres (activation, métier), métier (expérience
+minimale, métier sensible, rattachement).
 Les écritures en masse (`queryset.update()`) n'émettent aucun signal : elles appellent `eligibility.refresh_published` elles-mêmes
 (action d'administration, parcours KYC). Filet de sécurité : réconciliation périodique (`handy.tasks.reconcile_published`) et
 au démarrage (`manage.py eligibility_sync`), qui signale tout écart.
@@ -14,9 +15,10 @@ from django.db.models.signals import m2m_changed, post_delete, post_save, pre_de
 from handy import eligibility
 from handy.models import HandymanDocument, HandymanProfile, Service, ServiceCategory, User
 
-PROFILE_FIELDS = {"is_approved", "bio", "commune", "photo", "experience_years", "experience_label", "user", "user_id"}
+PROFILE_FIELDS = {"is_approved", "suspended", "commune", "experience_years", "user", "user_id"}
 SERVICE_FIELDS = {"is_active", "category", "category_id", "handyman", "handyman_id"}
-CATEGORY_FIELDS = {"min_experience_years", "parent", "parent_id"}
+CATEGORY_FIELDS = {"min_experience_years", "face_required", "parent", "parent_id"}
+USER_FIELDS = {"is_active", "is_verified"}
 
 
 def _relevant(update_fields, fields) -> bool:
@@ -33,14 +35,19 @@ def profile_saved(sender, instance, raw=False, update_fields=None, **kwargs):
 
 
 def user_saved(sender, instance, raw=False, update_fields=None, created=False, **kwargs):
-    # La dernière connexion (`last_login`) et la plupart des mises à jour ne touchent pas l'activation : rien à recalculer.
-    if not raw and not created and _relevant(update_fields, {"is_active"}):
+    # La dernière connexion (`last_login`) et la plupart des mises à jour ne touchent ni l'activation ni le téléphone : rien à recalculer.
+    if not raw and not created and _relevant(update_fields, USER_FIELDS):
         _refresh_user(instance.pk)
 
 
 def document_changed(sender, instance, raw=False, **kwargs):
     if not raw and instance.handyman_id:
         eligibility.refresh_published([instance.handyman_id])
+
+
+def face_changed(sender, instance, raw=False, **kwargs):
+    if not raw and instance.profile_id:
+        eligibility.refresh_published([instance.profile_id])
 
 
 def service_saved(sender, instance, raw=False, update_fields=None, **kwargs):
@@ -104,6 +111,8 @@ def connect() -> None:
     post_save.connect(user_saved, sender=User, dispatch_uid=f"{uid}.user")
     post_save.connect(document_changed, sender=HandymanDocument, dispatch_uid=f"{uid}.document_saved")
     post_delete.connect(document_changed, sender=HandymanDocument, dispatch_uid=f"{uid}.document_deleted")
+    post_save.connect(face_changed, sender="biometrics.BiometricVerification", dispatch_uid=f"{uid}.face_saved")
+    post_delete.connect(face_changed, sender="biometrics.BiometricVerification", dispatch_uid=f"{uid}.face_deleted")
     post_save.connect(service_saved, sender=Service, dispatch_uid=f"{uid}.service_saved")
     post_delete.connect(service_deleted, sender=Service, dispatch_uid=f"{uid}.service_deleted")
     post_save.connect(category_saved, sender=ServiceCategory, dispatch_uid=f"{uid}.category_saved")

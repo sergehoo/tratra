@@ -19,6 +19,7 @@ from rest_framework.test import APIClient
 from handy.models import Booking, HandymanProfile, Notification, Review
 from handy.test_booking_regression import _client
 from handy.test_eligibility import artisan, service
+from handy.testing import make_face_verified
 from live.models import LivePosition, TrackingSession
 from trust.models import BookingPass
 
@@ -89,6 +90,7 @@ def no_position_leak(responses, *needles):
 
 def test_full_journey_with_two_distinct_sessions():
     art_user = artisan("e2e_art", online=True)
+    make_face_verified(art_user.handyman_profile)               # badge « Vérifié » : pièce approuvée ET visage validé
     art_user.handyman_profile.location = Point(ARTISAN_HOME[1], ARTISAN_HOME[0], srid=4326)
     art_user.handyman_profile.save()
     svc = service(art_user, "Dépannage plomberie")
@@ -243,6 +245,7 @@ def test_full_journey_with_two_distinct_sessions():
 def test_badges_are_cumulative_and_unverified_profiles_show_nouveau():
     from trust.test_trust import certify, missions
     pro = artisan("e2e_pro", online=True)
+    make_face_verified(pro.handyman_profile)
     certify(pro)
     missions(pro, 16)
     api_pro, anon = login("e2e_pro"), APIClient()

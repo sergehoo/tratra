@@ -14,7 +14,7 @@ from django.db import transaction
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
-from handy.eligibility import is_publishable
+from handy.eligibility import is_orderable
 from handy.models import Booking, HandymanProfile
 from live import routing
 from live.models import LivePosition, TrackingSession
@@ -117,7 +117,7 @@ def start_route(booking: Booking, user, *, consent: bool) -> TrackingSession:
         raise LiveError("outside_window", "Le suivi s'ouvre quelques heures avant l'heure prévue de l'intervention.",
                         409)
     profile = HandymanProfile.objects.select_related("user").filter(user_id=user.id).first()
-    if profile is None or not is_publishable(profile):
+    if profile is None or not is_orderable(profile):
         raise LiveError("not_verified", "Votre identité n'est pas (ou plus) vérifiée : le suivi est indisponible.", 409)
     now = timezone.now()
     with transaction.atomic():

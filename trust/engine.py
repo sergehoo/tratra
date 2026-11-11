@@ -84,8 +84,8 @@ def trust_score(m: Dict, c: TrustConfig) -> Dict:
                       "value": None if value is None or not available else round(value, 3), "detail": detail if available and value is not None else missing,
                       "source": source})
 
-    part("identity", "Identité vérifiée (KYC)", c.weight_identity, 1.0 if m["verified"] else 0.0,
-         "Pièce d'identité contrôlée par l'équipe Tratra" if m["verified"] else "Identité non vérifiée", "vérifié")
+    part("identity", "Identité vérifiée (KYC)", c.weight_identity, 1.0 if _identity(m) else 0.0,
+         "Pièce d'identité contrôlée par l'équipe Tratra" if _identity(m) else "Identité non vérifiée", "vérifié")
     part("satisfaction", "Satisfaction des clients", c.weight_satisfaction,
          (rev["average"] / 5) if rev["average"] is not None else None,
          f"{str(rev['average']).replace('.', ',')}/5 sur {rev['count']} avis", "plateforme",
@@ -123,7 +123,7 @@ def trust_score(m: Dict, c: TrustConfig) -> Dict:
     live = [p for p in parts if p["available"] and p["weight"] > 0]
     activity = [p for p in live if p["key"] in ACTIVITY_COMPONENTS]
     total_weight = sum(p["weight"] for p in live)
-    if not m["verified"]:
+    if not _identity(m):
         score, reason = None, "Identité non vérifiée : aucun score n'est publié."
     elif not activity:
         # L'identité (et la réactivité) seule ne fait pas un score : sans résultat client mesuré (avis, ponctualité),
@@ -143,15 +143,22 @@ def trust_score(m: Dict, c: TrustConfig) -> Dict:
             "note": "Seules les composantes mesurables comptent : une donnée manquante n'est jamais comptée comme un zéro."}
 
 
+def _identity(m: Dict) -> bool:
+    """Identité vérifiée ET commandes autorisées : fonde le score, Expert et Sûr (le badge « Vérifié », lui, demande en plus le visage)."""
+    return bool(m.get("identity", m["verified"]))
+
+
 def desired_badges(m: Dict, c: TrustConfig) -> Dict[str, Dict]:
     """{code: {reason, snapshot}} des badges que l'artisan DOIT avoir maintenant."""
     out: Dict[str, Dict] = {}
     if not m["account_active"]:
         return out  # compte suspendu/désactivé : aucun badge, aucune visibilité
-    if not m["verified"]:
+    if not _identity(m):
         out[BadgeAward.NOUVEAU] = {"reason": "Profil créé, identité pas encore vérifiée (KYC)."}
         return out
-    out[BadgeAward.VERIFIE] = {"reason": "KYC approuvé, profil complet et validé par l'équipe Tratra."}
+    # Le badge « Vérifié » demande la vérification faciale : une pièce approuvée seule ouvre les commandes (et Expert, Sûr), pas le badge.
+    if m["verified"]:
+        out[BadgeAward.VERIFIE] = {"reason": "Pièce d'identité approuvée et vérification faciale validée."}
     expert = expert_criteria(m, c)
     if all(x["met"] for x in expert):
         out[BadgeAward.EXPERT] = {"reason": "Expertise démontrée : justificatifs approuvés et résultats atteints.",
@@ -164,10 +171,12 @@ def desired_badges(m: Dict, c: TrustConfig) -> Dict[str, Dict]:
 
 
 def _lost_reason(code: str, m: Dict, c: TrustConfig) -> str:
-    if code in (BadgeAward.EXPERT, BadgeAward.SUR) and not m["verified"]:
+    if code in (BadgeAward.EXPERT, BadgeAward.SUR) and not _identity(m):
         return "Retrait immédiat : l'identité n'est plus vérifiée (suspension, KYC invalide ou compte désactivé)."
     if code == BadgeAward.VERIFIE:
-        return "Identité plus vérifiée : KYC non approuvé, profil incomplet, compte inactif ou suspendu."
+        if _identity(m):
+            return "Le badge Vérifié demande une vérification faciale validée (selfie comparé à la pièce d'identité)."
+        return "Identité plus vérifiée : KYC non approuvé, commandes non activées, compte inactif ou suspendu."
     if code == BadgeAward.NOUVEAU:
         return "Identité vérifiée."
     crit = expert_criteria(m, c) if code == BadgeAward.EXPERT else sure_criteria(m, c)
@@ -201,11 +210,14 @@ def evaluate_profile(profile: HandymanProfile, *, trigger: str = "signal", actor
             BadgeAward.objects.create(profile=profile, code=code, start_reason=info["reason"], snapshot=snap)
             awarded.append(code)
             audit("badge.awarded", actor=actor, target=profile, badge=code, reason=info["reason"], trigger=trigger)
-    # Tratra ID : le badge d'identité suit exactement VERIFIE (trace dédiée pour l'audit des suspensions).
-    if BadgeAward.VERIFIE in revoked:
-        audit("tratra_id.suspended", actor=actor, target=profile, trigger=trigger)
-    if BadgeAward.VERIFIE in awarded:
+    # Tratra ID : le badge d'identité suit exactement l'identité vérifiée (trace dédiée pour l'audit des suspensions).
+    valid = bool(_identity(metrics_) and metrics_["account_active"])
+    last = (AuditEvent.objects.filter(target_type="handymanprofile", target_id=profile.pk, action__in=("tratra_id.suspended", "tratra_id.activated"))
+            .order_by("-created_at", "-id").values_list("action", flat=True).first())
+    if valid and last != "tratra_id.activated":
         audit("tratra_id.activated", actor=actor, target=profile, trigger=trigger)
+    elif not valid and last == "tratra_id.activated":
+        audit("tratra_id.suspended", actor=actor, target=profile, trigger=trigger)
     codes = [c for c in BadgeAward.ORDER if c in wanted]
     if score["score"] != profile.trust_score:   # historique consultable : chaque changement, avec le détail du calcul
         from trust.models import TrustScoreChange

@@ -24,7 +24,7 @@ from django.utils import timezone
 from PIL import Image, ImageDraw, ImageFont
 
 from handy.api.serializers import absolute_media_url, public_display_name
-from handy.eligibility import is_publishable
+from handy.eligibility import is_orderable
 from handy.models import Booking, HandymanProfile
 from trust import passport
 from trust.models import BadgeAward, BookingPass, IdentityCheck, ProfessionalId, audit
@@ -93,8 +93,8 @@ def pass_url(token: str) -> str:
 
 
 def is_valid(profile: HandymanProfile) -> bool:
-    """Le badge est valide si et seulement si l'artisan est aujourd'hui éligible (KYC approuvé, compte actif…)."""
-    return is_publishable(profile)
+    """Le badge est valide si et seulement si l'artisan peut aujourd'hui recevoir des commandes (pièce approuvée, compte actif, non suspendu…)."""
+    return is_orderable(profile)
 
 
 # ---- QR ---------------------------------------------------------------------------------------------

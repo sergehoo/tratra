@@ -18,7 +18,7 @@ from django.utils import timezone
 from flash import services as S
 from flash.models import DispatchConfig, DispatchEvent, MissionOffer, MissionRequest
 from flash.services import FlashError
-from handy.eligibility import is_publishable
+from handy.eligibility import is_orderable
 from handy.models import FavoriteHandyman, HandymanProfile, Service, ServiceCategory, User
 
 SORTS = ("recommended", "distance", "rating", "price")
@@ -157,7 +157,7 @@ def direct_pros(client, category: ServiceCategory, *, when=None, lat=None, lng=N
 def validate_target(client, pro_id, req: MissionRequest, config: DispatchConfig, now) -> User:
     pro = User.objects.filter(pk=pro_id).select_related("handyman_profile").first() if str(pro_id or "").isdigit() else None
     profile = getattr(pro, "handyman_profile", None) if pro else None
-    if pro is None or profile is None or not is_publishable(profile):
+    if pro is None or profile is None or not is_orderable(profile):
         raise FlashError("pro_unavailable", "Ce professionnel n'est pas disponible sur Tratra pour le moment.", 400)
     if pro.pk == client.pk:
         raise FlashError("self_booking_forbidden", "Vous ne pouvez pas vous choisir vous-même.", 400)
@@ -301,7 +301,7 @@ def favorites(client, request=None) -> List[Dict]:
         if profile is None:
             continue
         card = pro_card(profile, request=request, favorite=True)
-        card["bookable"] = is_publishable(profile)
+        card["bookable"] = is_orderable(profile)
         card["available_now"] = bool(profile.online) and card["bookable"]
         card["trades"] = sorted({c for c in Service.objects.filter(handyman=fav.handyman, is_active=True)
                                  .values_list("category__name", flat=True)})
@@ -312,7 +312,7 @@ def favorites(client, request=None) -> List[Dict]:
 def add_favorite(client, pro_id) -> FavoriteHandyman:
     pro = User.objects.filter(pk=pro_id).select_related("handyman_profile").first() if str(pro_id or "").isdigit() else None
     profile = getattr(pro, "handyman_profile", None) if pro else None
-    if profile is None or not is_publishable(profile):
+    if profile is None or not is_orderable(profile):
         raise FlashError("pro_unavailable", "Ce professionnel n'est pas disponible sur Tratra.", 404)
     if pro.pk == client.pk:
         raise FlashError("self_favorite", "Vous ne pouvez pas vous ajouter vous-même.", 400)

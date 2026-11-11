@@ -145,7 +145,7 @@ def send_notification_push(self, notification_id, collapse_key=None):
 
 @shared_task
 def send_profile_completion_reminders():
-    profiles = HandymanProfile.objects.filter(is_approved=True)
+    profiles = HandymanProfile.objects.filter(published=True)   # profils visibles des clients, vérifiés ou non
     for profile in profiles:
         if profile.profile_completion() < 100:
             Notification.objects.create(

@@ -8,7 +8,7 @@ from django.db.models import Q
 from business import rbac as business_rbac
 from business.models import Membership, Role
 from engagements.models import ContractEvent, EngagementContract
-from handy.eligibility import is_user_publishable
+from handy.eligibility import is_user_orderable
 from handy.notifications import notify
 
 logger = logging.getLogger(__name__)
@@ -94,7 +94,7 @@ def organization_actor(user, organization_id) -> bool:
 
 
 def require_eligible_worker(user, message: str = "Ce prestataire n'est pas (ou plus) vérifié par Tratra.") -> None:
-    if not is_user_publishable(user):
+    if not is_user_orderable(user):
         raise conflict("worker_not_verified", message)
 
 

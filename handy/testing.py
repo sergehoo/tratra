@@ -28,6 +28,17 @@ def make_eligible(profile, *, category=None):
     return profile
 
 
+def make_face_verified(profile):
+    """Vérification faciale VALIDÉE (approuvée après revue humaine) : avec des commandes activées, donne le badge « Vérifié ».
+    Enregistrement normal : les copies de l'éligibilité et les badges Trust suivent."""
+    from biometrics.models import BiometricVerification
+
+    ver, _ = BiometricVerification.objects.get_or_create(profile=profile)
+    ver.status = BiometricVerification.MANUAL_APPROVED
+    ver.save()
+    return ver
+
+
 def make_jpeg(size=(900, 700), color=(200, 90, 40), exif=False) -> bytes:
     """Vrai JPEG (dégradé : décodable, de taille réaliste) ; `exif=True` y ajoute une position GPS pour vérifier son retrait."""
     import io

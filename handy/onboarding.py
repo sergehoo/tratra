@@ -3,7 +3,10 @@
 - Questions configurées dans l'administration (`OnboardingQuestion`), choisies selon le métier ; réponses en gros boutons.
 - Les réponses sont enregistrées (`ProOnboarding`) pour reprendre plus tard, sur n'importe quel appareil, puis APPLIQUÉES aux modèles
   existants : profil professionnel (`HandymanProfile`) et une offre (`Service`) rédigée à partir des réponses. Aucun second profil.
-- Rien n'est publié avant l'éligibilité (`handy.eligibility`) : identité vérifiée par l'équipe et validation professionnelle.
+- Parcours PROGRESSIF : compte (identité saisie une seule fois) → publication en trois écrans (métier et prestations, zone,
+  confirmation) → pièce d'identité (active les commandes) → vérification faciale (badge « Vérifié »). Le service est public dès la
+  confirmation, avec la mention « Non vérifié » et sans aucune commande possible (`handy.eligibility`).
+- Les questions du métier sont facultatives et complétables plus tard ; seule l'expérience est demandée quand le métier impose un minimum.
 - Un texte proposé (présentation, description de l'offre) n'est remplacé que s'il n'a pas été retouché par l'utilisateur ; un champ déjà
   rempli par ailleurs (parcours classique) n'est jamais écrasé.
 """
@@ -30,16 +33,16 @@ SINGLE_TARGETS = {"experience", "price", "days", "slots"}         # une question
 
 # Étapes du parcours (affichage de la progression et « Continuer »).
 JOURNEY = [
-    ("trade", "Votre métier"),
-    ("zone", "Votre quartier"),
-    ("questions", "Vos réponses"),
     ("account", "Votre compte"),
     ("phone", "Votre téléphone"),
-    ("offer", "Votre annonce"),
-    ("photo", "Votre photo"),
+    ("trade", "Votre métier"),
+    ("zone", "Votre zone"),
+    ("offer", "Votre service publié"),
     ("identity", "Votre identité"),
-    ("approval", "Validation par l’équipe Tratra"),
+    ("face", "Votre visage"),
 ]
+# Écrans à parcourir, compte créé, pour publier le premier service (trois au plus).
+PUBLISH_STEPS = ("trade", "zone", "offer")
 
 
 class OnboardingError(Exception):
@@ -106,7 +109,7 @@ def config(trade_id) -> Dict:
         "prestations": [{"id": c.pk, "name": c.name, "min_experience_years": c.min_experience_years} for c in prestations],
         "questions": [question_payload(q) for q in questions_for(root)],
         "communes": COMMUNES,
-        "journey": [{"key": k, "label": label} for k, label in JOURNEY],
+        "journey": [{"key": k, "label": label} for k, label in JOURNEY if k != "face" or _face_open()],
     }
 
 
@@ -287,16 +290,32 @@ def bio_draft(ob: ProOnboarding, first_name: str = "") -> str:
 
 # ═══ Application aux modèles existants ════════════════════════════════════════════════════════════════════════════════
 
+def _minimum(ob: ProOnboarding, profile=None) -> Dict:
+    """Expérience minimale exigée pour publier : celle du profil s'il existe, sinon celle du métier choisi et de ses prestations."""
+    from handy.eligibility import experience_minimum
+
+    if profile is not None and profile.skills.exists():
+        return experience_minimum(profile)
+    cats = list(ServiceCategory.objects.filter(pk__in=[ob.trade_id, *ob.prestations], min_experience_years__gt=0)) if ob.trade_id else []
+    top = max(cats, key=lambda c: c.min_experience_years, default=None)
+    return {"years": top.min_experience_years, "trade": top.name} if top else {"years": 0, "trade": ""}
+
+
 @transaction.atomic
 def apply(user) -> Dict:
-    """Crée/complète le profil professionnel du compte et l'offre proposée. Idempotent ; n'écrase jamais ce que l'utilisateur a saisi
-    ailleurs ; l'offre n'est publique qu'une fois l'éligibilité acquise (règle inchangée)."""
+    """Publie le premier service : crée/complète le profil professionnel du compte et l'offre proposée. Idempotent ; n'écrase jamais ce
+    que l'utilisateur a saisi ailleurs. Seuls le métier et la zone sont exigés (et l'expérience, si le métier impose un minimum) : le
+    service devient public « Non vérifié » si la règle de publication est satisfaite (`handy.eligibility`), sans aucune commande."""
     ob = ProOnboarding.objects.select_for_update().get(pk=onboarding_for(user).pk)
     done = _complete(ob)
-    if not (done["trade"] and done["zone"] and done["questions"]):
-        raise OnboardingError("incomplete", "Répondez d’abord aux questions du parcours.", 409)
+    if not (done["trade"] and done["zone"]):
+        raise OnboardingError("incomplete", "Choisissez d’abord votre métier et votre zone.", 409)
     if user.user_type == "admin":
         raise OnboardingError("forbidden", "Un compte administrateur ne peut pas proposer de services.", 403)
+    existing = HandymanProfile.objects.filter(user=user).first()
+    minimum = _minimum(ob)
+    if minimum["years"] and profile_values(ob)["experience"] is None and not (existing and experience_declared(existing)):
+        raise OnboardingError("experience_required", f"{minimum['trade']} demande une expérience minimale : indiquez la vôtre.", 409)
     profile, _ = HandymanProfile.objects.get_or_create(user=user)
     v = profile_values(ob)
     fields = []
@@ -338,54 +357,78 @@ def apply(user) -> Dict:
 
 # ═══ Progression : étapes faites, prochaine action, un seul bouton « Continuer » ═══════════════════════════════════════
 
+def _face_open() -> bool:
+    """La vérification faciale n'est une étape du parcours que si le module est ouvert (BIOMETRIC_ENABLED)."""
+    from biometrics import services as biometrics
+
+    return biometrics.enabled()
+
+
 def state(user) -> Dict:
-    from handy.eligibility import eligibility_summary, experience_minimum
+    from handy.eligibility import VERIFIE, eligibility_summary
 
     ob = onboarding_for(user)
     done = _complete(ob)
     profile = HandymanProfile.objects.filter(user=user).first()
     e = eligibility_summary(profile) if profile else None
-    has_photo = bool(profile and profile.photo)
-    kyc = (e or {}).get("kyc", {}).get("status", "draft")
+    applied = ob.applied_at is not None and ob.service_id is not None
+    published = bool(e and e["publication"]["authorized"] and e["offers"]["published"])
+    stages = {st["key"]: st for st in e["stages"]} if e else {}
+    # Sans profil : la faciale suivra la pièce d'identité — ou n'est pas proposée du tout tant que le module est fermé.
+    identity = stages.get("identity", {}).get("state", "todo")
+    face = stages.get("face", {}).get("state", "locked" if _face_open() else "unavailable")
+    level = e["verification"]["level"] if e else "NON_VERIFIE"
     status = {
-        "trade": done["trade"], "zone": done["zone"], "questions": done["questions"], "account": True,
-        "phone": bool(user.is_verified), "offer": ob.applied_at is not None and ob.service_id is not None,
-        "photo": has_photo, "identity": kyc == "approved",
-        "approval": bool(e and e["publication"]["authorized"]),
+        "account": True, "phone": bool(user.is_verified), "trade": done["trade"], "zone": done["zone"],
+        "offer": applied and published, "identity": identity == "done", "face": level == VERIFIE,
     }
-    # Expérience déclarée sous le minimum d'un métier exercé : la publication est bloquée par la règle, pas en attente de l'équipe.
-    if profile is not None:
-        minimum = experience_minimum(profile)
-    else:                                                                    # avant le profil : le métier choisi (et ses prestations)
-        cats = list(ServiceCategory.objects.filter(pk__in=[ob.trade_id, *ob.prestations], min_experience_years__gt=0)) if ob.trade_id else []
-        top = max(cats, key=lambda c: c.min_experience_years, default=None)
-        minimum = {"years": top.min_experience_years, "trade": top.name} if top else {"years": 0, "trade": ""}
+    waiting = {"identity": identity == "pending", "face": face == "pending"}
+    minimum = _minimum(ob, profile)
     v = profile_values(ob) if ob.trade_id else {"experience": None}
     declared = ({"years": profile.experience_years, "label": profile.experience_label} if profile and experience_declared(profile)
                 else v["experience"])
-    experience_ok = declared is None or declared["years"] >= minimum["years"]
-    waiting = {"identity": kyc == "pending", "approval": kyc == "approved" and not status["approval"] and experience_ok}
-    steps = [{"key": k, "label": label, "state": "done" if status[k] else ("waiting" if waiting.get(k) else "todo")} for k, label in JOURNEY]
-    actions = {
-        "trade": ("resume", "Choisir mon métier"), "zone": ("resume", "Choisir mon quartier"),
-        "questions": ("resume", "Répondre aux questions"), "phone": ("verify_phone", "Confirmer mon téléphone"),
-        "offer": ("apply", "Créer mon annonce"), "photo": ("photo", "Ajouter ma photo"),
-        "identity": ("verify_identity", "Vérifier mon identité"),
-    }
-    # Prochaine action = première étape que l'UTILISATEUR peut faire ; sinon on attend l'équipe (jamais un « Continuer » sans effet).
-    nxt = next((s for s in steps if s["state"] == "todo" and s["key"] in actions), None)
-    if nxt is not None:
-        code, label = actions[nxt["key"]]
-        next_action = {"code": code, "label": label, "step": nxt["key"]}
-    elif not experience_ok:
-        n = minimum["years"]
-        next_action = {"code": "blocked", "step": "approval",
-                       "label": f"{minimum['trade']} demande au moins {n} an{'s' if n > 1 else ''} d’expérience pour publier"}
-    elif not status["approval"]:
-        pending = next((s for s in steps if s["state"] != "done"), None)
-        next_action = {"code": "wait", "label": "Nous vérifions votre dossier", "step": pending["key"] if pending else "approval"}
+    experience_ok = (declared["years"] >= minimum["years"]) if declared else minimum["years"] == 0
+    journey = [(k, label) for k, label in JOURNEY if k != "face" or face != "unavailable"]   # faciale non proposée : étape absente
+    steps = [{"key": k, "label": label, "state": "done" if status[k] else ("waiting" if waiting.get(k) else "todo")} for k, label in journey]
+    for st in steps:
+        if st["key"] in stages or st["key"] == "offer":
+            stage = stages.get("publication" if st["key"] == "offer" else st["key"], {})
+            st["benefit"], st["status"] = stage.get("benefit", ""), stage.get("status", "")
+    orders = bool(e and e["orders"]["authorized"])
+    blocked = None
+    if not status["phone"]:
+        next_action = {"code": "verify_phone", "label": "Confirmer mon téléphone", "step": "phone"}
+    elif not status["trade"]:
+        next_action = {"code": "resume", "label": "Choisir mon métier", "step": "trade"}
+    elif not status["zone"]:
+        next_action = {"code": "resume", "label": "Choisir ma zone", "step": "zone"}
+    elif not applied:
+        next_action = {"code": "apply", "label": "Publier mon service", "step": "offer"}
+    elif not published:
+        # Publication refusée par la règle (expérience minimale, suspension, compte) : le motif réel, jamais une attente fictive.
+        blocker = next(iter(e["publication"]["blockers"]), None) if e else None
+        if blocker is None and e and not e["offers"]["active"]:
+            blocker = {"code": "no_active_offer", "label": "Aucune offre active", "action": e["offers"]["action"]}
+        blocked = {"code": blocker["code"], "label": blocker["label"], "hint": blocker.get("hint", "")} if blocker else None
+        # Expérience minimale : la déclaration est conservée telle quelle, rien à « corriger » — un blocage expliqué, pas un bouton.
+        action = None if (blocker or {}).get("code") == "experience_minimum" else (blocker or {}).get("action")
+        next_action = ({"code": action["code"], "label": action["label"], "step": "offer"} if action
+                       else {"code": "blocked", "label": (blocker or {}).get("label", "Publication impossible pour le moment"), "step": "offer"})
+    elif not orders:
+        action = next((b["action"] for b in e["orders"]["blockers"] if b["action"]), None)
+        if action is not None:
+            next_action = {"code": action["code"], "label": action["label"], "step": action.get("step", "identity")}
+        else:
+            pending = next((b for b in e["orders"]["blockers"]), None)
+            next_action = {"code": "wait", "label": pending["label"] if pending else "Nous vérifions votre dossier",
+                           "step": "face" if pending and pending["code"] == "face_required" else "identity"}
+    elif not status["face"] and face in ("todo", "retry"):
+        next_action = {"code": "verify_identity", "label": "Obtenir le badge Vérifié", "step": "face"}
+    elif not status["face"] and face == "pending":
+        next_action = {"code": "wait", "label": "Vérification faciale en cours de revue", "step": "face"}
     else:
-        next_action = {"code": "done", "label": "Voir mon annonce", "step": None}
+        next_action = {"code": "done", "label": "Voir mon service", "step": None}
+    publish_steps = [st for st in steps if st["key"] in PUBLISH_STEPS]
     return {
         "path": ob.path,
         "trade": {"id": ob.trade_id, "name": ob.trade.name} if ob.trade_id else None,
@@ -396,7 +439,13 @@ def state(user) -> Dict:
         "done": sum(1 for s in steps if s["state"] == "done"),
         "total": len(steps),
         "next_action": next_action,
-        "published": status["approval"],
+        "published": published,
+        "orders_enabled": orders,
+        "verification": e["verification"] if e else {"level": "NON_VERIFIE", "label": "Non vérifié", "badge": False, "face": None},
+        "blocked": blocked,
+        # Publication du premier service : trois écrans au plus après la création du compte.
+        "publish": {"done": sum(1 for st in publish_steps if st["state"] == "done"), "total": len(PUBLISH_STEPS)},
+        "optional": {"questions": done["questions"], "photo": bool(profile and profile.photo)},
         "experience": {"declared": declared["label"] if declared else "", "years": declared["years"] if declared else None,
                        "minimum": minimum["years"], "trade": minimum["trade"], "ok": experience_ok},
     }

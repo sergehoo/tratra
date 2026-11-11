@@ -12,6 +12,7 @@ from handy.models import (
 )
 from handy.test_booking_regression import _client
 from handy.test_eligibility import artisan, service
+from handy.testing import make_face_verified
 from trust import engine
 from trust.models import AuditEvent, BadgeAward, TrustConfig
 
@@ -68,8 +69,10 @@ def certify(art, *, approve=True, expires_on=None, title="CAP Plomberie"):
     return doc
 
 
-def seasoned(name="s_art", *, sure=True, expert=True):
+def seasoned(name="s_art", *, sure=True, expert=True, face=True):
     art = artisan(name)
+    if face:
+        make_face_verified(art.handyman_profile)                # badge « Vérifié » : pièce approuvée ET visage validé
     if expert:
         certify(art)
     missions(art, 16 if sure else 11)
@@ -92,10 +95,12 @@ def test_new_artisan_is_nouveau_with_no_score_and_no_penalty():
     assert active_codes(art) == {"NOUVEAU"}
 
 
-def test_kyc_approval_awards_verifie_and_ends_nouveau():
+def test_kyc_approval_ends_nouveau_and_only_the_face_check_awards_verifie():
     art = artisan("t_kyc", eligible=False)
     from handy.testing import make_eligible
     make_eligible(art.handyman_profile)
+    assert badges(art) == []                                    # pièce approuvée : commandes, jamais le badge
+    make_face_verified(art.handyman_profile)
     assert badges(art) == ["VERIFIE"]
     history = {a.code: a for a in BadgeAward.objects.filter(profile__user=art)}
     assert history["NOUVEAU"].ended_at is not None and history["VERIFIE"].ended_at is None
@@ -123,7 +128,12 @@ def test_verifie_depends_only_on_kyc_never_on_declaration():
     HandymanDocument.objects.filter(handyman=p).first().approve(by=staff())
     assert "VERIFIE" not in badges(art)  # profil non validé par l'équipe
     p.refresh_from_db(); p.is_approved = True; p.skills.add(ServiceCategory.objects.create(name="X", slug="x")); p.save()
+    assert badges(art) == []             # identité vérifiée, commandes activées : toujours pas le badge
+    ver = make_face_verified(p)
     assert badges(art) == ["VERIFIE"]
+    ver.status = "rejected"              # décision faciale retirée : le badge tombe aussitôt
+    ver.save()
+    assert badges(art) == []
 
 
 @pytest.mark.parametrize("revoke", ["kyc_rejected", "suspended", "kyc_deleted"])
@@ -145,8 +155,16 @@ def test_loss_of_identity_removes_dependent_badges_immediately(revoke):
     assert not active_codes(art) & {"VERIFIE", "EXPERT", "SUR"}
     ended = BadgeAward.objects.filter(profile__user=art, code__in=["EXPERT", "SUR"], ended_at__isnull=False)
     assert ended.count() == 2 and all("identité" in a.end_reason.lower() for a in ended)
-    # Et l'artisan n'est plus publié : passeport public introuvable.
-    assert api().get(f"/handy/handymen/{art.handyman_profile.pk}/trust/").status_code == 404
+    passport = api().get(f"/handy/handymen/{art.handyman_profile.pk}/trust/")
+    if revoke == "suspended":
+        assert passport.status_code == 404                      # compte désactivé : plus publié, passeport public introuvable
+    else:
+        # Pièce refusée ou retirée : le service reste visible, mais sans identité vérifiée ni badge de confiance.
+        body = passport.json()
+        assert passport.status_code == 200 and body["identity"]["verified"] is False and body["identity"]["face_verified"] is False
+        assert not {b["code"] for b in body["badges"]} & {"VERIFIE", "EXPERT", "SUR"}
+        profile = HandymanProfile.objects.get(user=art)
+        assert profile.published and not profile.orders_enabled and profile.verification == "NON_VERIFIE"
 
 
 # ---- EXPERT -----------------------------------------------------------------------------------------
@@ -206,6 +224,13 @@ def test_badges_are_cumulative():
     assert badges(art) == ["VERIFIE", "EXPERT", "SUR"]
 
 
+def test_identity_alone_grounds_expert_and_sur_but_never_verifie():
+    art = seasoned("t_ident", face=False)
+    assert badges(art) == ["EXPERT", "SUR"]
+    profile = HandymanProfile.objects.get(user=art)
+    assert profile.verification == "IDENTITE_VERIFIEE" and profile.orders_enabled
+
+
 def test_evaluation_is_idempotent_and_leaves_a_single_active_award_per_code():
     art = seasoned("t_idem")
     before = BadgeAward.objects.filter(profile__user=art).count()
@@ -234,7 +259,8 @@ def test_score_is_withheld_without_measured_activity():
     assert p.trust_score is None
     data = api().get(f"/handy/handymen/{p.pk}/trust/").json()
     assert data["score"]["value"] is None and "aucune pénalité" in data["score"]["reason"]
-    assert data["identity"]["verified"] is True and [b["code"] for b in data["badges"]] == ["VERIFIE"]
+    assert data["identity"]["verified"] is True and data["identity"]["face_verified"] is False
+    assert [b["code"] for b in data["badges"]] == []            # identité vérifiée sans visage : aucun badge « Vérifié »
 
 
 def test_reactivity_alone_does_not_publish_a_score_and_small_samples_stay_private():
@@ -337,6 +363,7 @@ def test_my_trust_is_private_detailed_and_requires_a_professional_profile():
 
 def test_my_trust_shows_remaining_criteria_and_motivated_history():
     art = artisan("t_me2")
+    make_face_verified(art.handyman_profile)
     missions(art, 6)
     body = api(art).get("/handy/me/trust/").json()
     expert = {c["key"]: c for c in body["next_badges"]["EXPERT"]["criteria"]}
@@ -357,7 +384,8 @@ def test_badges_and_score_appear_in_cards_and_search_can_filter_and_sort():
     listing = client.get("/handy/services/", {"badge": "EXPERT"}).json()["results"]
     assert {r["id"] for r in listing} == top_services
     everyone = top_services | {s_plain.id}
-    assert {r["id"] for r in client.get("/handy/services/", {"badge": "VERIFIE"}).json()["results"]} == everyone
+    # Badge « Vérifié » : uniquement le professionnel dont le visage a été validé — une pièce approuvée seule ne suffit pas.
+    assert {r["id"] for r in client.get("/handy/services/", {"badge": "VERIFIE"}).json()["results"]} == top_services
     assert client.get("/handy/services/", {"badge": "NOUVEAU"}).json()["count"] == len(everyone)  # non filtrable : ignoré
     ranked = [r["id"] for r in client.get("/handy/services/", {"sort": "trust"}).json()["results"]]
     assert ranked[0] in top_services and ranked[-1] == s_plain.id
@@ -365,7 +393,7 @@ def test_badges_and_score_appear_in_cards_and_search_can_filter_and_sort():
     assert [a["id"] for a in feat] == [top.handyman_profile.pk]
     assert [b["code"] for b in feat[0]["badges"]] == ["VERIFIE", "EXPERT", "SUR"] and feat[0]["trust_score"] is not None
     plain_card = next(a for a in client.get("/handy/handymen/featured/").json()["results"] if a["id"] == plain.handyman_profile.pk)
-    assert plain_card["trust_score"] is None and [b["code"] for b in plain_card["badges"]] == ["VERIFIE"]
+    assert plain_card["trust_score"] is None and [b["code"] for b in plain_card["badges"]] == []
 
 
 # ---- Certifications : dépôt par l'artisan, validation par l'équipe ------------------------------------------

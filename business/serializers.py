@@ -159,8 +159,8 @@ class ContractSerializer(OrgScopedMixin, serializers.ModelSerializer):
         return self._same_org(site, "Site") if site else site
 
     def validate_provider(self, user):
-        from handy.eligibility import is_user_publishable
-        if user is not None and not is_user_publishable(user):
+        from handy.eligibility import is_user_orderable
+        if user is not None and not is_user_orderable(user):
             raise serializers.ValidationError("Ce prestataire n'est pas éligible (identité vérifiée requise).")
         return user
 

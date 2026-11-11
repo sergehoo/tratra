@@ -127,6 +127,13 @@ class HandymanProfile(models.Model):
     # Dispatch et les listes au lieu de recalculer la règle complète (KYC, spécialités, expérience) sur tout le pays à chaque requête.
     # Recalculée dans la MÊME transaction que chaque changement (handy/eligibility_sync.py) et réconciliée périodiquement.
     published = models.BooleanField(default=False, db_index=True, editable=False)
+    # Trois niveaux DISTINCTS (handy/eligibility.py) : publication (`published`), commandes (`orders_enabled`), badge (`verification`).
+    # `is_approved` = commandes ACTIVÉES : automatiquement à l'approbation de la pièce d'identité, ou par l'équipe (recours manuel).
+    # `suspended` = décision de modération de l'équipe : ni publié ni commandable tant que la suspension n'est pas levée.
+    suspended = models.BooleanField(default=False, db_index=True)
+    orders_enabled = models.BooleanField(default=False, db_index=True, editable=False)
+    VERIFICATION_LEVELS = [("NON_VERIFIE", "Non vérifié"), ("IDENTITE_VERIFIEE", "Identité vérifiée"), ("VERIFIE", "Vérifié")]
+    verification = models.CharField(max_length=20, choices=VERIFICATION_LEVELS, default="NON_VERIFIE", db_index=True, editable=False)
 
     class Meta:
         indexes = [
@@ -209,7 +216,7 @@ class HandymanProfile(models.Model):
         rating_pts = (Decimal(str(self.rating or 0)) / Decimal('5')) * Decimal('50')
         jobs = min(self.completed_jobs or 0, 50)
         jobs_pts = (Decimal(jobs) / Decimal('50')) * Decimal('25')
-        kyc_pts = Decimal('15') if self.is_approved else Decimal('0')
+        kyc_pts = Decimal('15') if self.verification != 'NON_VERIFIE' else Decimal('0')   # identité contrôlée
         completion_pts = (Decimal(self.profile_completion()) / Decimal('100')) * Decimal('10')
         total = rating_pts + jobs_pts + kyc_pts + completion_pts
         return int(max(Decimal('0'), min(total, Decimal('100'))))
@@ -284,8 +291,10 @@ class HandymanDocument(models.Model):
         self.reviewed_at = timezone.now()
         self.rejection_reason = ''
         self.save(update_fields=['status', 'reviewed_by', 'reviewed_at', 'rejection_reason'])
+        # Pièces obligatoires toutes approuvées : les commandes sont activées (sauf dossier de risque : décision de l'équipe).
+        from handy.activation import after_document_approved
         from handy.notification_events import kyc_decided
-        kyc_decided(self)
+        kyc_decided(self, outcome=after_document_approved(self, by=by))
         return self
 
     def reject(self, *, by, reason=''):
@@ -500,6 +509,9 @@ class ServiceCategory(models.Model):
     min_experience_years = models.PositiveSmallIntegerField(
         default=0, help_text="Expérience minimale (en années) exigée pour publier une offre de ce métier ; 0 = débutants acceptés. "
                              "S'applique aussi à ses prestations. La déclaration de l'artisan n'est jamais modifiée.")
+    face_required = models.BooleanField(
+        default=False, help_text="Métier sensible : la vérification faciale (selfie comparé à la pièce d'identité) est exigée AVANT toute "
+                                 "commande. S'applique aussi à ses prestations. Sans cette case, la pièce d'identité approuvée suffit.")
     family = models.ForeignKey(CatalogFamily, on_delete=models.SET_NULL, blank=True, null=True, related_name="trades",
                                help_text="Famille de navigation (métiers uniquement ; ignorée pour une prestation).")
     keywords = models.TextField(blank=True, default="", help_text="Synonymes et pannes courantes, séparés par des virgules "
@@ -694,7 +706,8 @@ class Booking(models.Model):
             return []
         candidates = (Service.objects
                       .filter(category_id=self.service.category_id, is_active=True,
-                              handyman__handyman_profile__is_approved=True)
+                              handyman__handyman_profile__orders_enabled=True,
+                              handyman__handyman_profile__suspended=False, handyman__is_active=True)
                       .exclude(handyman_id=self.handyman_id)
                       .select_related('handyman__handyman_profile')
                       .order_by('-handyman__handyman_profile__rating')[:limit])

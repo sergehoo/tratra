@@ -16,7 +16,7 @@ from flash import services
 from flash.models import DispatchConfig, MissionOffer, MissionRequest
 from flash.notify import money, offer_payload, when_label, zone_label
 from flash.services import FlashError
-from handy.eligibility import eligibility_summary, is_publishable
+from handy.eligibility import eligibility_summary, is_orderable, is_verified
 from handy.models import HandymanProfile, ServiceCategory
 
 TAG = "Tratra Flash"
@@ -54,7 +54,7 @@ def _pro_card(user, request) -> dict:
     name = f"{first} {last[0]}." if first and last else _first(user)        # « Prénom N. », comme partout ailleurs
     return {"id": user.pk, "name": name, "photo": absolute_media_url(request, profile.photo) if profile else None,
             "trust_score": profile.trust_score if profile else None, "badges": profile.trust_badges if profile else [],
-            "rating": rep["average"], "reviews": rep["count"], "verified": bool(profile and is_publishable(profile))}
+            "rating": rep["average"], "reviews": rep["count"], "verified": bool(profile and is_verified(profile))}
 
 
 def _km(value):
@@ -398,11 +398,12 @@ def availability_view(request):
 
 
 def availability_payload(profile: HandymanProfile) -> dict:
-    eligible = is_publishable(profile)
-    blockers = eligibility_summary(profile)["publication"]["blockers"] if not eligible else []
+    eligible = is_orderable(profile)
+    summary = None if eligible else eligibility_summary(profile)
+    blockers = (summary["publication"]["blockers"] + summary["orders"]["blockers"]) if summary else []
     slots = list(profile.availability_slots.order_by("weekday", "start_time").values("weekday", "start_time", "end_time"))
     return {"online": bool(profile.online), "eligible": eligible,
-            "reason": None if eligible else (blockers[0]["label"] if blockers else "Profil pas encore vérifié : impossible de recevoir des missions."),
+            "reason": None if eligible else (blockers[0]["label"] if blockers else "Identité pas encore vérifiée : impossible de recevoir des missions."),
             "missed_streak": services.missed_streak(profile.user_id), "auto_pause_after": DispatchConfig.get_solo().auto_pause_after_missed,
             "schedule": [{"weekday": s["weekday"], "start": s["start_time"].strftime("%H:%M"), "end": s["end_time"].strftime("%H:%M")} for s in slots],
             "pending_offers": MissionOffer.objects.filter(handyman_id=profile.user_id, status=MissionOffer.PENDING,

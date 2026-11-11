@@ -131,11 +131,13 @@ def test_featured_only_approved_active_and_no_sensitive_fields(api_client):
     card = body["results"][0]
     assert card["user_id"] == awa.id
     assert card["display_name"] == "Awa K."
-    assert card["is_verified"] is True
+    # Pièce approuvée sans vérification faciale : commandes possibles, mais jamais présenté comme « Vérifié ».
+    assert card["is_verified"] is False and card["can_order"] is True
+    assert card["verification"] == {"level": "IDENTITE_VERIFIEE", "label": "Identité vérifiée", "badge": False}
     assert card["commune"] == "Cocody"
     assert set(card.keys()) == {
         "id", "display_name", "commune", "rating", "completed_jobs", "experience_years",
-        "is_verified", "online", "photo", "user_id", "quartier", "hourly_rate", "skills",
+        "is_verified", "verification", "can_order", "online", "photo", "user_id", "quartier", "hourly_rate", "skills",
         "services_count", "trust_score", "badges"}
     _assert_no_sensitive(r.content.decode())
 
@@ -268,7 +270,7 @@ def test_public_stats_real_values_and_cache(api_client):
     r = api_client.get(url)
     assert r.status_code == 200, r.content
     data = r.json()
-    assert set(data.keys()) == {"categories", "services", "artisans_verified", "artisans_online",
+    assert set(data.keys()) == {"categories", "services", "artisans", "artisans_verified", "artisans_online",
                                 "missions_completed", "reviews_count", "rating_average"}
     assert data["categories"] - base["categories"] == 2
     assert data["services"] - base["services"] == 2
@@ -312,7 +314,7 @@ def test_services_public_payload_hides_email_and_embeds_artisan(api_client):
     assert set(row["handyman_detail"].keys()) == {"id", "first_name", "display_name"}
     assert row["handyman_detail"]["display_name"] == "Awa K."
     assert row["artisan"]["display_name"] == "Awa K."
-    assert row["artisan"]["is_verified"] is True
+    assert row["artisan"]["is_verified"] is False and row["artisan"]["verification"]["level"] == "IDENTITE_VERIFIEE"
     assert row["artisan"]["commune"] == "Cocody"
     assert row["artisan"]["completed_jobs"] == 12
     assert row["distance_km"] is None

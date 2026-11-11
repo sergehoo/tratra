@@ -85,8 +85,9 @@ def build(profile, *, request=None, owner: bool = False, config=None) -> Dict:
         "commune": profile.commune,
         "member_since": profile.user.date_joined,
         "evaluated_at": profile.trust_evaluated_at,
-        "identity": {"verified": m["verified"], "verified_on": _kyc_verified_on(profile) if m["verified"] else None,
-                     "source": "vérifié"},
+        # `verified` = pièce d'identité approuvée et commandes autorisées ; `face_verified` = badge « Vérifié » (visage comparé à la pièce).
+        "identity": {"verified": m["identity"], "verified_on": _kyc_verified_on(profile) if m["identity"] else None,
+                     "face_verified": m["verified"], "source": "vérifié"},
         "badges": [badge_payload(active[c]) for c in BadgeAward.ORDER if c in active],
         "score": {"value": score["score"], "confidence": score["confidence"], "reason": score["reason"],
                   "note": score["note"],

@@ -205,6 +205,26 @@ def test_firm_acceptance_creates_one_confirmed_booking_and_closes_the_others(mak
     assert Booking.objects.filter(handyman=b).count() == 1
 
 
+def test_a_pro_who_lost_his_orders_cannot_accept_and_a_published_unverified_pro_is_never_solicited(make_pro, make_request):
+    """Onboarding progressif : être publié ne suffit pas — sollicitation et acceptation exigent des commandes activées."""
+    from handy.eligibility import is_publishable
+    from handy.models import HandymanDocument
+
+    pro = make_pro("perdu")
+    offer = offers_of(make_request())[0]
+    HandymanDocument.objects.filter(handyman=pro.handyman_profile, document_type="id_card").update(status="rejected")
+    profile = pro.handyman_profile
+    profile.save()                                                              # pièce refusée : copies recalculées
+    profile.refresh_from_db()
+    assert is_publishable(profile) and not profile.orders_enabled               # toujours visible, « Non vérifié »
+    with pytest.raises(FlashError) as e:
+        services.accept(offer.pk, pro)
+    assert e.value.code == "not_eligible" and e.value.status == 403
+    assert not Booking.objects.filter(handyman=pro).exists()
+    assert as_user(pro).post(f"/handy/flash/offers/{offer.pk}/accept/", {}, format="json").status_code == 403
+    assert offers_of(make_request()) == []                                      # plus jamais sollicité tant que l'identité manque
+
+
 def test_accepting_through_the_api_is_idempotent(make_pro, make_request):
     pro = make_pro("api")
     offer = offers_of(make_request())[0]

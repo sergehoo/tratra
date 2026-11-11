@@ -115,9 +115,9 @@ def _address(user) -> str:
 
 
 def _verification(user) -> str:
-    from handy.eligibility import is_user_publishable
+    from handy.eligibility import is_user_orderable
 
-    if getattr(user, "handyman_profile", None) is not None and is_user_publishable(user):
+    if getattr(user, "handyman_profile", None) is not None and is_user_orderable(user):
         return "Identité contrôlée par Tratra (pièce d'identité non reproduite)"
     return "Téléphone vérifié par code" if getattr(user, "is_verified", False) else "—"
 

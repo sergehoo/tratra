@@ -25,6 +25,7 @@ urlpatterns = [
     path("kyc/<int:pk>/", api_people.KycDetail.as_view(), name="bo-kyc-detail"),
     path("kyc/<int:pk>/approve/", api_people.KycProfileApprove.as_view(), name="bo-kyc-approve"),
     path("kyc/<int:pk>/suspend/", api_people.KycProfileSuspend.as_view(), name="bo-kyc-suspend"),
+    path("kyc/<int:pk>/restore/", api_people.KycProfileRestore.as_view(), name="bo-kyc-restore"),
     path("kyc/<int:pk>/biometric/", api_biometrics.BiometricDetail.as_view(), name="bo-kyc-biometric"),
     path("kyc/<int:pk>/biometric/decision/", api_biometrics.BiometricDecision.as_view(), name="bo-kyc-biometric-decision"),
     path("kyc/biometric/captures/<int:pk>/", api_biometrics.BiometricCaptureFile.as_view(), name="bo-kyc-biometric-capture"),

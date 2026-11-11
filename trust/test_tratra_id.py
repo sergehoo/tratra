@@ -10,6 +10,7 @@ from rest_framework.test import APIClient
 from handy.models import Booking, HandymanDocument, HandymanProfile
 from handy.test_booking_regression import _client
 from handy.test_eligibility import artisan, service
+from handy.testing import make_face_verified
 from trust import identity
 from trust.models import AuditEvent, BookingPass, IdentityCheck, ProfessionalId
 
@@ -60,6 +61,7 @@ def test_code_normalisation_accepts_urls_and_rejects_garbage():
 
 def test_public_verification_confirms_a_verified_professional_without_sensitive_data():
     art = artisan("id_pub")
+    make_face_verified(art.handyman_profile)
     art.first_name, art.last_name, art.phone = "Awa", "Koné", "+2250700000222"
     art.save()
     code = api(art).get("/handy/me/tratra-id/").json()["tratra_id"]

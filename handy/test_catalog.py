@@ -116,7 +116,7 @@ def test_order_is_position_then_name_with_prestations_right_after_their_trade(wo
 def test_unpublished_offers_are_not_counted(world):
     from handy.models import HandymanProfile
 
-    HandymanProfile.objects.filter(user=world["pro"]).update(is_approved=False)            # artisan non éligible : ses offres ne sont plus publiées
+    HandymanProfile.objects.filter(user=world["pro"]).update(suspended=True)               # professionnel suspendu : ses offres ne sont plus publiées
     cache.clear()
     _, items = get_catalog()
     assert items["jardinage"]["offers_total"] == 0 and items["cuisine"]["offers_total"] == 0 and "jardinage" in items       # le métier reste affiché

@@ -1,5 +1,6 @@
 """« Inscription accompagnée » : questions par métier (configurables), sauvegarde et reprise, annonce rédigée à partir des réponses,
-application aux modèles EXISTANTS sans rien écraser, aucune publication avant éligibilité, droits, préremplissage KYC par la lecture."""
+application aux modèles EXISTANTS sans rien écraser, publication immédiate « Non vérifié » puis commandes après la pièce d'identité,
+droits, préremplissage KYC par la lecture."""
 from unittest import mock
 
 import pytest
@@ -89,14 +90,16 @@ def test_questions_are_configurable_in_django(nanny):
 # ═══ Sauvegarde, reprise, annonce proposée ════════════════════════════════════════════════════════════════════════════
 
 def test_answers_are_saved_cleaned_and_resumed(nanny):
-    u = member()
+    u = member(is_verified=True)
     c = api(u)
     d = fill(c, nanny, answers={**ANSWERS, "experience": "999", "hack": "x", "nanny_skills": ["babies", "rm -rf"]})
     assert "experience" not in d["answers"] and "hack" not in d["answers"]          # seules les valeurs proposées sont gardées
     assert d["answers"]["nanny_skills"] == ["babies"]
     d = api(u).get("/handy/me/onboarding/").json()                                  # autre appareil : même progression
     assert (d["trade"]["name"], d["commune"], d["quartier"], d["step"]) == ("Nousnou", "Cocody", "Riviera 2", "preview")
-    assert d["next_action"]["code"] == "resume" and d["next_action"]["step"] == "questions"
+    # Métier et zone suffisent : les questions sont facultatives, le service peut être publié.
+    assert d["next_action"] == {"code": "apply", "label": "Publier mon service", "step": "offer"}
+    assert d["publish"] == {"done": 2, "total": 3} and d["optional"]["questions"] is False
 
 
 def test_offer_is_written_from_the_answers_without_ai(nanny):
@@ -133,7 +136,10 @@ def test_apply_fills_the_existing_profile_and_creates_one_offer_idempotently(nan
     assert p.monthly_rate == 60000 and p.bio.startswith("Nousnou à Cocody (Riviera 2).")
     assert set(p.skills.values_list("slug", flat=True)) == {"nousnou", "garde-de-nuit"}
     assert Service.objects.filter(handyman=u).count() == 1
-    assert d["steps"][5] == {"key": "offer", "label": "Votre annonce", "state": "done"}
+    offer = next(s for s in d["steps"] if s["key"] == "offer")
+    assert (offer["state"], offer["status"]) == ("done", "Publié") and "Non vérifié" in offer["benefit"]
+    assert d["published"] is True and d["orders_enabled"] is False and d["verification"]["level"] == "NON_VERIFIE"
+    assert d["publish"] == {"done": 3, "total": 3}
     c.post("/handy/me/onboarding/apply/")                                              # rejouée : aucun doublon
     assert Service.objects.filter(handyman=u).count() == 1 and HandymanProfile.objects.filter(user=u).count() == 1
 
@@ -165,26 +171,33 @@ def test_proposed_texts_are_updated_while_untouched(nanny):
     assert "Logement sur place possible." in Service.objects.get(handyman=u).description
 
 
-def test_no_public_offer_before_identity_and_professional_validation(nanny):
+def test_offer_is_public_unverified_at_once_then_orders_follow_the_identity_check(nanny):
+    from handy.eligibility import is_orderable
+
     u = member(is_verified=True)
     c = api(u)
-    fill(c, nanny)
+    fill(c, nanny, answers={})                                                         # métier et zone seulement : ni question, ni photo
     c.post("/handy/me/onboarding/apply/")
     profile = HandymanProfile.objects.get(user=u)
-    profile.photo = "profile_pics/x.jpg"
-    profile.save()
-    assert not is_publishable(profile)
-    assert not api().get("/handy/services/").json().get("results")                    # rien dans le catalogue public
+    assert is_publishable(profile) and not is_orderable(profile)
+    listed = api().get("/handy/services/").json()["results"]                           # visible tout de suite, jamais présenté comme vérifié
+    assert len(listed) == 1
+    artisan = listed[0]["artisan"]
+    assert (artisan["is_verified"], artisan["can_order"], artisan["verification"]["level"]) == (False, False, "NON_VERIFIE")
+    assert artisan["verification"]["label"] == "Non vérifié" and artisan["online"] is False
     d = c.get("/handy/me/onboarding/").json()
-    assert d["next_action"]["code"] == "verify_identity" and d["published"] is False
+    assert d["next_action"] == {"code": "verify_identity", "label": "Activer mes commandes", "step": "identity"}
+    assert d["published"] is True and d["orders_enabled"] is False
     staff = User.objects.create_user(username="st", email="st@x.test", password="x", is_staff=True)
-    HandymanDocument.objects.create(handyman=profile, document_type="id_card", file="kyc/x.jpg", status="pending")
-    assert c.get("/handy/me/onboarding/").json()["next_action"] == {"code": "wait", "label": "Nous vérifions votre dossier", "step": "identity"}
-    HandymanDocument.objects.filter(handyman=profile).update(status="approved", reviewed_by=staff)
-    assert c.get("/handy/me/onboarding/").json()["next_action"]["step"] == "approval"
-    approve_profile(profile, by=staff)
+    doc = HandymanDocument.objects.create(handyman=profile, document_type="id_card", file="kyc/x.jpg", status="pending")
+    assert c.get("/handy/me/onboarding/").json()["next_action"] == {"code": "wait", "label": "Pièce d’identité en cours de revue",
+                                                                    "step": "identity"}
+    doc.approve(by=staff)                                                              # contrôle documentaire : commandes activées
     d = c.get("/handy/me/onboarding/").json()
-    assert d["published"] is True and d["next_action"]["code"] == "done" and d["done"] == d["total"]
+    assert d["orders_enabled"] is True and d["next_action"]["code"] == "done" and d["done"] == d["total"]
+    assert d["verification"]["level"] == "IDENTITE_VERIFIEE"                           # pas de badge « Vérifié » sans vérification faciale
+    artisan = api().get("/handy/services/").json()["results"][0]["artisan"]
+    assert (artisan["is_verified"], artisan["can_order"]) == (False, True)
 
 
 def test_apply_requires_the_answers_and_authentication(nanny):
@@ -209,10 +222,45 @@ def test_each_account_sees_only_its_own_onboarding(nanny):
 def test_journey_steps_and_next_action_for_a_beginner(nanny):
     u = member()
     d = api(u).get("/handy/me/onboarding/").json()
-    assert [s["key"] for s in d["steps"]] == ["trade", "zone", "questions", "account", "phone", "offer", "photo", "identity", "approval"]
-    assert d["next_action"] == {"code": "resume", "label": "Choisir mon métier", "step": "trade"}
-    fill(api(u), nanny)
-    assert api(u).get("/handy/me/onboarding/").json()["next_action"]["code"] == "verify_phone"     # téléphone pas encore confirmé
+    # Compte, puis trois écrans pour publier (métier, zone, confirmation), puis l'identité ; la faciale n'apparaît que si elle est ouverte.
+    assert [s["key"] for s in d["steps"]] == ["account", "phone", "trade", "zone", "offer", "identity"]
+    assert d["next_action"] == {"code": "verify_phone", "label": "Confirmer mon téléphone", "step": "phone"}   # pas encore confirmé
+    u.is_verified = True
+    u.save()
+    assert api(u).get("/handy/me/onboarding/").json()["next_action"] == {"code": "resume", "label": "Choisir mon métier", "step": "trade"}
+    c = api(u)
+    c.put("/handy/me/onboarding/", {"trade": nanny.pk}, format="json")
+    assert c.get("/handy/me/onboarding/").json()["next_action"] == {"code": "resume", "label": "Choisir ma zone", "step": "zone"}
+    c.put("/handy/me/onboarding/", {"commune": "Cocody"}, format="json")
+    d = c.get("/handy/me/onboarding/").json()
+    assert d["next_action"] == {"code": "apply", "label": "Publier mon service", "step": "offer"} and d["publish"]["done"] == 2
+
+
+def test_face_step_appears_when_open_and_asks_for_the_badge_after_orders(nanny, settings):
+    settings.BIOMETRIC_ENABLED = True
+    u = member(is_verified=True)
+    c = api(u)
+    fill(c, nanny, answers={})
+    d = c.post("/handy/me/onboarding/apply/").json()
+    assert [s["key"] for s in d["steps"]][-2:] == ["identity", "face"]
+    face = d["steps"][-1]
+    assert face["state"] == "todo" and "badge « Vérifié »" in face["benefit"]
+    staff = User.objects.create_user(username="st2", email="st2@x.test", password="x", is_staff=True)
+    HandymanDocument.objects.create(handyman=u.handyman_profile, document_type="id_card", file="kyc/x.jpg", status="pending").approve(by=staff)
+    d = c.get("/handy/me/onboarding/").json()
+    assert d["orders_enabled"] is True                                                 # métier non sensible : commandes sans la faciale
+    assert d["next_action"] == {"code": "verify_identity", "label": "Obtenir le badge Vérifié", "step": "face"}
+
+
+def test_trade_with_a_minimum_asks_for_the_experience_before_publishing(nanny):
+    nanny.min_experience_years = 2
+    nanny.save()
+    u = member(is_verified=True)
+    c = api(u)
+    fill(c, nanny, answers={})
+    r = c.post("/handy/me/onboarding/apply/")
+    assert r.status_code == 409 and r.json()["code"] == "experience_required"
+    assert not HandymanProfile.objects.filter(user=u).exists() and not Service.objects.filter(handyman=u).exists()
 
 
 # ═══ Expérience : déclaration exacte, minimum par métier ═══════════════════════════════════════════════════════════════
@@ -265,7 +313,8 @@ def test_trade_minimum_is_configurable_and_blocks_publication_without_touching_t
     assert "« Moins d’un an »" in blocker["hint"]
     state = c.get("/handy/me/onboarding/").json()
     assert state["next_action"]["code"] == "blocked" and state["published"] is False
-    assert state["steps"][-1]["state"] == "todo"                                   # bloqué par la règle, pas « en attente de l'équipe »
+    assert next(s for s in state["steps"] if s["key"] == "offer")["state"] == "todo"   # bloqué par la règle, pas « en attente »
+    assert state["blocked"]["code"] == "experience_minimum"
     p.refresh_from_db()
     assert (p.experience_years, p.experience_label) == (0, "Moins d’un an")        # jamais modifiée pour passer le seuil
     nanny.min_experience_years = 0
@@ -341,3 +390,13 @@ def test_seeded_questions_use_typographic_apostrophes():
         texts += [q.text, q.help_text] + [str(o.get(k, "")) for o in q.options for k in ("label", "phrase")]
     assert texts and not [t for t in texts if "'" in t]
     assert any("Moins d’un an" == str(o.get("label")) for q in OnboardingQuestion.objects.filter(key="experience") for o in q.options)
+
+
+@pytest.mark.django_db(transaction=True)
+def test_apply_opens_its_own_transaction_outside_any_ambient_one(nanny):
+    """Hors transaction ambiante (requête réelle, sans ATOMIC_REQUESTS), la publication verrouille la ligne : elle doit ouvrir sa propre
+    transaction. Les autres tests tournent dans la transaction du test et ne voient pas ce défaut (erreur 500 à la publication)."""
+    c = api(member(is_verified=True))
+    fill(c, nanny)
+    r = c.post("/handy/me/onboarding/apply/")
+    assert r.status_code == 200 and r.json()["published"] is True

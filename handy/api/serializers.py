@@ -1,4 +1,5 @@
 # handy/api/serializers.py
+import re
 from collections.abc import Mapping
 from datetime import timedelta
 from decimal import Decimal
@@ -34,6 +35,7 @@ from handy.models import (
     HandymanDocument, Report, Device, HeroSlide, Payout, Dispute, TimeOff, ReplacementSuggestion,
     PayoutAccount, SubscriptionPlan, Subscription, CompanyProfile
 )
+from handy.eligibility import NON_VERIFIE
 from handy.services.pricing import estimate_price
 from handy.services.fees import compute_platform_fee
 
@@ -131,7 +133,12 @@ class PublicUserMiniSerializer(serializers.ModelSerializer):
 class PublicArtisanMiniSerializer(serializers.ModelSerializer):
     """Résumé public d'un profil artisan, embarqué dans les services."""
     display_name = serializers.SerializerMethodField()
-    is_verified = serializers.BooleanField(source="is_approved", read_only=True)
+    # Badge « Vérifié » : pièce d'identité approuvée ET vérification faciale validée. Un profil publié ou dont seule la pièce
+    # est contrôlée n'est jamais présenté comme « Vérifié » (`verification` donne le niveau exact).
+    is_verified = serializers.SerializerMethodField()
+    verification = serializers.SerializerMethodField()
+    can_order = serializers.BooleanField(source="orders_enabled", read_only=True)
+    online = serializers.SerializerMethodField()
     photo = serializers.SerializerMethodField()
     # Tratra Trust : score expliqué (None tant que les données sont insuffisantes) et badges ACTUELS.
     trust_score = serializers.IntegerField(read_only=True)
@@ -140,11 +147,26 @@ class PublicArtisanMiniSerializer(serializers.ModelSerializer):
     class Meta:
         model = HandymanProfile
         fields = ["id", "display_name", "commune", "rating", "completed_jobs",
-                  "experience_years", "is_verified", "online", "photo", "trust_score", "badges"]
+                  "experience_years", "is_verified", "verification", "can_order", "online", "photo", "trust_score", "badges"]
         read_only_fields = fields
 
     def get_display_name(self, obj) -> str:
         return public_display_name(obj.user)
+
+    def get_is_verified(self, obj) -> bool:
+        from handy.eligibility import VERIFIE
+
+        return obj.verification == VERIFIE
+
+    @extend_schema_field(OpenApiTypes.OBJECT)
+    def get_verification(self, obj):
+        from handy.eligibility import verification_payload
+
+        return verification_payload(obj.verification)
+
+    def get_online(self, obj) -> bool:
+        # « Disponible » n'a de sens que pour un professionnel qui peut recevoir une commande.
+        return bool(obj.online and obj.orders_enabled)
 
     @extend_schema_field(OpenApiTypes.OBJECT)
     def get_badges(self, obj):
@@ -631,6 +653,12 @@ def _invalid_image_url() -> CodedAPIException:
                              fields={"image_url": [field_error("invalid_image_url", detail)]})
 
 
+# Coordonnées glissées dans une annonce (numéro ivoirien ou international, suite de 8 chiffres, lien, messagerie) : refusées tant que
+# l'identité du professionnel n'est pas vérifiée — le contact passe par Tratra.
+CONTACT_LEAK = re.compile(r"\d{8,}|(?:\+|\b00)\s?225|\b0[157](?:[\s.\-]?\d{2}){4}\b|https?://|\bwww\.|\bwa\.me\b|"
+                          r"\b[\w-]+\.(?:com|net|org|ci|io|me|app)\b|\bwhats\s?app\b", re.IGNORECASE)
+
+
 class ServiceSerializer(serializers.ModelSerializer):
     # `handyman` est posé par le serveur (= request.user) : jamais au nom d'autrui,
     # jamais de changement de propriétaire (§4.7).
@@ -675,7 +703,53 @@ class ServiceSerializer(serializers.ModelSerializer):
                     dict(Service.MODES)[m] for m in refused) + "."})
             for code, _ in Service.MODES:
                 attrs[f"offers_{code}"] = code in modes
+        self._check_price(attrs)
+        self._check_publication(attrs)
         return attrs
+
+    def _value(self, attrs, name):
+        return attrs[name] if name in attrs else getattr(self.instance, name, None)
+
+    def _check_price(self, attrs) -> None:
+        """Un tarif fixe ou horaire porte un prix strictement positif ; « sur devis » n'en porte aucun."""
+        if self.instance is not None and "price" not in attrs and "price_type" not in attrs:
+            return
+        if self._value(attrs, "price_type") == "quote":
+            attrs["price"] = None
+            return
+        price = self._value(attrs, "price")
+        if price is None or price <= 0:
+            raise serializers.ValidationError({"price": "Indiquez un prix supérieur à 0, ou choisissez « Sur devis »."})
+
+    def _check_publication(self, attrs) -> None:
+        """Contrôles anti-spam à la publication (l'identité n'est plus exigée pour publier) : pas de doublon d'annonce ; tant que
+        l'identité n'est pas vérifiée, un nombre limité d'annonces actives et ni numéro de téléphone ni lien dans le texte."""
+        request = self.context.get("request")
+        user = getattr(self.instance, "handyman", None) or getattr(request, "user", None)
+        if user is None or not getattr(user, "pk", None):
+            return
+        active = self._value(attrs, "is_active")
+        active = True if active is None else bool(active)
+        mine = Service.objects.filter(handyman_id=user.pk, is_active=True)
+        if self.instance is not None:
+            mine = mine.exclude(pk=self.instance.pk)
+        touched = self.instance is None or bool({"title", "category", "is_active"} & set(attrs))
+        title = (self._value(attrs, "title") or "").strip()
+        if active and touched and title and mine.filter(category=self._value(attrs, "category"), title__iexact=title).exists():
+            raise serializers.ValidationError({"title": "Vous proposez déjà cette prestation."})
+        profile = getattr(user, "handyman_profile", None)
+        if profile is None or profile.verification != NON_VERIFIE:
+            return
+        limit = int(getattr(settings, "UNVERIFIED_MAX_ACTIVE_SERVICES", 3))
+        activating = active and (self.instance is None or not self.instance.is_active)
+        if activating and mine.count() >= limit:
+            raise serializers.ValidationError(
+                f"Vous pouvez publier {limit} services avant la vérification de votre identité. Activez vos commandes pour en publier davantage.",
+                code="unverified_limit")
+        for name in ("title", "description"):
+            if name in attrs and CONTACT_LEAK.search(attrs[name] or ""):
+                raise serializers.ValidationError({name: "Ne mettez ni numéro de téléphone ni lien dans votre annonce : les clients vous "
+                                                         "contactent par Tratra."})
 
     def validate_image_url(self, value):
         """`https` vers un hôte de stockage du projet (MEDIA_PUBLIC_HOSTS) uniquement :

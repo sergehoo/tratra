@@ -38,7 +38,7 @@ def test_requires_authentication():
 def test_new_client_has_zero_everything_and_no_provider():
     me = client_user()
     d = api(me).get(URL).json()
-    assert d["capabilities"] == {"client": True, "provider": False, "publishable": False, "company": False, "business": False}
+    assert d["capabilities"] == {"client": True, "provider": False, "publishable": False, "orders": False, "company": False, "business": False}
     assert d["provider"] is None
     assert d["client"]["bookings"]["total"] == 0
     assert d["reviews"] == {"received_count": 0, "received_average": None, "to_write": 0}
@@ -75,7 +75,7 @@ def test_provider_only_sees_missions_checklist_and_actions():
     assert d["capabilities"]["provider"] is True and d["capabilities"]["publishable"] is False
     p = d["provider"]
     assert p["missions"]["pending"] == 1 and p["missions"]["in_progress"] == 1 and p["missions"]["total"] == 2
-    assert p["completion"]["done"] == 0 and p["completion"]["total"] == 7 and p["completion"]["percent"] == 0
+    assert p["completion"]["done"] == 0 and p["completion"]["total"] == 6 and p["completion"]["percent"] == 0
     assert p["kyc"]["status"] == "none" and p["services"] == {"active": 1, "total": 1}
     keys = [a["key"] for a in d["actions"]]
     assert "missions_pending" in keys and "kyc_missing" in keys and "profile_incomplete" in keys

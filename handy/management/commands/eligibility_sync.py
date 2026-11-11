@@ -19,8 +19,8 @@ class Command(BaseCommand):
         if opts["check"]:
             drift = eligibility.published_drift()
             if drift:
-                raise CommandError(f"{drift} profil(s) dont la publication diffère de la règle d'éligibilité.")
+                raise CommandError(f"{drift} profil(s) dont la publication, les commandes ou le niveau de vérification diffèrent de la règle d'éligibilité.")
             self.stdout.write("Copie de l'éligibilité conforme à la règle.")
             return
         changed = eligibility.refresh_published()
-        self.stdout.write(f"Éligibilité recalculée : {changed} profil(s) corrigé(s).")
+        self.stdout.write(f"Éligibilité recalculée : {changed} correction(s).")

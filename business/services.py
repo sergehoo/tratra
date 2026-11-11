@@ -16,7 +16,7 @@ from business import rbac
 from business.models import (ApprovalRule, ApprovalStep, Budget, ConsolidatedInvoice, Equipment, InterventionRequest,
                              Invitation, InvoiceLine, MaintenanceContract, Membership, Organization, PreventivePlan, Role,
                              Site)
-from handy.eligibility import publishable
+from handy.eligibility import orderable
 from handy.models import Booking, HandymanProfile, Notification, Payment, Service, TimeOff
 from handy.notifications import notify
 from trust.models import audit
@@ -234,7 +234,7 @@ def suggest_artisans(req: InterventionRequest, limit: int = 5) -> List[Dict]:
     """Artisans ÉLIGIBLES (KYC approuvé, profil complet, compte actif — règle unique de la plateforme), classés selon : contrat
     (prestataire attitré), compétence, proximité du site, confiance, note, disponibilité. Chaque suggestion explique son rang."""
     now = timezone.now()
-    qs = publishable().select_related("user").prefetch_related("skills")
+    qs = orderable().select_related("user").prefetch_related("skills")
     qs = qs.exclude(user_id=req.requested_by_id)  # un demandeur ne s'affecte pas sa propre mission
     qs = qs.exclude(Exists(TimeOff.objects.filter(handyman_id=OuterRef("pk"), start__lte=now, end__gte=now)))
     if req.category_id:

@@ -1,6 +1,8 @@
-"""Éligibilité des artisans : publication publique ET missions (handy/eligibility.py).
+"""Éligibilité des professionnels (handy/eligibility.py) : trois niveaux séparés.
 
-Règle : compte actif + profil approuvé + KYC approuvé (pièce d'identité) + profil complet.
+PUBLICATION : compte actif, non suspendu, téléphone confirmé (ou commandes déjà activées), métier et zone.
+COMMANDES : publication + pièce d'identité approuvée (+ vérification faciale pour un métier sensible).
+BADGE « Vérifié » : commandes + vérification faciale satisfaite.
 """
 from datetime import timedelta
 
@@ -11,7 +13,8 @@ from django.urls import reverse
 from django.utils import timezone
 from rest_framework.test import APIClient
 
-from handy.eligibility import is_publishable, publishable, publishable_rule
+from handy.eligibility import (IDENTITE_VERIFIEE, NON_VERIFIE, is_orderable, is_publishable, is_verified, orderable, orderable_rule,
+                               publishable, publishable_rule, verification_level, verified_rule)
 from handy.models import (
     Booking, HandymanDocument, HandymanProfile, Service, ServiceCategory, TimeOff, User,
 )
@@ -51,17 +54,34 @@ def service(user, title="Dépannage", active=True):
 
 # ---- La règle : SQL et Python concordent -----------------------------------------------------
 
+def _phone_only(p):
+    """Compte au téléphone confirmé dont les commandes ne sont pas activées : le cas du professionnel qui vient de publier."""
+    p.is_approved = False
+    User.objects.filter(pk=p.user_id).update(is_verified=True)
+
+
+def _documents(status):
+    def change(p):
+        for doc in HandymanDocument.objects.filter(handyman=p):
+            doc.status = status
+            doc.save(update_fields=["status"])
+    return change
+
+
+# cas → (modification, publié ?, commandes ?, identité vérifiée ?)
 BREAKERS = {
-    "complet": lambda p: None,
-    "non_approuve": lambda p: setattr(p, "is_approved", False),
-    "sans_bio": lambda p: setattr(p, "bio", ""),
-    "sans_experience": lambda p: setattr(p, "experience_years", 0),
-    "sans_zone": lambda p: setattr(p, "commune", ""),
-    "sans_photo": lambda p: setattr(p, "photo", ""),
-    "sans_specialite": lambda p: p.skills.clear(),
-    "kyc_en_attente": lambda p: HandymanDocument.objects.filter(handyman=p).update(status="pending"),
-    "kyc_rejete": lambda p: HandymanDocument.objects.filter(handyman=p).update(status="rejected"),
-    "sans_document": lambda p: HandymanDocument.objects.filter(handyman=p).delete(),
+    "complet": (lambda p: None, True, True, True),
+    "non_approuve_telephone_non_confirme": (lambda p: setattr(p, "is_approved", False), False, False, True),
+    "non_approuve_telephone_confirme": (_phone_only, True, False, True),
+    "suspendu": (lambda p: setattr(p, "suspended", True), False, False, False),
+    "sans_bio": (lambda p: setattr(p, "bio", ""), True, True, True),                     # facultatif : complétable plus tard
+    "sans_experience": (lambda p: setattr(p, "experience_years", 0), True, True, True),  # facultatif hors métier à expérience minimale
+    "sans_photo": (lambda p: setattr(p, "photo", ""), True, True, True),                 # facultatif
+    "sans_zone": (lambda p: setattr(p, "commune", ""), False, False, True),
+    "sans_specialite": (lambda p: p.skills.clear(), False, False, True),
+    "kyc_en_attente": (_documents("pending"), True, False, False),
+    "kyc_rejete": (_documents("rejected"), True, False, False),
+    "sans_document": (lambda p: HandymanDocument.objects.filter(handyman=p).delete(), True, False, False),
 }
 
 
@@ -78,8 +98,7 @@ def test_checklist_reflects_the_rule():
     from handy.eligibility import profile_checklist
     user = artisan("liste", eligible=False)
     items = {i["key"]: i["done"] for i in profile_checklist(user.handyman_profile)}
-    assert items == {"bio": False, "skills": False, "experience": False, "zone": False,
-                     "photo": False, "kyc": False, "approval": False}
+    assert items == {"bio": False, "skills": False, "experience": False, "zone": False, "photo": False, "kyc": False}
     make_eligible(user.handyman_profile)
     assert all(i["done"] for i in profile_checklist(HandymanProfile.objects.get(user=user)))
 
@@ -88,18 +107,27 @@ def test_checklist_reflects_the_rule():
 def test_rule_sql_matches_python(case):
     user = artisan(f"a_{case}")
     profile = user.handyman_profile
-    BREAKERS[case](profile)
+    change, published, orders, identity = BREAKERS[case]
+    change(profile)
     profile.save()
     profile = HandymanProfile.objects.get(pk=profile.pk)
-    expected = case == "complet"
-    assert is_publishable(profile) is expected
-    assert publishable_rule().filter(pk=profile.pk).exists() is expected
+    assert is_publishable(profile) is published
+    assert publishable_rule().filter(pk=profile.pk).exists() is published
+    assert is_orderable(profile) is orders
+    assert orderable_rule().filter(pk=profile.pk).exists() is orders
+    # Copies calculées (recherche, cartes) à jour dans la même transaction que le changement.
+    assert (profile.published, profile.orders_enabled) == (published, orders)
+    assert orderable().filter(pk=profile.pk).exists() is orders
+    # Sans vérification faciale, jamais « Vérifié » : au mieux « Identité vérifiée » (pièce approuvée, compte actif, non suspendu).
+    assert is_verified(profile) is False and not verified_rule().filter(pk=profile.pk).exists()
+    assert verification_level(profile) == profile.verification == (IDENTITE_VERIFIEE if identity else NON_VERIFIE)
 
 
 EXPERIENCE_CASES = {
     # (années, tranche déclarée, minimum du métier de la spécialité, minimum du métier d'une offre active) → publiable ?
     "tranche_debutant_metier_sans_minimum": (0, "Moins d’un an", 0, 0, True),
-    "aucune_declaration": (0, "", 0, 0, False),
+    "aucune_declaration": (0, "", 0, 0, True),          # facultative quand le métier ne fixe aucun minimum
+    "aucune_declaration_metier_a_minimum": (0, "", 1, 0, False),
     "sous_minimum_specialite": (1, "1 à 2 ans", 2, 0, False),
     "sous_minimum_offre": (1, "", 0, 3, False),
     "minimum_atteint": (3, "3 à 5 ans", 3, 3, True),

@@ -554,7 +554,11 @@ BIOMETRIC_MAX_ATTEMPTS_PER_DAY = config('BIOMETRIC_MAX_ATTEMPTS_PER_DAY', defaul
 BIOMETRIC_MAX_ATTEMPTS_PER_WEEK = config('BIOMETRIC_MAX_ATTEMPTS_PER_WEEK', default=6, cast=int)
 BIOMETRIC_RETENTION_DAYS = config('BIOMETRIC_RETENTION_DAYS', default=30, cast=int)              # suppression des captures après la fin d'une session
 BIOMETRIC_CONSENT_VERSION = config('BIOMETRIC_CONSENT_VERSION', default='2026-10')
-KYC_BIOMETRIC_REQUIRED = config('KYC_BIOMETRIC_REQUIRED', default=False, cast=bool)              # le badge « Vérifié » exige alors la vérification faciale ou une procédure alternative approuvée
+# Politique générale : la vérification faciale devient obligatoire pour les COMMANDES de tous les métiers. Sans elle, seuls les métiers
+# sensibles (ServiceCategory.face_required, réglé dans l'administration) l'exigent. Le badge « Vérifié » la demande dans tous les cas.
+KYC_BIOMETRIC_REQUIRED = config('KYC_BIOMETRIC_REQUIRED', default=False, cast=bool)
+# Anti-spam à la publication : nombre d'annonces actives permis tant que l'identité du professionnel n'est pas vérifiée.
+UNVERIFIED_MAX_ACTIVE_SERVICES = config('UNVERIFIED_MAX_ACTIVE_SERVICES', default=3, cast=int)
 
 # Push mobile (FCM HTTP v1) : voir handy/push.py. Sans identifiants, aucun push n'est envoyé (jamais d'erreur).
 FCM_CREDENTIALS_FILE = config('FCM_CREDENTIALS_FILE', default='')

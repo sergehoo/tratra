@@ -148,9 +148,12 @@ def open_direct(user, other_id: int, *, allow_stranger: bool = False) -> Tuple[C
     existing = Conversation.objects.filter(pair_key=key).first()
     if existing is not None:
         return existing, False
-    from handy.eligibility import is_user_publishable
+    from handy.eligibility import is_user_orderable, is_user_publishable
 
-    if not allow_stranger and other.pk not in contacts.contact_ids(user.pk) and not is_user_publishable(other):
+    # Un professionnel publié mais non vérifié n'est pas joignable : aucun contact ni commande avant le contrôle de son identité.
+    if not allow_stranger and other.pk not in contacts.contact_ids(user.pk) and not is_user_orderable(other):
+        if is_user_publishable(other):
+            raise MessagingError("not_verified", "Ce professionnel n'a pas encore fait vérifier son identité : il n'est pas joignable pour le moment.", 403)
         raise MessagingError("not_reachable", "Ce membre n'est pas joignable directement : passez par une réservation.", 403)
     day_key = f"msg:newconv:{user.pk}:{timezone.localdate().isoformat()}"
     cache.add(day_key, 0, 90000)

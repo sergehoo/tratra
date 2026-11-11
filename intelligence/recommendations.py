@@ -52,7 +52,7 @@ def _available(profile, when: Optional[datetime]) -> Tuple[Optional[bool], str]:
 
 def recommend(user, *, category=None, query: str = "", location: Optional[Point] = None, when: Optional[datetime] = None, limit: int = 6, with_transport: bool = True) -> Dict:
     wanted = _tokens(query)
-    qs = (Service.objects.filter(is_active=True, handyman__in=eligibility.publishable().values("user_id"))
+    qs = (Service.objects.filter(is_active=True, handyman__in=eligibility.orderable_user_ids())
           .exclude(handyman=user).select_related("handyman", "handyman__handyman_profile", "category"))
     if category is not None:
         qs = qs.filter(category=category)

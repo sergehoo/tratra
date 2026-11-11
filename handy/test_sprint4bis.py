@@ -163,5 +163,10 @@ def test_presence_bloquee_si_non_verifie(api_client):
 
     prof.is_approved = True
     prof.save(update_fields=["is_approved"])
+    r = api_client.post(reverse("handymen-presence"), {"online": True}, format="json")
+    assert r.status_code == 403 and r.json()["code"] == "orders_not_enabled"   # commandes activées à la main, sans pièce approuvée : toujours interdit
+    from handy.testing import make_eligible
+
+    make_eligible(prof)                                                        # pièce d'identité approuvée, zone et métier renseignés
     r2 = api_client.post(reverse("handymen-presence"), {"online": True}, format="json")
     assert r2.status_code == 200 and r2.json()["online"] is True

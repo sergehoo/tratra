@@ -27,7 +27,7 @@ from django.utils import timezone
 
 from flash.models import DispatchConfig, DispatchEvent, MissionOffer, MissionRequest
 from handy import proximity
-from handy.eligibility import is_publishable, publishable
+from handy.eligibility import is_orderable, orderable
 from handy.models import AvailabilitySlot, Booking, HandymanProfile, Service, ServiceArea, ServiceCategory, TimeOff
 
 logger = logging.getLogger(__name__)
@@ -327,7 +327,7 @@ def candidates(req: MissionRequest, config: DispatchConfig, now=None, *, explain
     offered = set(req.offers.values_list("handyman_id", flat=True)) if req.pk else set()
     busy_elsewhere = set() if listing else set(
         MissionOffer.objects.filter(status=MissionOffer.PENDING, expires_at__gt=now).exclude(request=req).values_list("handyman_id", flat=True))
-    base = (publishable(HandymanProfile.objects.all())
+    base = (orderable(HandymanProfile.objects.all())
             .filter(Q(user__services__is_active=True, user__services__category_id__in=family) | Q(skills__id__in=family))
             .exclude(user_id=req.client_id))
     zone = _zone_filter(req, config, radius_km)
@@ -751,7 +751,7 @@ def accept(offer_id: int, user, *, now=None) -> MissionRequest:
         if offer.status != MissionOffer.PENDING or now > offer.expires_at + timedelta(seconds=ACCEPT_GRACE_SECONDS):
             raise FlashError("offer_expired", "Cette proposition a expiré.", 409)
         profile = HandymanProfile.objects.select_for_update(of=("self",)).select_related("user").get(user=user)   # sérialise les acceptations d'un même pro
-        if not is_publishable(profile):
+        if not is_orderable(profile):
             raise FlashError("not_eligible", "Votre profil n'est plus éligible aux missions.", 403)
         config = DispatchConfig.get_solo()
         busy = availability_issue(profile, req, config, now, check_online=False)
@@ -867,7 +867,7 @@ def choose_quote(request_id: int, client, offer_id: int, *, now=None) -> Mission
         if offer.proposal_expires_at and now > offer.proposal_expires_at + timedelta(seconds=ACCEPT_GRACE_SECONDS):
             raise FlashError("proposal_lapsed", "Cette proposition a expiré.", 409)
         profile = HandymanProfile.objects.select_for_update(of=("self",)).select_related("user").get(user_id=offer.handyman_id)
-        if not is_publishable(profile):
+        if not is_orderable(profile):
             raise FlashError("not_eligible", "Ce professionnel n'est plus disponible.", 409)
         config = DispatchConfig.get_solo()
         busy = availability_issue(profile, req, config, now, check_online=False)
@@ -1093,7 +1093,7 @@ def answer_counter(offer_id: int, user, accept: bool, *, now=None) -> MissionReq
             transaction.on_commit(lambda: _notify_counter_answer(offer.pk, False))
             return req
         profile = HandymanProfile.objects.select_for_update(of=("self",)).select_related("user").get(user=user)
-        if not is_publishable(profile):
+        if not is_orderable(profile):
             raise FlashError("not_eligible", "Votre profil n'est plus éligible aux missions.", 403)
         config = DispatchConfig.get_solo()
         busy = availability_issue(profile, req, config, now, check_online=False)

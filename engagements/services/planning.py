@@ -18,7 +18,7 @@ from engagements.rules import BOOKING_HORIZON_DAYS, SHIFT_HORIZON_DAYS
 from engagements.services.common import EngagementError, conflict, counterpart, notify_role, party_of, record, require_eligible_worker
 from engagements.services.installments import generate_installments, q, refresh_installment
 from engagements.services.validation import Validator
-from handy.eligibility import is_user_publishable
+from handy.eligibility import is_user_orderable
 from handy.models import Booking, User
 
 logger = logging.getLogger(__name__)
@@ -289,7 +289,7 @@ def propose_replacement(contract: EngagementContract, user, shift_id: int, repla
     substitute = User.objects.filter(pk=replacement_worker_id, is_active=True).first()
     if substitute is None or substitute.pk in (contract.worker_id, contract.principal_id):
         raise EngagementError("invalid", "Remplaçant invalide.", 400, fields={"replacement_worker": "Choisissez un autre professionnel vérifié."})
-    if not is_user_publishable(substitute):
+    if not is_user_orderable(substitute):
         raise conflict("worker_not_verified", "Le remplaçant doit être un professionnel vérifié par Tratra.")
     if contract.schedule_events.filter(kind="replacement", replaces=shift, status="requested").exists():
         raise conflict("overlap", "Un remplacement est déjà en cours de validation pour cette intervention.")
@@ -338,7 +338,7 @@ def materialize_bookings(contract: EngagementContract, today: Optional[date] = N
     made = 0
     for event in events:
         worker = event.replacement_worker if event.kind == "replacement" else contract.worker
-        if worker is None or not is_user_publishable(worker) or covered(contract, event.date):
+        if worker is None or not is_user_orderable(worker) or covered(contract, event.date):
             continue
         try:
             with transaction.atomic():

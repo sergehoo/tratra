@@ -31,7 +31,7 @@ from engagements.services import planning as planning_svc
 from engagements.services import postings as posting_svc
 from engagements.services.common import EngagementError, contracts_for, managed_org_ids, party_of
 from engagements.services.experience import experience_for
-from handy.eligibility import is_user_publishable, publishable
+from handy.eligibility import is_user_orderable, orderable
 from handy.models import HandymanProfile
 
 TAG = "Engagements"
@@ -147,7 +147,7 @@ def workers(request):
     q = (request.query_params.get("q") or "").strip()[:60]
     if len(q) < 2:
         return Response({"results": []})
-    profiles = (publishable(HandymanProfile.objects.exclude(user=request.user)).filter(Q(user__first_name__icontains=q) | Q(user__last_name__icontains=q))
+    profiles = (orderable(HandymanProfile.objects.exclude(user=request.user)).filter(Q(user__first_name__icontains=q) | Q(user__last_name__icontains=q))
                 .select_related("user").order_by("user__first_name", "user__last_name")[:10])
     return Response({"results": [{"id": p.user_id, "name": S.public_name(p.user), "commune": p.commune or p.user.city or ""} for p in profiles]})
 
@@ -178,7 +178,7 @@ def postings(request):
         qs = qs.filter(city__icontains=q["city"][:100])
     if q.get("q"):
         qs = qs.filter(Q(title__icontains=q["q"][:100]) | Q(description__icontains=q["q"][:100]))
-    eligible = is_user_publishable(request.user)
+    eligible = is_user_orderable(request.user)
     applied = set(EngagementApplication.objects.filter(applicant=request.user).values_list("posting_id", flat=True))
 
     def render(p):
@@ -204,7 +204,7 @@ def posting_detail(request, pk):
         p.refresh_from_db()
     out = S.posting(p, request.user, detail=True)
     out["applied"] = p.applications.filter(applicant=request.user).exists()
-    out["can_apply"] = bool(p.status == "open" and not out["mine"] and is_user_publishable(request.user) and not out["applied"])
+    out["can_apply"] = bool(p.status == "open" and not out["mine"] and is_user_orderable(request.user) and not out["applied"])
     return Response(out)
 
 

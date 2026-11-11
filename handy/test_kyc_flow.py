@@ -10,7 +10,7 @@ from rest_framework.test import APIClient
 
 from backoffice.services import approve_profile
 from handy import kyc_flow
-from handy.eligibility import eligibility_summary, is_publishable
+from handy.eligibility import eligibility_summary, is_orderable, is_publishable
 from handy.models import HandymanDocument, KycDossier, Notification, User
 from handy.test_eligibility import BREAKERS, artisan, service
 
@@ -275,8 +275,13 @@ def test_face_step_appears_only_when_biometrics_are_enabled_and_human_review_rem
     fill(c)
     _send(c)
     d = c.get(URL).json()
-    assert steps(d)["face"] == "current" and d["current_step"] == "face" and d["face"]["required"] is False
+    # Facultative (badge « Vérifié ») : proposée, jamais bloquante — le dossier attend la revue de la pièce.
+    assert steps(d)["face"] == "optional" and d["current_step"] == "review" and d["face"]["required"] is False
     assert d["face"]["satisfied"] is False                       # aucune validation faciale automatique
+    settings.KYC_BIOMETRIC_REQUIRED = True                        # politique : exigée avant les commandes → étape à faire
+    d = c.get(URL).json()
+    assert steps(d)["face"] == "current" and d["current_step"] == "face" and d["face"]["required"] is True
+    settings.KYC_BIOMETRIC_REQUIRED = False
     bio.request_human_review(u, "other")                          # alternative humaine (module biométrique existant)
     c.patch(URL, {"face_choice": "human"}, format="json")
     d = c.get(URL).json()
@@ -291,12 +296,14 @@ def test_face_step_appears_only_when_biometrics_are_enabled_and_human_review_rem
 def test_publication_authorization_always_equals_is_publishable(breaker):
     u = artisan(f"elig_{breaker}")
     profile = u.handyman_profile
-    BREAKERS[breaker](profile)
+    BREAKERS[breaker][0](profile)
     profile.save()
     profile.refresh_from_db()
     s = eligibility_summary(profile)
     assert s["publication"]["authorized"] is is_publishable(profile)
     assert (s["publication"]["blockers"] == []) is s["publication"]["authorized"]
+    assert s["orders"]["authorized"] is is_orderable(profile)
+    assert (s["orders"]["blockers"] == []) is s["orders"]["authorized"]
 
 
 def test_four_distinct_notions_with_real_blockers_and_corrective_actions():
@@ -305,22 +312,29 @@ def test_four_distinct_notions_with_real_blockers_and_corrective_actions():
     assert s["profile"]["total"] == 5 and s["profile"]["complete"] is False
     assert s["kyc"]["status"] == "draft" and s["approval"]["approved"] is False
     codes = {b["code"]: b["action"] and b["action"]["code"] for b in s["publication"]["blockers"]}
-    assert codes == {"profile_incomplete": "edit_profile", "kyc_draft": "verify_identity"}
+    assert codes == {"phone_unverified": "verify_phone", "profile_incomplete": "edit_profile"}
+    # la pièce d'identité ne bloque plus la publication : elle n'ouvre que les commandes
+    orders = {b["code"]: b["action"] and b["action"]["code"] for b in s["orders"]["blockers"]}
+    assert orders == {"not_published": "verify_phone", "kyc_draft": "verify_identity"}
     assert s["offers"] == {"total": 0, "active": 0, "published": 0, "inactive": 0, "label": "Aucune offre créée",
-                           "action": {"code": "add_service", "label": "Ajouter une offre"}}
-    assert s["next_action"]["code"] == "edit_profile"
-    # identité vérifiée, profil complet, mais validation finale pas encore donnée : un seul blocage, sans action à faire
+                           "action": {"code": "add_service", "label": "Publier un service"}, "accepting_orders": False}
+    assert s["next_action"]["code"] == "verify_phone" and s["verification"]["level"] == "NON_VERIFIE"
+    # pièce approuvée, téléphone confirmé, activation retenue par l'équipe : service public, un seul blocage des commandes, sans action
     ok = artisan("elig_wait")
+    ok.is_verified = True
+    ok.save()
     profile = ok.handyman_profile
     profile.is_approved = False
     profile.save()
     service(ok)
     s = eligibility_summary(profile)
-    assert [b["code"] for b in s["publication"]["blockers"]] == ["approval_pending"] and s["publication"]["blockers"][0]["action"] is None
-    assert s["offers"]["published"] == 0 and s["offers"]["active"] == 1 and "en attente" in s["offers"]["label"]
+    assert s["publication"]["authorized"] is True and s["publication"]["blockers"] == []
+    assert [b["code"] for b in s["orders"]["blockers"]] == ["approval_pending"] and s["orders"]["blockers"][0]["action"] is None
+    assert s["offers"]["published"] == 1 and s["offers"]["accepting_orders"] is False
+    assert s["verification"]["level"] == "IDENTITE_VERIFIEE" and s["verification"]["badge"] is False
     approve_profile(profile, by=None)
     s = eligibility_summary(profile)
-    assert s["publication"]["authorized"] is True and s["offers"]["published"] == 1 and s["offers"]["label"] == "1 offre publiée"
+    assert s["orders"]["authorized"] is True and s["offers"]["accepting_orders"] is True and s["offers"]["label"] == "1 offre publiée"
 
 
 def test_dashboard_identity_state_ignores_pending_professional_documents():
@@ -328,7 +342,7 @@ def test_dashboard_identity_state_ignores_pending_professional_documents():
     u = artisan("elig_cert")
     HandymanDocument.objects.create(handyman=u.handyman_profile, document_type="certification", file="kyc/c.pdf", status="pending", title="CAP")
     p = api(u).get("/handy/me/dashboard/").json()["provider"]
-    assert p["completion"]["done"] == p["completion"]["total"] == 7
+    assert p["completion"]["done"] == p["completion"]["total"] == 6
     assert p["kyc"]["status"] == "approved" and p["eligibility"]["kyc"]["approved"] is True and p["publishable"] is True
     assert p["eligibility"]["publication"]["authorized"] is True
 
@@ -344,7 +358,7 @@ def test_my_services_show_a_clear_publication_state_per_offer():
     ok = artisan("svc_ok")
     service(ok)
     assert api(ok).get("/handy/me/services/").json()["results"][0]["publication"] == {
-        "state": "published", "label": "Publiée", "hint": "Visible des clients dans le catalogue et la recherche."}
+        "state": "published", "label": "Publiée", "orders": True, "hint": "Visible des clients. Vous pouvez recevoir des commandes."}
 
 
 def test_a_dossier_belongs_to_its_owner_only():

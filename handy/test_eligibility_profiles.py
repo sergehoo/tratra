@@ -19,11 +19,11 @@ def _viewer(username="viewer"):
     return c
 
 
-@pytest.mark.parametrize("case", [k for k in BREAKERS if k != "complet"])
+@pytest.mark.parametrize("case", [k for k, v in BREAKERS.items() if not v[1]])   # tout ce qui retire la PUBLICATION
 def test_every_ineligibility_hides_the_artisan_everywhere(case):
     user = artisan("hid_" + case, online=True)
     profile = user.handyman_profile
-    BREAKERS[case](profile)
+    BREAKERS[case][0](profile)
     profile.save()
     svc = service(user, "Service " + case)
     anon, viewer = APIClient(), _viewer("v_" + case)

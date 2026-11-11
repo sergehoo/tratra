@@ -14,7 +14,7 @@ from rest_framework.test import APIClient
 
 from handy.models import (
     User, Booking, Service, ServiceCategory, HandymanProfile,
-    Review, Coupon, OTPCode, Payment,
+    Review, Coupon, OTPCode, Payment, HandymanDocument,
 )
 
 
@@ -38,8 +38,11 @@ def test_quality_score_composite():
     p.completed_jobs = 50
     p.is_approved = True
     p.save()
-    # note 40 + volume 25 + KYC 15 + complétude 0 (profil vide) = 80
-    assert p.compute_quality_score() == 80
+    assert p.compute_quality_score() == 65                      # sans pièce d'identité approuvée : aucun point d'identité
+    HandymanDocument.objects.create(handyman=p, document_type="id_card", file="kyc/x.pdf", status="approved")
+    p.refresh_from_db()
+    # note 40 + volume 25 + identité vérifiée 15 + complétude 1 (seule la pièce d'identité est renseignée) = 81
+    assert p.compute_quality_score() == 81
 
 
 @pytest.mark.django_db
@@ -48,6 +51,7 @@ def test_avis_met_a_jour_quality_score():
     p = HandymanProfile.objects.get(user=h)
     p.is_approved = True
     p.save()
+    HandymanDocument.objects.create(handyman=p, document_type="id_card", file="kyc/x.pdf", status="approved")
     b = Booking.objects.create(
         client=c, handyman=h, status="completed",
         booking_date=timezone.now() - timedelta(days=1),

@@ -21,7 +21,9 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 
 from handy.api.serializers import absolute_media_url
-from handy.eligibility import eligibility_summary, is_publishable, profile_checklist
+from handy.eligibility import (
+    eligibility_summary, is_orderable, is_publishable, profile_checklist, verification_level, verification_payload,
+)
 from handy import addresses as address_service
 from handy.models import (
     Booking, CompanyProfile, Conversation, HandymanDocument, HandymanProfile, Message, Notification, Review, Service,
@@ -103,6 +105,9 @@ def _provider_block(user, profile, now) -> dict:
         "online": bool(profile.online),
         "is_approved": bool(profile.is_approved),
         "publishable": is_publishable(profile),
+        # Trois niveaux distincts : publié (visible), commandes activées (identité vérifiée), badge « Vérifié » (visage).
+        "orders_enabled": is_orderable(profile),
+        "verification": verification_payload(verification_level(profile)),
         "rating": float(profile.rating) if profile.rating else None,
         "completed_jobs": int(profile.completed_jobs or 0),
         "completion": {
@@ -236,6 +241,7 @@ def me_dashboard(request):
             "client": user.user_type != "admin",
             "provider": profile is not None,
             "publishable": bool(provider and provider["publishable"]),
+            "orders": bool(provider and provider["orders_enabled"]),
             "company": user.user_type == "entreprise" or CompanyProfile.objects.filter(user=user).exists(),
             # Tratra Business : le compte est membre actif d'au moins une organisation (rôle et capacités : /business/orgs/).
             "business": user.business_memberships.filter(is_active=True, organization__is_active=True).exists(),
@@ -281,20 +287,28 @@ def me_services(request):
     user = request.user
     profile = HandymanProfile.objects.filter(user=user).first()
     publishable = is_publishable(profile)
+    orders = publishable and is_orderable(profile)
+    summary = eligibility_summary(profile) if profile is not None else None
+    blockers = summary["publication"]["blockers"] if summary else []
     services = (Service.objects.filter(handyman=user).select_related("category", "category__parent")
                 .annotate(bookings_count=Count("bookings")).order_by("-created_at", "-id"))
 
     def publication(s) -> dict:
         if not s.is_active:
             return {"state": "inactive", "label": "Désactivée", "hint": "Invisible des clients. Activez-la pour la proposer."}
+        if orders:
+            return {"state": "published", "label": "Publiée", "orders": True,
+                    "hint": "Visible des clients. Vous pouvez recevoir des commandes."}
         if publishable:
-            return {"state": "published", "label": "Publiée", "hint": "Visible des clients dans le catalogue et la recherche."}
-        return {"state": "waiting", "label": "En attente d’autorisation",
-                "hint": "Elle sera publiée automatiquement dès que votre publication sera autorisée."}
+            return {"state": "published", "label": "Publiée · Non vérifié", "orders": False,
+                    "hint": "Visible des clients avec la mention « Non vérifié ». Activez vos commandes pour recevoir des demandes."}
+        return {"state": "waiting", "label": "Non publiée", "orders": False,
+                "hint": blockers[0]["label"] if blockers else "Elle sera publiée dès que votre profil pourra l’être."}
 
     return Response({
         "publishable": publishable,
-        "eligibility": eligibility_summary(profile) if profile is not None else None,
+        "orders_enabled": orders,
+        "eligibility": summary,
         "results": [{
             "id": s.id, "title": s.title, "category": s.category.name if s.category_id else None,
             "category_id": s.category_id,

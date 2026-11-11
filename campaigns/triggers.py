@@ -67,10 +67,10 @@ def has_business_request(user) -> bool:
 
 def progress_of(user) -> str:
     """Étape la plus avancée du compte (ciblage « par progression »)."""
-    from handy.eligibility import is_user_publishable
+    from handy.eligibility import is_user_orderable
 
     if getattr(user, "handyman_profile", None) is not None:
-        if is_user_publishable(user):
+        if is_user_orderable(user):
             return "active" if user.services.filter(is_active=True).exists() else "publishable"
         if kyc_state(user) == "approved":
             return "kyc_approved"

@@ -65,8 +65,8 @@ from handy.media.sanitize import sanitize_image
 from handy import catalog
 from handy import proximity
 from handy.eligibility import (
-    can_receive_missions, not_on_timeoff, publishable, publishable_user_ids, published_services,
-    restrict_public_services,
+    NON_VERIFIE, ORDERS_REFUSED, can_receive_missions, is_orderable, is_user_publishable, not_on_timeoff, orderable,
+    orderable_user_ids, publishable, publishable_user_ids, published_services, restrict_public_services,
 )
 from handy.models import (
     User, HandymanProfile, ServiceCategory, Service, ServiceImage, Booking,
@@ -212,7 +212,7 @@ def suggest_alternatives_qs(booking: Booking, price_tolerance=Decimal('0.15'), k
             price__gte=min_price, price__lte=max_price)
                 .exclude(pk=booking.service.pk))
 
-    return (base.filter(handyman_id__in=publishable_user_ids())
+    return (base.filter(handyman_id__in=orderable_user_ids())   # un remplaçant doit pouvoir recevoir la commande
             .filter(proximity.near('handyman__handyman_profile__location', booking.job_location, km))   # index spatial (préfiltre)
             .select_related('handyman__handyman_profile')
             .annotate(distance=Distance('handyman__handyman_profile__location', booking.job_location))
@@ -346,8 +346,8 @@ def apply_public_service_filters(qs, params, *, restrict=True):
 
     categories=1,2 · family=<id ou slug> · category__name=<nom> · commune=<commune ou quartier> · verified=1 · online=1 · urgent=1 · mode=one_off|recurring|contract · min_price · max_price
     """
-    # Publication : seuls les services ACTIFS d'artisans éligibles (compte actif, profil approuvé,
-    # KYC approuvé, profil complet) sont publics — règle unique : handy/eligibility.py.
+    # Publication : seuls les services ACTIFS de professionnels publiés (compte actif, téléphone confirmé, métier et zone
+    # renseignés, non suspendus) sont publics — règle unique : handy/eligibility.py. Publié ne veut pas dire vérifié.
     # `restrict=False` : l'artisan consulte SES propres services (actifs ou non, publiés ou non).
     if restrict:
         qs = restrict_public_services(qs)
@@ -369,12 +369,16 @@ def apply_public_service_filters(qs, params, *, restrict=True):
                        | Q(handyman__handyman_profile__quartier__icontains=commune))
 
     if _flag(params, "verified"):
-        qs = qs.filter(handyman__handyman_profile__is_approved=True)
+        # Identité contrôlée au moins (« Identité vérifiée » ou « Vérifié ») : jamais un profil « Non vérifié ».
+        qs = qs.exclude(handyman__handyman_profile__verification=NON_VERIFIE)
+
+    if _flag(params, "orderable"):
+        qs = qs.filter(handyman__handyman_profile__orders_enabled=True)
 
     if _flag(params, "online"):
-        # « En ligne » n'a de sens que pour un profil vérifié (cf. /handymen/presence/).
+        # « En ligne » n'a de sens que pour un professionnel qui peut recevoir une commande (cf. /handymen/presence/).
         qs = qs.filter(handyman__handyman_profile__online=True,
-                       handyman__handyman_profile__is_approved=True)
+                       handyman__handyman_profile__orders_enabled=True)
 
     badge = _badge_param(params)
     if badge:
@@ -577,9 +581,9 @@ class UserViewSet(viewsets.ModelViewSet):
 
 # ---- Profils artisans ----
 def public_profile_queryset():
-    """Profils dont la carte publique peut être servie : artisans ÉLIGIBLES (compte actif, profil
-    approuvé, KYC approuvé, profil complet — handy/eligibility.py). Même règle que le catalogue,
-    /handymen/featured/ et la fiche publique. Annoté pour PublicArtisanSerializer."""
+    """Profils dont la carte publique peut être servie : professionnels PUBLIÉS (compte actif, téléphone confirmé, métier
+    et zone renseignés, non suspendus — handy/eligibility.py). Même règle que le catalogue, /handymen/featured/ et la fiche
+    publique. La carte porte le niveau de vérification : un profil publié n'est pas forcément vérifié."""
     return (publishable()
             .annotate(services_count=Count("user__services",
                                            filter=Q(user__services__is_active=True),
@@ -689,10 +693,11 @@ class HandymanProfileViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
         if online is None:
             return Response({"detail": "online (booléen) requis."},
                             status=status.HTTP_400_BAD_REQUEST)
-        # Conformité : un profil non vérifié ne peut pas se rendre disponible.
-        if bool(online) and not profile.is_approved:
+        # Conformité : sans commandes activées (identité vérifiée), impossible de se rendre disponible.
+        if bool(online) and not is_orderable(profile):
             return Response(
-                {"detail": "Profil non vérifié : impossible de passer en ligne."},
+                {"detail": "Activez vos commandes (vérification d'identité) pour vous rendre disponible.",
+                 "code": "orders_not_enabled"},
                 status=status.HTTP_403_FORBIDDEN,
             )
         profile.online = bool(online)
@@ -1016,11 +1021,13 @@ class BookingViewSet(OwnerScopedQuerysetMixin, viewsets.ModelViewSet):
         return run_idempotent(request, "booking.create", lambda: super(BookingViewSet, self).create(request, *args, **kwargs))
 
     def perform_create(self, serializer):
-        # Missions : seuls les artisans éligibles (actif, approuvé, KYC approuvé, profil complet)
-        # peuvent recevoir une réservation — règle unique : handy/eligibility.py.
-        if not can_receive_missions(serializer.validated_data.get("handyman")):
+        # Commandes : seuls les professionnels dont les commandes sont activées (publiés, identité vérifiée, vérification
+        # faciale si le métier l'exige) peuvent recevoir une réservation — règle unique : handy/eligibility.py.
+        handyman = serializer.validated_data.get("handyman")
+        if not can_receive_missions(handyman):
             raise drf_serializers.ValidationError(
-                {"handyman": ["Cet artisan n'est pas éligible aux missions pour le moment."]})
+                {"handyman": [ORDERS_REFUSED if handyman is not None and is_user_publishable(handyman)
+                              else "Cet artisan n'est pas éligible aux missions pour le moment."]})
         # Doublon naturel (ancien client sans clé d'idempotence, double clic) : même client, même artisan, même
         # prestation, même créneau, déjà en attente ou confirmé → on indique la réservation existante.
         data = serializer.validated_data
@@ -1892,13 +1899,15 @@ def company_profile(request):
 # ---- Chiffres publics (landing) ----
 def compute_public_stats() -> dict:
     """Chiffres RÉELS de la plateforme (aucune valeur inventée ni arrondie « marketing »)."""
-    approved = publishable()
+    published = publishable()
     reviews = published_reviews().aggregate(count=Count("id"), average=Avg("rating"))
     return {
         "categories": ServiceCategory.objects.filter(is_active=True).count(),
         "services": restrict_public_services(Service.objects.all()).count(),
-        "artisans_verified": approved.count(),
-        "artisans_online": approved.filter(online=True).count(),
+        "artisans": published.count(),
+        # « Vérifiés » : identité contrôlée au moins — jamais un profil seulement publié.
+        "artisans_verified": published.exclude(verification=NON_VERIFIE).count(),
+        "artisans_online": orderable().filter(online=True).count(),
         "missions_completed": Booking.objects.filter(status="completed").count(),
         "reviews_count": reviews["count"] or 0,
         "rating_average": _round2(reviews["average"]),

@@ -30,7 +30,7 @@ STEPS = [
     ("quality", "Contrôle qualité et lecture"),
     ("face", "Vérification faciale"),
     ("review", "Revue par l’équipe Tratra"),
-    ("activation", "Activation du profil professionnel"),
+    ("activation", "Activation des commandes"),
 ]
 SIDES = {"cni": ["front", "back"], "passport": ["front"]}
 SIDE_LABELS = {("cni", "front"): "Recto", ("cni", "back"): "Verso", ("passport", "front"): "Page photo"}
@@ -127,10 +127,24 @@ def _face(profile: HandymanProfile, dossier: KycDossier) -> Dict:
     enabled = bio.enabled()
     human = bool(ver and ver.human_review_requested_at)
     done = (not enabled) or bool(ver and ver.satisfied) or status == BiometricVerification.PENDING_REVIEW or human
-    return {"enabled": enabled, "required": False, "status": status, "satisfied": bool(ver and ver.satisfied), "choice": dossier.face_choice,
-            "human_review_requested": human, "done": done,
-            "note": ("Comparez votre visage à votre pièce, après votre consentement explicite, ou demandez une vérification par l’équipe."
-                     if enabled else "Non requise : l’équipe Tratra vérifie votre pièce elle-même.")}
+    from handy import eligibility
+
+    # Exigée pour les COMMANDES d'un métier sensible (ou par la politique générale) ; partout ailleurs elle donne le badge « Vérifié ».
+    required = eligibility.face_required(profile)
+    trade = eligibility.sensitive_trade(profile)
+    if not enabled:
+        note = ("La vérification faciale n’est pas encore ouverte : l’équipe Tratra vous préviendra." if required
+                else "Pas demandée pour le moment : l’équipe Tratra vérifie votre pièce elle-même.")
+    elif required:
+        note = (f"Obligatoire pour recevoir des commandes en « {trade} » : comparez votre visage à votre pièce, après votre consentement "
+                "explicite, ou demandez une vérification par l’équipe." if trade else
+                "Obligatoire pour recevoir des commandes : comparez votre visage à votre pièce, après votre consentement explicite, ou "
+                "demandez une vérification par l’équipe.")
+    else:
+        note = ("Elle vous donne le badge « Vérifié » : comparez votre visage à votre pièce, après votre consentement explicite, ou "
+                "demandez une vérification par l’équipe.")
+    return {"enabled": enabled, "required": required, "status": status, "satisfied": bool(ver and ver.satisfied), "choice": dossier.face_choice,
+            "human_review_requested": human, "done": done, "note": note, "benefit": eligibility.BENEFITS["face"]}
 
 
 # ═══ Contrôle qualité et lecture d’une photo ═══════════════════════════════════════════════════════════════════════════
@@ -259,12 +273,14 @@ def state(user) -> Dict:
         "quality": sent,
         "face": face["done"] and sent,
         "review": review["state"] == "approved",
-        "activation": eligibility["publication"]["authorized"],
+        "activation": eligibility["orders"]["authorized"],
     }
     steps, current = [], None
     for key, label in STEPS:
         if key == "face" and not face["enabled"]:
             st = "skipped"
+        elif key == "face" and not face["required"] and not done[key]:
+            st = "optional"                                         # badge « Vérifié » : proposé, jamais bloquant pour les commandes
         elif key == "capture" and review["state"] == "rejected":
             st = "error"                                            # nouvelle pièce demandée : on reprend les photos
         elif done[key]:

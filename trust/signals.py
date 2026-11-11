@@ -11,8 +11,8 @@ from django.dispatch import receiver
 from handy.models import Booking, Dispute, HandymanDocument, HandymanProfile, Review, User
 from trust.engine import evaluate_user
 
-# Champs de profil qui conditionnent l'éligibilité (donc VERIFIE) ou le niveau d'expérience (EXPERT).
-PROFILE_FIELDS = ("is_approved", "bio", "commune", "photo", "experience_years", "experience_label")
+# Champs de profil qui conditionnent l'éligibilité (identité, commandes, badge VERIFIE) ou le niveau d'expérience (EXPERT).
+PROFILE_FIELDS = ("is_approved", "suspended", "bio", "commune", "photo", "experience_years", "experience_label")
 
 
 def _trigger(user_id, why):
@@ -71,6 +71,15 @@ def document_changed(sender, instance, **kwargs):
     if kwargs.get("raw"):
         return
     _trigger(getattr(instance.handyman, "user_id", None) if instance.handyman_id else None, "document")
+
+
+@receiver(post_save, sender="biometrics.BiometricVerification", dispatch_uid="trust_face_saved")
+@receiver(post_delete, sender="biometrics.BiometricVerification", dispatch_uid="trust_face_deleted")
+def face_changed(sender, instance, **kwargs):
+    # Le badge « Vérifié » repose sur la vérification faciale : attribution et retrait suivent la décision dans la même transaction.
+    if kwargs.get("raw"):
+        return
+    _trigger(HandymanProfile.objects.filter(pk=instance.profile_id).values_list("user_id", flat=True).first(), "biometric")
 
 
 @receiver(post_save, sender=Review, dispatch_uid="trust_review_saved")

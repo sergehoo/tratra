@@ -43,13 +43,13 @@ def _payload(**extra):
 
 # ---- A. Historique : l'artisan perd (ou n'a jamais eu) l'éligibilité ---------------------------------
 
-@pytest.mark.parametrize("case", [k for k in BREAKERS if k != "complet"])
+@pytest.mark.parametrize("case", [k for k, v in BREAKERS.items() if not v[2]])   # tout ce qui retire les COMMANDES
 def test_existing_bookings_stay_usable_when_the_artisan_is_no_longer_eligible(case):
     cli, art = _client(), artisan("hist_" + case)
     svc = service(art, "Dépannage")
     ids = {s: _booking(cli, art, svc, status=s).id for s in STATUSES}
     profile = art.handyman_profile
-    BREAKERS[case](profile)
+    BREAKERS[case][0](profile)
     profile.save()
     svc.is_active = False  # la prestation n'est plus publiée non plus
     svc.save()

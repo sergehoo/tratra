@@ -363,12 +363,15 @@ def verified_badge(profile):
     return BadgeAward.objects.filter(profile=profile, code="VERIFIE", ended_at__isnull=True).exists()
 
 
-def test_verified_badge_requires_the_biometric_check_or_an_approved_alternative_only_when_the_policy_is_on(settings):
-    u = artisan("bio_bdg")                                                                      # KYC approuvé et dossier complet (éligible)
+def test_verified_badge_always_requires_the_biometric_check_or_an_approved_alternative(settings):
+    from handy import eligibility
+
+    u = artisan("bio_bdg")                                                                      # KYC approuvé, commandes activées
     profile = u.handyman_profile
-    assert verified_badge(profile)                                                              # politique désactivée : comportement historique inchangé
-    settings.KYC_BIOMETRIC_REQUIRED = True
-    assert not verified_badge(profile)                                                          # aucune vérification faciale : plus de badge
+    assert not verified_badge(profile) and eligibility.is_orderable(profile)                    # pièce approuvée seule : commandes, jamais le badge
+    assert eligibility.verification_level(profile) == "IDENTITE_VERIFIEE"
+    settings.KYC_BIOMETRIC_REQUIRED = True                                                      # politique générale : le visage conditionne aussi les commandes
+    assert not verified_badge(profile) and not eligibility.is_orderable(profile)
     ver = services.verification_for(profile)
     for status in ("pending_review", "failed", "inconclusive", "in_progress", "rejected", "recapture_requested"):
         BiometricVerification.objects.filter(pk=ver.pk).update(status=status)
