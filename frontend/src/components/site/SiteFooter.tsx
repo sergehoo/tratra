@@ -13,10 +13,10 @@ export interface FooterLink {
 }
 
 /**
- * Métiers du pied de page : ceux que la landing transmet (prop `trades`, issus du catalogue unique). Sans données (autres pages), un seul lien
- * vers le catalogue complet — aucun métier n'est écrit en dur ici.
+ * Métiers du pied de page : ceux que la page transmet (prop `trades`, issus du catalogue unique), suivis d'un seul lien vers le catalogue
+ * complet — ajouté ici uniquement, aucun métier n'est écrit en dur.
  */
-const DEFAULT_TRADES: FooterLink[] = [{ label: "Tous les métiers", href: "/metiers" }];
+const ALL_TRADES: FooterLink = { label: "Tous les métiers", href: "/metiers" };
 
 const PLATFORM: FooterLink[] = [
   { label: "Rechercher un professionnel", href: "/search" },
@@ -58,7 +58,10 @@ function Column({ title, links, id }: { title: string; links: FooterLink[]; id: 
  * `apps` : badges Google Play / App Store (la landing transmet les siens ; rien ne s'affiche sans badge publié).
  */
 export default function SiteFooter({ trades, apps }: { trades?: FooterLink[]; apps?: ReactNode }) {
-  const tradeLinks = (trades && trades.length ? trades : DEFAULT_TRADES).slice(0, 8);
+  // Un lien par adresse (clés React uniques) ; le lien vers le catalogue complet n'apparaît qu'une fois, en dernier.
+  const tradeLinks = (trades ?? [])
+    .filter((l, i, all) => l.href !== ALL_TRADES.href && all.findIndex((o) => o.href === l.href) === i)
+    .slice(0, 8);
   const year = new Date().getFullYear();
 
   return (
@@ -110,7 +113,7 @@ export default function SiteFooter({ trades, apps }: { trades?: FooterLink[]; ap
           <Column
             id="footer-metiers"
             title="Métiers"
-            links={[...tradeLinks, { label: "Tous les métiers", href: "/search" }]}
+            links={[...tradeLinks, ALL_TRADES]}
           />
           <Column id="footer-plateforme" title="Plateforme" links={PLATFORM} />
           <Column id="footer-confiance" title="Confiance" links={TRUST} />

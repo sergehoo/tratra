@@ -136,10 +136,7 @@ export default async function HomePage() {
           <BusinessSection />
           <FinalCta />
         </main>
-        <SiteFooter
-          trades={footerTrades.length ? [...footerTrades, { label: "Tous les métiers", href: "/metiers" }] : undefined}
-          apps={<LandingStoreBadges placement="footer" />}
-        />
+        <SiteFooter trades={footerTrades} apps={<LandingStoreBadges placement="footer" />} />
       </LandingDataProvider>
     </>
   );
