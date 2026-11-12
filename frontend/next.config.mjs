@@ -74,6 +74,8 @@ const nextConfig = {
       { source: "/worker", destination: "/dashboard/provider", permanent: false },
       { source: "/worker/missions/:id", destination: "/dashboard/provider/missions/:id", permanent: false },
       { source: "/worker/kyc", destination: "/dashboard/profile/kyc", permanent: false },
+      // Ancienne adresse des conditions d'utilisation (liens déjà diffusés) : redirection permanente (308, en-tête Location).
+      { source: "/conditions", destination: "/conditions-utilisation", permanent: true },
     ];
   },
   async headers() {

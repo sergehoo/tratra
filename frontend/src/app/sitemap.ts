@@ -1,4 +1,5 @@
 import type { MetadataRoute } from "next";
+import { TERMS_PATH, TERMS_UPDATED_ON } from "@/lib/legal";
 
 const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL || "https://tratra.net").replace(/\/+$/, "");
 
@@ -15,5 +16,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
     { url: `${SITE_URL}/search`, lastModified: now, changeFrequency: "daily", priority: 0.9 },
     { url: `${SITE_URL}/metiers`, lastModified: now, changeFrequency: "daily", priority: 0.8 },
     { url: `${SITE_URL}/register`, lastModified: now, changeFrequency: "monthly", priority: 0.5 },
+    { url: `${SITE_URL}${TERMS_PATH}`, lastModified: new Date(`${TERMS_UPDATED_ON}T00:00:00Z`), changeFrequency: "yearly", priority: 0.3 },
+    { url: `${SITE_URL}/confidentialite`, changeFrequency: "yearly", priority: 0.3 },
   ];
 }

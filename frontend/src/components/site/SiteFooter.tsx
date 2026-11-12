@@ -5,6 +5,7 @@ import { BadgeCheck, Navigation, ShieldCheck, Wallet } from "lucide-react";
 import { BrandWordmark } from "@/components/ds/BrandWordmark";
 import { CONTAINER } from "@/components/ds/layout";
 import { ESCROW_ENABLED } from "@/lib/config";
+import { TERMS_PATH } from "@/lib/legal";
 import { registerHref } from "@/lib/links";
 
 export interface FooterLink {
@@ -29,6 +30,12 @@ const TRUST: FooterLink[] = [
   { label: "Nos garanties", href: "/#confiance" },
   { label: "Comment ça marche", href: "/#comment" },
   { label: "Avis clients", href: "/#avis" },
+];
+
+const LEGAL: FooterLink[] = [
+  { label: "Conditions d’utilisation", href: TERMS_PATH },
+  { label: "Confidentialité", href: "/confidentialite" },
+  { label: "Suppression de compte", href: "/suppression-compte" },
 ];
 
 const LINK =
@@ -121,8 +128,22 @@ export default function SiteFooter({ trades, apps }: { trades?: FooterLink[]; ap
       </div>
 
       <div className="relative border-t border-white/10">
-        <div className={`py-6 text-sm text-white/60 ${CONTAINER}`}>
+        <div className={`flex flex-col gap-3 py-6 text-sm text-white/60 sm:flex-row sm:items-center sm:justify-between ${CONTAINER}`}>
           <p>© {year} Tratra. Tous droits réservés.</p>
+          <nav aria-label="Informations légales">
+            <ul className="flex flex-wrap gap-x-5 gap-y-1">
+              {LEGAL.map((l) => (
+                <li key={l.href}>
+                  <Link
+                    href={l.href}
+                    className="inline-flex min-h-[32px] items-center rounded text-white/70 underline-offset-2 transition-colors hover:text-white hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                  >
+                    {l.label}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </nav>
         </div>
       </div>
     </footer>

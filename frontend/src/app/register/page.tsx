@@ -8,6 +8,7 @@ import { useTurnstile } from "@/components/security/Turnstile";
 import { AuthFrame } from "@/components/auth/AuthFrame";
 import { useAuth } from "@/lib/auth";
 import { ApiError } from "@/lib/api";
+import { TERMS_PATH, TERMS_VERSION } from "@/lib/legal";
 import { isSafeInternalPath, loginHref, spaceHref } from "@/lib/links";
 import { DEFAULT_COUNTRY, phoneError, toE164, type PhoneValue } from "@/lib/phone";
 
@@ -37,7 +38,7 @@ function messagesOf(value: unknown): string[] {
 }
 
 /** Erreurs API : messages par champ quand l'API les rattache à un champ, sinon message général. */
-function registerErrors(err: unknown): { general: string; fields: FieldErrors } {
+function registerErrors(err: unknown): { general: string; fields: FieldErrors; termsOutdated?: boolean } {
   if (err instanceof ApiError) {
     const data = err.data;
     if (err.status === 429) {
@@ -45,6 +46,14 @@ function registerErrors(err: unknown): { general: string; fields: FieldErrors } 
     }
     if (err.status >= 500) {
       return { general: "Le service est momentanément indisponible. Réessayez dans un instant.", fields: {} };
+    }
+    if (data && typeof data === "object" && !Array.isArray(data) && (data as { code?: unknown }).code === "terms_outdated") {
+      // Conditions modifiées depuis l'ouverture de la page : la case est décochée, la personne relit la nouvelle version.
+      return {
+        general: "Les Conditions d’utilisation ont été mises à jour. Rechargez la page, relisez-les puis cochez à nouveau la case.",
+        fields: { accept_terms: "Nouvelle version des Conditions d’utilisation à accepter." },
+        termsOutdated: true,
+      };
     }
     if (data && typeof data === "object" && !Array.isArray(data)) {
       const fields: FieldErrors = {};
@@ -92,7 +101,7 @@ function validate(f: FormState): FieldErrors {
   if (phoneProblem) errors.phone = phoneProblem;
   if (f.password.length < MIN_PASSWORD) errors.password = `Au moins ${MIN_PASSWORD} caractères.`;
   if (f.confirm !== f.password) errors.confirm = "Les mots de passe ne correspondent pas.";
-  if (!f.accept_terms) errors.accept_terms = "Acceptez les conditions et la politique de confidentialité pour continuer.";
+  if (!f.accept_terms) errors.accept_terms = "Cochez « J’accepte les Conditions d’utilisation » pour continuer.";
   return errors;
 }
 
@@ -137,13 +146,15 @@ function RegisterForm() {
           phone_country: f.phone.country,
           password: f.password,
           accept_terms: f.accept_terms,
+          terms_version: TERMS_VERSION,           // version affichée par le lien ; le serveur refuse une version périmée
           turnstile_token: captcha.token,
         },
         next,
       );
       // Succès : redirection vers la vérification du téléphone, le bouton reste désactivé.
     } catch (err) {
-      const { general, fields } = registerErrors(err);
+      const { general, fields, termsOutdated } = registerErrors(err);
+      if (termsOutdated) setF((s) => ({ ...s, accept_terms: false }));
       setFieldErrors(fields);
       setError(general);
       setBusy(false);
@@ -234,11 +245,11 @@ function RegisterForm() {
             label={
               <>
                 J’accepte les{" "}
-                <Link href="/conditions" target="_blank" className="font-semibold text-primaryDark underline underline-offset-2">
-                  conditions d’utilisation
+                <Link href={TERMS_PATH} target="_blank" rel="noopener" className="font-semibold text-primaryDark underline underline-offset-2">
+                  Conditions d’utilisation
                 </Link>{" "}
                 et la{" "}
-                <Link href="/confidentialite" target="_blank" className="font-semibold text-primaryDark underline underline-offset-2">
+                <Link href="/confidentialite" target="_blank" rel="noopener" className="font-semibold text-primaryDark underline underline-offset-2">
                   politique de confidentialité
                 </Link>
                 .

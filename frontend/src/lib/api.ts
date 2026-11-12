@@ -335,6 +335,8 @@ export async function register(payload: {
   phone_country?: string;
   password: string;
   accept_terms: boolean;
+  /** Version des Conditions d'utilisation affichée (src/lib/legal.ts) : enregistrée avec la date d'acceptation. */
+  terms_version?: string;
   /** Jeton anti-robot Turnstile (vérifié par le serveur quand il est configuré). */
   turnstile_token?: string | null;
 }): Promise<User> {

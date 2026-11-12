@@ -25,6 +25,7 @@ interface Detail {
   date_joined: string;
   last_login: string | null;
   terms_accepted_at: string | null;
+  terms_version?: string | null;
   kinds: string[];
   profile: { id: number; commune: string | null; approved: boolean; online: boolean; trust_score: number | null; trust_badges: string[]; completed_jobs: number; rating: number } | null;
   bookings: { as_client: Record<string, number>; as_artisan: Record<string, number>; active: number };
@@ -263,7 +264,8 @@ export default function UserDetailPage() {
         <KV items={[
           ["Téléphone", d.phone_full ? <>{d.phone_full} {d.is_verified ? <Badge tone="success">Vérifié</Badge> : <Badge tone="warning">Non vérifié</Badge>}</> : "—"],
           ["E-mail", d.email_full], ["Ville", d.city], ["Pays", d.country], ["Inscrit le", dt(d.date_joined)], ["Dernière connexion", dt(d.last_login)],
-          ["Conditions acceptées", dt(d.terms_accepted_at)], ["Identifiant", d.username],
+          ["Conditions acceptées", dt(d.terms_accepted_at)],
+          ["Version des conditions", d.terms_accepted_at ? d.terms_version || "Antérieure au versionnage" : "—"], ["Identifiant", d.username],
         ]} />
       </Section>
       {d.profile ? (

@@ -214,6 +214,8 @@ services:
         NEXT_PUBLIC_ESCROW_ENABLED: ${NEXT_PUBLIC_ESCROW_ENABLED:-false}
         # Anti-robot Cloudflare Turnstile (clé PUBLIQUE ; vide = désactivé) — la clé secrète va dans .env (TURNSTILE_SECRET_KEY).
         NEXT_PUBLIC_TURNSTILE_SITE_KEY: ${NEXT_PUBLIC_TURNSTILE_SITE_KEY:-}
+        # Mentions d'identification de l'éditeur (page /conditions-utilisation), séparées par « | » ; vide = non publiées.
+        NEXT_PUBLIC_LEGAL_MENTIONS: ${NEXT_PUBLIC_LEGAL_MENTIONS:-}
     depends_on:
       tratraweb-stg:
         condition: service_healthy
