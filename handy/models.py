@@ -60,6 +60,9 @@ class User(AbstractUser):
     gender = models.CharField(max_length=1, choices=GENDERS, blank=True, default='')
     # Horodatage de l'acceptation des conditions d'utilisation et de la politique de confidentialité.
     terms_accepted_at = models.DateTimeField(null=True, blank=True)
+    # Version des conditions acceptée (handy/legal.py). Vide = acceptées avant le versionnage ou par un client qui n'annonçait pas
+    # de version : jamais renseignée sans acceptation explicite de cette version précise.
+    terms_version = models.CharField(max_length=20, blank=True, default='')
     # Suppression de compte demandée par la personne : le compte est ANONYMISÉ (voir handy/account_deletion.py), jamais restauré.
     deleted_at = models.DateTimeField(null=True, blank=True)
 

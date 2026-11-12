@@ -6,6 +6,7 @@ from handy.api.catalog import catalog_match, public_catalog
 from handy.api.kyc_flow import me_kyc, me_kyc_capture, me_kyc_restart, me_kyc_send
 from handy.api.phone_api import phone_defaults
 from handy.api.mobile_apps import public_mobile_apps
+from handy.api.legal import me_terms, public_terms
 from handy.api.onboarding import me_onboarding, me_onboarding_apply, onboarding_config
 from handy.api import messaging as msg_api
 from handy.api.account import me_account_deletion
@@ -76,12 +77,14 @@ urlpatterns = [
     path('public/stats/', public_stats, name='public-stats'),
     # Badges Google Play / App Store du site : liens configurés dans l'administration, lecture seule.
     path('public/mobile-apps/', public_mobile_apps, name='public-mobile-apps'),
+    path('public/legal/terms/', public_terms, name='public-terms'),
     # Catalogue unique des métiers (public, ETag) : web, application mobile, administration partagent cette source.
     path('catalog/', public_catalog, name='public-catalog'),
     path('catalog/match/', catalog_match, name='catalog-match'),
     # Compte unifié : tableau de bord agrégé + création du profil professionnel du compte courant.
     path('me/dashboard/', me_dashboard, name='me-dashboard'),
     path('me/account/deletion/', me_account_deletion, name='me-account-deletion'),
+    path('me/terms/', me_terms, name='me-terms'),
     path('me/addresses/', me_addresses, name='me-addresses'),
     path('me/addresses/<int:pk>/', me_address_detail, name='me-address-detail'),
     path('me/addresses/<int:pk>/primary/', me_address_set_primary, name='me-address-primary'),

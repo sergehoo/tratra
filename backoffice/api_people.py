@@ -167,7 +167,7 @@ class UserDetail(BOView):
         data.update({
             # Le détail montre les coordonnées complètes (support, vérifications) ; la liste, elles, restent masquées.
             "phone_full": u.phone, "email_full": u.email, "username": u.username, "country": u.country,
-            "kinds": _kinds(u), "terms_accepted_at": u.terms_accepted_at,
+            "kinds": _kinds(u), "terms_accepted_at": u.terms_accepted_at, "terms_version": u.terms_version or None,
             "profile": None if profile is None else {
                 "id": profile.pk, "commune": profile.commune, "approved": profile.is_approved, "online": profile.online,
                 "published": profile.published, "orders_enabled": profile.orders_enabled, "verification": profile.verification,

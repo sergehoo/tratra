@@ -22,7 +22,7 @@ from drf_spectacular.utils import extend_schema_field
 from drf_spectacular.types import OpenApiTypes
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
-from handy import features
+from handy import features, legal
 from handy.auth_tokens import SessionAwareRefreshToken, apply_remember, wants_remember
 from handy.api.errors import CodedAPIException, field_error
 from handy.api.staff_access import staff_may
@@ -300,6 +300,8 @@ class UserSerializer(serializers.ModelSerializer):
     Inscription (compte unique, plus de choix client/artisan/entreprise) :
     - OBLIGATOIRES : `first_name`, `last_name`, `phone` (E.164, +225 par défaut), `password`
       (validateurs Django) et `accept_terms: true` (conditions et confidentialité, horodaté) ;
+    - `terms_version` : version des conditions affichée à la personne (`GET /public/legal/terms/`). Enregistrée avec la date ;
+      périmée → 400 `terms_outdated` (aucun compte créé) ; absente (client antérieur) → date seule, aucune version supposée ;
     - FACULTATIFS : `email` (à renseigner après connexion), `username` (hérité : généré si absent) ;
     - le téléphone est enregistré NON vérifié : `is_verified` (lecture seule) ne passe à vrai
       qu'après validation effective d'un code (`/auth/otp/verify/`) — jamais avant ;
@@ -313,6 +315,7 @@ class UserSerializer(serializers.ModelSerializer):
     """
     password = serializers.CharField(write_only=True, required=False)
     accept_terms = serializers.BooleanField(write_only=True, required=False)
+    terms_version = serializers.CharField(write_only=True, required=False, allow_blank=True, max_length=20)
     # Pays choisi pour le numéro (ISO 3166, ex. « CI ») : le numéro peut alors être saisi au format national.
     phone_country = serializers.CharField(write_only=True, required=False, allow_blank=True, max_length=2)
     profile_picture = PublicImageField(required=False, allow_null=True)
@@ -324,7 +327,7 @@ class UserSerializer(serializers.ModelSerializer):
             "id", "username", "email", "first_name", "last_name", "gender", "user_type",
             "phone", "profile_picture", "address", "city", "postal_code", "country",
             "latitude", "longitude", "is_verified", "date_joined", "last_login", 'password',
-            "accept_terms", "phone_country",
+            "accept_terms", "terms_version", "phone_country",
         ]
         read_only_fields = ['id', "date_joined", "last_login", "is_verified"]
 
@@ -407,6 +410,12 @@ class UserSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         if self.instance is None:
+            try:
+                attrs["terms_version"] = legal.check_announced(attrs.get("terms_version"))
+            except legal.TermsOutdated:
+                detail = "Les conditions d'utilisation ont été mises à jour : relisez-les puis acceptez la nouvelle version."
+                raise CodedAPIException("terms_outdated", detail, status=400, current_version=legal.TERMS_VERSION,
+                                        fields={"accept_terms": [field_error("terms_outdated", detail)]})
             password = attrs.get("password")
             candidate = User(**{k: attrs.get(k) or "" for k in ("username", "first_name", "last_name")},
                              email=attrs.get("email") or "")
@@ -426,6 +435,7 @@ class UserSerializer(serializers.ModelSerializer):
         password = validated_data.pop('password')
         validated_data.pop("accept_terms", None)
         validated_data.pop("phone_country", None)
+        terms_version = validated_data.pop("terms_version", "")
         validated_data["username"] = validated_data.get("username") or generate_username()
         validated_data["email"] = validated_data.get("email") or None
         validated_data.setdefault("user_type", "client")
@@ -435,10 +445,14 @@ class UserSerializer(serializers.ModelSerializer):
         user.is_superuser = False
         user.is_verified = False  # jamais vérifié avant la validation effective d'un code OTP
         user.terms_accepted_at = timezone.now()
+        user.terms_version = terms_version  # version effectivement affichée et acceptée (vide : client sans version)
         user.set_password(password)
         try:
             with transaction.atomic():
                 user.save()
+                from trust.models import audit
+
+                audit("account.terms_accepted", actor=user, target=user, version=terms_version or None, source="signup")
         except IntegrityError:
             # Course entre deux inscriptions concurrentes : même réponse générique.
             raise signup_unavailable()
@@ -449,6 +463,7 @@ class UserSerializer(serializers.ModelSerializer):
         validated_data.pop("password", None)
         validated_data.pop("user_type", None)
         validated_data.pop("accept_terms", None)
+        validated_data.pop("terms_version", None)  # nouvelle version : POST /me/terms/ (acceptation explicite et journalisée)
         validated_data.pop("phone_country", None)
         if "email" in validated_data:
             validated_data["email"] = validated_data["email"] or None
